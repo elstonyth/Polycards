@@ -8,8 +8,8 @@ import {
 } from "./steps/adjust-credits";
 
 // adjust-credits — operator-applied signed ledger row (grant / refund /
-// clawback) with a RM 0 balance floor. Single compensated step, mirroring
-// topup-credits.
+// clawback) with a RM 0 balance floor. Single step, mirroring topup-credits;
+// its compensator only runs for a later step or a cancel (README.md).
 export const adjustCreditsWorkflow = createWorkflow(
   "adjust-credits",
   function (input: AdjustCreditsInput) {
