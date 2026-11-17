@@ -384,7 +384,8 @@ export const ADMIN_ROUTES: readonly AdminRoute[] = [
   { matcher: '/admin/tier-settings', method: 'POST', limits: ACTION },
   // Global USD->MYR FX-rate write. Sets the multiplier behind every displayed
   // price, so it shares the admin money-mutation budget. Auth is the
-  // framework default /admin guard (handler is AuthenticatedMedusaRequest).
+  // framework default /admin guard (handler is AuthenticatedMedusaRequest);
+  // listed here explicitly so the auth+rate-limit intent is visible.
   { matcher: '/admin/pricing/fx', method: 'POST', limits: ACTION },
   // Site-settings write (slab-frame overlay URL). Not a money mutation, but
   // it repaints every card on the storefront — same admin budget.
@@ -588,7 +589,7 @@ export const SECRET_READS = ADMIN_ROUTES.filter((r) => r.secret).map((r) => ({
 }));
 
 const METHODS_BY_OPERATION = Object.entries(OPERATION_BY_METHOD).reduce<
-  Record<string, ('GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE')[]>
+  Record<string, Method[]>
 >((acc, [method, operation]) => {
   (acc[operation] ??= []).push(method as keyof typeof OPERATION_BY_METHOD);
   return acc;
@@ -644,8 +645,8 @@ export function adminRouteLimits(
 }
 
 /** The per-route desk-bot blocks reports/admin/proxy.ts adds to its
- *  prefix-wide ones. A matcher's `*` is one segment here, as the proxy's own
- *  patterns write it. */
+ *  prefix-wide ones. A matcher's `*` (and any `:param`) is one segment here,
+ *  as the proxy's own patterns write it. */
 export const deskBotBlockedRoutes: [RegExp, string][] = ADMIN_ROUTES.flatMap(
   (r): [RegExp, string][] =>
     r.deskBotsBlocked
@@ -654,7 +655,7 @@ export const deskBotBlockedRoutes: [RegExp, string][] = ADMIN_ROUTES.flatMap(
             new RegExp(
               `^${r.matcher
                 .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
-                .replace(/\*/g, '[^/]+')}(/|$)`,
+                .replace(/\*|:[A-Za-z_]\w*/g, '[^/]+')}(/|$)`,
             ),
             r.deskBotsBlocked,
           ],
