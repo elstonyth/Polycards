@@ -28,6 +28,8 @@ import {
   displayMarketPrice,
   resolveFxRate,
 } from '../../../../modules/packs/pricing';
+import { wireDate } from '../../../utils/wire-date';
+import type { StoreProfileResponse } from './types';
 
 // GET /store/profiles/:handle — PUBLIC profile page data (Task B). A plain
 // publishable-key store route (read-only, no workflow), same posture as
@@ -58,7 +60,7 @@ export { clearProfileCache } from '../../../../utils/profile-cache';
 
 export async function GET(
   req: MedusaRequest,
-  res: MedusaResponse,
+  res: MedusaResponse<StoreProfileResponse | { message: string }>,
 ): Promise<void> {
   const handle = req.params.handle;
   // Malformed params resolve like unknown ones — a 404, never a 500 (and the
@@ -75,7 +77,8 @@ export async function GET(
   // below), so a cache hit is always a real profile.
   const cached = getCachedProfile(cacheKey);
   if (cached !== undefined) {
-    res.json(cached);
+    // The cache holds only bodies this handler built (setCachedProfile below).
+    res.json(cached as StoreProfileResponse);
     return;
   }
 
@@ -256,7 +259,7 @@ export async function GET(
   const recent = recentTop.map(({ pull: p, card }) => ({
     pack_id: p.pack_id,
     rarity: rarityOf(p.pack_id, p.card_id),
-    rolled_at: p.rolled_at,
+    rolled_at: wireDate(p.rolled_at),
     card: {
       handle: card.handle,
       name: card.name,
@@ -307,7 +310,7 @@ export async function GET(
       ? custMeta.equipped_frame_level
       : null;
 
-  const body = {
+  const body: StoreProfileResponse = {
     // The stored spelling, not the URL's: a visitor arriving at /moonbreon
     // gets links and copy that read MOONBREON, the way its owner wrote it.
     handle: storedHandle(customer) ?? handle,
@@ -315,7 +318,7 @@ export async function GET(
     seed,
     avatar_url: avatarUrl,
     equipped_frame_level: equippedFrameLevel,
-    joined_at: customer.created_at,
+    joined_at: wireDate(customer.created_at),
     stats: {
       pulls: stats.pulls,
       volume: Math.round(stats.volume * 100) / 100,

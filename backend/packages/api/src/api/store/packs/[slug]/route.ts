@@ -4,6 +4,7 @@ import { PACKS_MODULE } from '../../../../modules/packs';
 import { withLossless } from '../../../../modules/packs/lossless';
 import { losslessWindowsForDisplay } from '../lossless-display';
 import { packDetailBody } from '../pack-bodies';
+import type { StorePackDetailResponse } from './types';
 
 // GET /store/packs/:slug — one active pack plus its prize pool (each odds row
 // joined to the referenced Card), behind /claw/[slug]'s Top Hits. A plain Medusa
@@ -31,10 +32,8 @@ import { packDetailBody } from '../pack-bodies';
 // computes per window and ≤TTL cross-instance skew, display-only either
 // way. Decision + upgrade path recorded in plan 116.
 const CACHE_TTL_MS = 30_000;
-// Typed only as far as the Lossless overlay needs; the full body is stored.
-type DetailBody = {
-  pack: { slug: string; category: string; buyback_percent: unknown };
-};
+// The full wire body is stored; Lossless is laid over a copy per request.
+type DetailBody = StorePackDetailResponse;
 const packCache = new Map<string, { expires: number; body: DetailBody }>();
 
 /** Test seam: module state outlives a test's fixtures — the http suite runs in
@@ -45,7 +44,7 @@ export function clearPackDetailCache(): void {
 
 export async function GET(
   req: MedusaRequest,
-  res: MedusaResponse,
+  res: MedusaResponse<StorePackDetailResponse | { message: string }>,
 ): Promise<void> {
   const packsModuleService: PacksModuleService =
     req.scope.resolve(PACKS_MODULE);

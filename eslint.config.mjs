@@ -79,10 +79,14 @@ const eslintConfig = defineConfig([
   // src/lib/security/csp.ts). A direct `zod` import anywhere else would bypass
   // that config and reintroduce CSP eval violations, so route all Zod use through
   // the schemas module.
+  //
+  // The same rule keeps backend code out of the bundle: `@acme/api/store/*` is a
+  // tsconfig path to a route's response types (ADR 0017), and Next resolves
+  // tsconfig paths, so only a type import may use it.
   {
     files: ['src/**/*.{ts,tsx}'],
     rules: {
-      'no-restricted-imports': [
+      '@typescript-eslint/no-restricted-imports': [
         'error',
         {
           paths: [
@@ -98,6 +102,12 @@ const eslintConfig = defineConfig([
               message:
                 "Import Zod via '@/lib/data/schemas' (keeps the jitless CSP-safe config the single source of truth).",
             },
+            {
+              group: ['@acme/api/*'],
+              allowTypeImports: true,
+              message:
+                'Backend response shapes are types only: use `import type` so no backend code enters the storefront bundle.',
+            },
           ],
         },
       ],
@@ -106,7 +116,7 @@ const eslintConfig = defineConfig([
   // schemas/zod.ts IS the single Zod entry point — it must import zod directly.
   {
     files: ['src/lib/data/schemas/zod.ts'],
-    rules: { 'no-restricted-imports': 'off' },
+    rules: { '@typescript-eslint/no-restricted-imports': 'off' },
   },
 ]);
 

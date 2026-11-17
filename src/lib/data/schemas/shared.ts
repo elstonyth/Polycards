@@ -77,6 +77,6 @@ export function listOf<T>(item: z.ZodType<T>) {
  *   card is in your Vault" answer.
  *
  * Callers that read fields off the body cast at the seam, the way
- * `vault.data.items as unknown as BackendVaultItem[]` does in actions/vault.ts.
+ * `vault.data.items as BackendVaultItem[]` does in actions/vault.ts.
  */
 export const UncheckedSchema = z.unknown();

@@ -4,6 +4,7 @@ import PacksModuleService from '../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../modules/packs';
 import { BOARD_FETCH_N, topShown } from '../../../modules/packs/eligibility';
 import { publicProfileFields, seedOf } from '../../../utils/profile-handle';
+import type { StoreLeaderboardResponse } from './types';
 
 // GET /store/leaderboard?period=weekly|alltime — public leaderboard. A plain
 // publishable-key store route (read-only, no workflow).
@@ -32,11 +33,14 @@ import { publicProfileFields, seedOf } from '../../../utils/profile-handle';
 // computes per window and ≤TTL cross-instance skew, display-only either
 // way. Decision + upgrade path recorded in plan 116.
 const CACHE_TTL_MS = 30_000;
-const boardCache = new Map<string, { expires: number; body: unknown }>();
+const boardCache = new Map<
+  string,
+  { expires: number; body: StoreLeaderboardResponse }
+>();
 // Single-flight per period: misses during an expiry window share ONE compute
 // instead of each running the whole-history aggregate (the #835 stampede
 // shape; audit 2026-11-11).
-const inFlight = new Map<string, Promise<unknown>>();
+const inFlight = new Map<string, Promise<StoreLeaderboardResponse>>();
 
 /** Test seam: module state outlives a test's fixtures — the http suite runs in
  *  one process, so test A's cached board would be served to test B. */
@@ -47,7 +51,7 @@ export function clearLeaderboardCache(): void {
 
 export async function GET(
   req: MedusaRequest,
-  res: MedusaResponse,
+  res: MedusaResponse<StoreLeaderboardResponse>,
 ): Promise<void> {
   const period = req.query.period === 'alltime' ? 'alltime' : 'weekly';
 
@@ -73,7 +77,7 @@ export async function GET(
 async function computeBoard(
   req: MedusaRequest,
   period: 'alltime' | 'weekly',
-): Promise<unknown> {
+): Promise<StoreLeaderboardResponse> {
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
   const customerService = req.scope.resolve(Modules.CUSTOMER);
   // Ranked top-N is aggregated in the DB (GROUP BY + ORDER BY + LIMIT) so it's

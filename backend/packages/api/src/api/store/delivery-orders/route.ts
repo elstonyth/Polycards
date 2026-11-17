@@ -7,6 +7,8 @@ import PacksModuleService from '../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../modules/packs';
 import { requestDeliveryWorkflow } from '../../../workflows/request-delivery';
 import { serializeDeliveryOrders } from '../../../modules/packs/delivery-view';
+import { wireDate, wireDateOrNull } from '../../utils/wire-date';
+import type { StoreDeliveryOrdersResponse } from './types';
 
 const ORDER_LIMIT = 200;
 // Mirrors MAX_BATCH in ../vault/buyback-batch/route.ts — a customer can never
@@ -67,7 +69,7 @@ export async function POST(
 // GET /store/delivery-orders — the caller's delivery orders, newest first.
 export async function GET(
   req: AuthenticatedMedusaRequest,
-  res: MedusaResponse,
+  res: MedusaResponse<StoreDeliveryOrdersResponse>,
 ): Promise<void> {
   const customerId = req.auth_context.actor_id;
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
@@ -78,5 +80,12 @@ export async function GET(
   );
 
   const items = await serializeDeliveryOrders(packs, orders);
-  res.json({ items });
+  res.json({
+    items: items.map((o) => ({
+      ...o,
+      shipped_at: wireDateOrNull(o.shipped_at),
+      delivered_at: wireDateOrNull(o.delivered_at),
+      created_at: wireDate(o.created_at),
+    })),
+  });
 }

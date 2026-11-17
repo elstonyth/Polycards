@@ -5,7 +5,9 @@
  * so the firm-default logic can be unit-tested without the Next.js
  * server-action constraint. Nothing here is server-only.
  */
+import type { StoreVaultItem } from '@acme/api/store/vault';
 import { toCardView, type CardView } from '@/lib/card-view';
+import type { MaybeAbsent } from '@/lib/store-wire';
 
 export type VaultItem = {
   pullId: string;
@@ -57,8 +59,8 @@ export type VaultItem = {
  * other field the mapper reads rides through the `looseObject` unguarded on
  * purpose — requiring them would let a stale field delete a card from the
  * customer's own vault — so `parseList`'s output type cannot describe them and
- * the two declarations genuinely differ. Keep the names below in step with
- * `VaultItemSchema` by hand.
+ * the two declarations genuinely differ. The names come from the backend's
+ * `StoreVaultItem`, so a rename there fails this typecheck.
  *
  * WHICH `??` DEFAULTS BELOW ARE DEAD, exactly — do not generalise this:
  * only `source`, `locked` and `sellable` are guaranteed by the schema's
@@ -71,36 +73,25 @@ export type VaultItem = {
  * frame on challenge prizes, with no type error to catch it. The CARD's
  * defaults (slab_image, marketPriceMyr, …) live in `toCardView` now.
  */
-export interface BackendVaultItem {
-  pull_id: string;
-  rolled_at: string;
-  pack_id: string;
-  pack_title: string;
-  /** Absent on an older backend → false (the pre-prism behaviour). */
-  challenge_prize?: boolean;
-  /** Absent on an older backend → false. */
-  lucky_draw_prize?: boolean;
-  /** Guarded by VaultItemSchema (optional there too) — declared here so the
-   *  mapper reads it directly instead of casting past its own input type. */
-  showcased?: boolean;
-  /** Absent on an older backend → 'pack' / false (see VaultItemSchema). */
-  source?: 'pack' | 'reward' | 'free' | 'gift' | 'bonus';
-  locked?: boolean;
-  sellable?: boolean;
+export type BackendVaultItem = MaybeAbsent<
+  Omit<StoreVaultItem, 'card' | 'buyback'>,
+  // Absent on an older backend: → false / 'pack' / true (see below).
+  | 'challenge_prize'
+  | 'lucky_draw_prize'
+  | 'showcased'
+  | 'source'
+  | 'locked'
+  | 'sellable'
+  | 'bonus_bp'
+> & {
   /** The wire card — read by `toCardView`, which defaults every field. Only
-   *  `name` is schema-guaranteed (a nameless row drops); the rest ride the
-   *  looseObject and are typed here as they arrive. */
-  card: {
-    handle: string;
-    name: string;
-    image: string;
-    slab_image?: string | null;
-    rarity: string;
-    market_value: number;
-    marketPriceMyr?: number;
-  };
-  buyback: { percent: number; amount: number; firm?: boolean; bonus?: number };
-}
+   *  `name` is schema-guaranteed (a nameless row drops). */
+  card: MaybeAbsent<
+    StoreVaultItem['card'],
+    'slab_image' | 'marketPriceMyr' | 'pokemon_dex' | 'sprite_image'
+  >;
+  buyback: MaybeAbsent<StoreVaultItem['buyback'], 'firm' | 'bonus'>;
+};
 
 export function mapVaultItem(i: BackendVaultItem): VaultItem {
   return {

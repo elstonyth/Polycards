@@ -13,52 +13,38 @@
  */
 import 'server-only';
 import { cache } from 'react';
+import type {
+  StoreProfilePull,
+  StoreProfileRarity,
+  StoreProfileResponse,
+  StoreProfileShowcaseCard,
+} from '@acme/api/store/profiles/[handle]';
 import { store } from '@/lib/store';
 import { PublicProfileSchema, ProfileHandleSchema } from '@/lib/data/schemas';
+import type { MaybeAbsent } from '@/lib/store-wire';
 
-export type ProfileRarity =
-  'Immortal' | 'Legendary' | 'Mythical' | 'Rare' | 'Uncommon' | 'Common';
+export type ProfileRarity = StoreProfileRarity;
 
-export interface PublicProfileCard {
-  handle: string;
-  name: string;
-  set: string;
-  grader: string;
-  grade: string;
-  /** Raw USD FMV — display should prefer marketPriceMyr. */
-  market_value: number;
-  /** Live MYR display value (FMV × FX × multiplier); absent on older backends. */
-  marketPriceMyr?: number;
-  image: string;
-  slab_image?: string | null;
-  /** Gacha tier of the (pack, card) pull — drives the slab's tier frame.
-   *  Optional: older backends omit it on collection items; null: the odds row
-   *  is gone (admin re-keyed it). Both render frameless — never a guessed tier. */
-  rarity?: ProfileRarity | null;
-}
+/** A profile card. Absent on older backends: `marketPriceMyr`, `slab_image`,
+ *  and `rarity` on collection items; `rarity` null = the odds row is gone
+ *  (admin re-keyed it). Both render frameless — never a guessed tier. */
+export type PublicProfileCard = MaybeAbsent<
+  StoreProfileShowcaseCard,
+  'marketPriceMyr' | 'slab_image' | 'rarity'
+>;
 
-export interface PublicProfilePull {
-  pack_id: string;
-  rarity: ProfileRarity;
-  rolled_at: string;
+export type PublicProfilePull = Omit<StoreProfilePull, 'card'> & {
   card: PublicProfileCard;
-}
+};
 
-export interface PublicProfile {
-  handle: string;
-  name: string;
-  seed: number;
-  avatar_url?: string | null;
-  equipped_frame_level?: number | null;
-  joined_at: string;
-  stats: {
-    pulls: number;
-    volume: number;
-    by_rarity: Record<ProfileRarity, number>;
-  };
-  collection?: PublicProfileCard[]; // showcased-only; optional: absent = empty (pre-migration compat)
+export type PublicProfile = MaybeAbsent<
+  Omit<StoreProfileResponse, 'collection' | 'recent'>,
+  'avatar_url' | 'equipped_frame_level'
+> & {
+  /** Showcased only; absent = empty (pre-migration compat). */
+  collection?: PublicProfileCard[];
   recent: PublicProfilePull[];
-}
+};
 
 /**
  * Result of a public-profile lookup. Three failure states, three different
@@ -97,8 +83,7 @@ export const getPublicProfile = cache(
       PublicProfileSchema,
       { auth: 'none', cache: 'auto' },
     );
-    if (r.ok)
-      return { status: 'ok', profile: r.data as unknown as PublicProfile };
+    if (r.ok) return { status: 'ok', profile: r.data as PublicProfile };
     // 404 = no account holds this handle (a typo, or a deleted account).
     if (r.kind === 'not_found') return { status: 'notfound' };
     // 410 = a real handle the backend is deliberately hiding (disabled

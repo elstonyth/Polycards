@@ -10,6 +10,9 @@
     },
     "./admin/*": {
       "types": "./src/api/admin/*/types.ts"
+    },
+    "./store/*": {
+      "types": "./src/api/store/*/types.ts"
     }
   },
   "keywords": [

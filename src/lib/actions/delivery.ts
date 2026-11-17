@@ -20,6 +20,7 @@
  * keep `getAuthToken`, which is why this file still imports it.
  */
 import type { HttpTypes } from '@medusajs/types';
+import type { StoreDeliveryOrder } from '@acme/api/store/delivery-orders';
 import { sdk } from '@/lib/medusa';
 import { store, type Failure } from '@/lib/store';
 import { logger } from '@/lib/logger';
@@ -55,6 +56,7 @@ import {
   postcodeHint,
 } from '@/lib/delivery-fee';
 import { toCardView, type CardView } from '@/lib/card-view';
+import type { MaybeAbsent } from '@/lib/store-wire';
 
 export type DeliveryOrderItemView = {
   pullId: string;
@@ -134,36 +136,23 @@ export type AddressView = {
   phone: string | null;
 };
 
-interface BackendDeliveryOrder {
-  id: string;
+// The /store/delivery-orders row as the mapper reads it: the backend's shape,
+// with the fields an older backend may lack marked optional.
+type BackendDeliveryOrder = MaybeAbsent<
+  Omit<StoreDeliveryOrder, 'address' | 'items'>,
+  'shipping_fee' | 'insurance_fee' | 'proof_images'
+> & {
+  /** Narrowed by DeliveryOrderSchema (an unknown status drops the order). */
   status: DeliveryOrderView['status'];
-  tracking_number: string | null;
-  shipping_fee?: number | null;
-  insurance_fee?: number | null;
-  proof_images?: string[] | null;
-  created_at: string;
-  address: {
-    name: string;
-    address_1?: string | null;
-    address_2?: string | null;
-    city: string;
-    province?: string | null;
-    postal_code?: string | null;
-    country_code: string;
-    phone?: string | null;
-  };
-  items: {
-    pull_id: string;
-    challenge_prize?: boolean;
-    lucky_draw_prize?: boolean;
-    card: {
-      handle: string;
-      name: string;
-      image: string;
-      slab_image?: string | null;
-    } | null;
-  }[];
-}
+  address: MaybeAbsent<
+    StoreDeliveryOrder['address'],
+    'address_1' | 'address_2' | 'province' | 'postal_code' | 'phone'
+  >;
+  items: MaybeAbsent<
+    StoreDeliveryOrder['items'][number],
+    'challenge_prize' | 'lucky_draw_prize'
+  >[];
+};
 
 // The address book goes through `sdk.store.customer.*` — built-in Medusa
 // endpoints (exception 3 in lib/store.ts's header), so those three actions
@@ -202,7 +191,7 @@ export async function getDeliveryOrders(): Promise<DeliveryOrdersResult> {
   // The assertion widens the parse output to the fields the mapper also READS
   // but DeliveryOrderSchema deliberately does not guard — they ride the
   // `looseObject` typed `unknown` (same seam as getVault's items).
-  const raw = r.data.items as unknown as BackendDeliveryOrder[];
+  const raw = r.data.items as BackendDeliveryOrder[];
   const orders: DeliveryOrderView[] = raw.map((o) => ({
     id: o.id,
     status: o.status,
