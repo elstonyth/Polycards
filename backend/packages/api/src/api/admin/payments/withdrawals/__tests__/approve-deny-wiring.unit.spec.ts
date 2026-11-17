@@ -5,6 +5,11 @@ import {
 import { POST as APPROVE } from '../[id]/approve/route';
 import { POST as DENY } from '../[id]/deny/route';
 
+const permission = { allowed: true };
+jest.mock('@medusajs/framework', () => ({
+  hasPermission: jest.fn(async () => permission.allowed),
+}));
+
 jest.mock('../../../../../modules/packs/gateway-withdrawal', () => ({
   submitHeldWithdrawal: jest.fn(),
   denyHeldWithdrawal: jest.fn(),
@@ -39,7 +44,7 @@ const mkReq = (over: Record<string, unknown> = {}) =>
   ({
     scope: { resolve: () => undefined },
     params: { id: 'gpw_1' },
-    auth_context: { actor_id: 'usr_admin_1' },
+    auth_context: { actor_id: 'usr_admin_1', app_metadata: { roles: ['role_reviewer'] } },
     headers: {},
     ip: '10.0.0.7',
     ...over,
@@ -184,4 +189,17 @@ it('a failed household stamp never turns a sent payout into an error', async () 
   await APPROVE(mkReq({ scope: { resolve: (k: string) => (k === 'logger' ? { warn } : packs) }, body: { verify_device_peers: true } }), res);
   expect(out.body).toBe(answer);
   expect(warn).toHaveBeenCalledTimes(1);
+});
+
+it('refuses the household tick, before paying, for an approver without the bank read policy', async () => {
+  permission.allowed = false;
+  try {
+    approveOp.mockResolvedValue({ id: 'gpw_1', status: 'pending', approved: true });
+    await expect(
+      APPROVE(mkReq({ body: { verify_device_peers: true } }), mkRes().res),
+    ).rejects.toThrow(/needs access to bank details/);
+    expect(approveOp).not.toHaveBeenCalled();
+  } finally {
+    permission.allowed = true;
+  }
 });

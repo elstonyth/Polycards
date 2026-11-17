@@ -2,6 +2,8 @@ import type {
   AuthenticatedMedusaRequest,
   MedusaResponse,
 } from '@medusajs/framework/http';
+import { hasPermission } from '@medusajs/framework';
+import { MedusaError } from '@medusajs/framework/utils';
 import { submitHeldWithdrawal } from '../../../../../../modules/packs/gateway-withdrawal';
 import { PACKS_MODULE } from '../../../../../../modules/packs';
 import type PacksModuleService from '../../../../../../modules/packs/service';
@@ -24,6 +26,28 @@ export async function POST(
   res: MedusaResponse,
 ): Promise<void> {
   const body = (req.body ?? {}) as { verify_device_peers?: unknown };
+  // Confirming a household is the review drawer's call, and the drawer needs
+  // the bank read policy (ADR 0018): an approver without it is refused BEFORE
+  // anything is paid, never approved with the tick silently dropped.
+  if (body.verify_device_peers === true) {
+    const roles =
+      (req.auth_context as { app_metadata?: { roles?: string[] } })
+        .app_metadata?.roles ?? [];
+    // hasPermission answers true for an empty role list: never here.
+    const allowed =
+      roles.length > 0 &&
+      (await hasPermission({
+        roles,
+        actions: { resource: 'customer_bank_account', operation: 'read' },
+        container: req.scope,
+      }));
+    if (!allowed) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'Confirming a household needs access to bank details. Approve without the tick, or ask an admin who has it.',
+      );
+    }
+  }
   const result = await submitHeldWithdrawal(req.scope, {
     withdrawalId: req.params.id,
     adminId: req.auth_context.actor_id,

@@ -40,14 +40,18 @@ medusaIntegrationTestRunner({
         getContainer().resolve<PacksModuleService>(PACKS_MODULE);
 
       // A role with exactly one policy, signed the way the guard specs do.
-      const tokenWith = async (name: string, resource: string) => {
+      const tokenWith = async (
+        name: string,
+        resource: string,
+        operation: 'read' | 'update' = 'read',
+      ) => {
         const container = getContainer();
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const rbac = container.resolve(Modules.RBAC) as any;
         const [role] = await rbac.createRbacRoles([{ name }]);
         const policies = await rbac.listRbacPolicies({
           resource: [resource],
-          operation: ['read'],
+          operation: operation === 'read' ? ['read'] : ['read', operation],
         });
         await rbac.createRbacRolePolicies(
           policies.map((p: { id: string }) => ({
@@ -184,6 +188,32 @@ medusaIntegrationTestRunner({
           household_verified: true,
         });
         expect(again.data.unverified_peers).toBe(0);
+      });
+
+      it('refuses the household tick from an approver without bank access, before paying', async () => {
+        const s = await seed();
+        const approver = await tokenWith('payments-approver', 'payment', 'update');
+        const refused = await unwrapResponse(
+          api.post(
+            `/admin/payments/withdrawals/${s.withdrawal}/approve`,
+            { verify_device_peers: true },
+            as(approver),
+          ),
+        );
+        expect(refused.status).toBe(400);
+        expect(refused.data.message).toMatch(/needs access to bank details/);
+        const [row] = await packs().listGatewayWithdrawals({ id: s.withdrawal }, { take: 1 });
+        expect(row.status).toBe('held');
+        // A super admin passes the tick check and reaches the approve itself
+        // (this seeded row was never debited, so the approve refuses it on its own terms).
+        const admin = await unwrapResponse(
+          api.post(
+            `/admin/payments/withdrawals/${s.withdrawal}/approve`,
+            { verify_device_peers: true },
+            as(adminToken),
+          ),
+        );
+        expect(admin.data?.message ?? '').not.toMatch(/needs access to bank details/);
       });
 
       it('needs the bank read policy', async () => {
