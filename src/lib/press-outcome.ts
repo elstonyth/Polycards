@@ -16,7 +16,7 @@
  *   • A FAILURE MAY HAVE DEBITED. An unreachable server, or any refusal other
  *     than "top up", "log in" or "stale gifts", can come after the charge
  *     landed. Those re-read the balance BEFORE the button unlocks, so nobody is
- *     invited to spin again over a stale pre-charge figure.
+ *     invited to open again over a stale pre-charge figure.
  */
 import { ticketTotal } from '@/lib/packs-data';
 import type { RolledBatch, RollResult } from '@/lib/roll-batch';

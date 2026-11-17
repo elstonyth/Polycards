@@ -1,9 +1,10 @@
 'use client';
 // The reveal session of one slot machine: which phase it is in, the roll that
-// rides with that phase, and the timers that move it. One press goes
+// rides with that phase, and the timers that move it. One press (an Open, or a
+// guest demo Spin) goes
 //
-//   idle → resolving (server round-trip) → spinning (reel) → flood → transform
-//        → review (sell window) → idle
+//   idle → resolving (server round-trip) → spinning (the reel turns) → flood
+//        → transform → review (sell window) → idle
 //
 // and every piece of data is carried BY the phase it belongs to, so a phase
 // can never be reached without its roll, and leaving a phase drops its roll in
@@ -62,12 +63,15 @@ export interface HeldRoll {
 }
 
 export type RevealState = { phase: RevealPhase } & HeldRoll;
+/** A phase with a roll on screen: from the reel's launch to the conclude. */
+export type RollState = ({ phase: 'spinning' } & HeldRoll) | RevealState;
 
-export type MachineState =
-  | { phase: 'idle' }
-  | { phase: 'resolving' }
-  | ({ phase: 'spinning' } & HeldRoll)
-  | RevealState;
+export type MachineState = { phase: 'idle' } | { phase: 'resolving' } | RollState;
+
+/** True from the reel's launch until the reveal concludes. */
+export function hasRoll(s: MachineState): s is RollState {
+  return s.phase !== 'idle' && s.phase !== 'resolving';
+}
 
 /** True while the reveal overlay is mounted, narrowing to its phase range. */
 export function isRevealState(s: MachineState): s is RevealState {
@@ -100,9 +104,9 @@ export interface PackMachineOptions {
   /** Cosmetic reel winner for a card. May throw; the paid result lands anyway. */
   toWinner: (card: WonCard) => ColumnWinner;
   /** A press passed every guard and is about to roll. */
-  onPress?: () => void;
+  onPress: () => void;
   /** A roll settled for the account signed in now, and the reveal begins. */
-  onSettled?: (batch: RolledBatch) => void;
+  onSettled: (batch: RolledBatch) => void;
 }
 
 type Action =
@@ -121,7 +125,7 @@ function reduce(s: MachineState, a: Action): MachineState {
   const held: HeldRoll | null =
     'held' in a
       ? a.held
-      : 'batch' in s
+      : hasRoll(s)
         ? { batch: s.batch, winners: s.winners, reels: s.reels }
         : null;
   // Unreachable by the table (every edge into a roll phase carries or keeps a
@@ -130,9 +134,13 @@ function reduce(s: MachineState, a: Action): MachineState {
   return { phase: to, ...held };
 }
 
+/** A top-rarity card in the batch: the room blast and the "Big win!" line. */
+const isBigWin = (batch: RolledBatch) =>
+  batch.cards.some((c) => isTopRarity(c.rarity));
+
 /** The screen-reader line for a settled roll. */
 function announceFor(batch: RolledBatch): string {
-  const big = batch.cards.some((c) => isTopRarity(c.rarity));
+  const big = isBigWin(batch);
   const prefix = batch.mode === 'demo' ? 'Demo — ' : big ? 'Big win! ' : '';
   const tickets = ticketTotal(batch.cards);
   const first = batch.cards[0];
@@ -155,18 +163,18 @@ export function usePackMachine(opts: PackMachineOptions) {
   // Kept across conclude: the status line holds its text until the next press.
   const [announce, setAnnounce] = useState('');
 
-  // The latest options, for the stable callbacks below. `settled` can be
+  // The latest options, for the stable callbacks below. `settle` can be
   // invoked from a STALE closure — the reel prop, the watchdog, press's own
   // mapping catch captured at press time — so a closed-over customer id could
   // compare against the account that rolled rather than the one signed in NOW.
   // Mirrored in a layout effect rather than during render: it lands in the
-  // commit, before any passive effect, rAF or timer that could call settled.
+  // commit, before any passive effect, rAF or timer that could call settle.
   const live = useRef(opts);
   useLayoutEffect(() => {
     live.current = opts;
   });
 
-  // Held from the press until the reel settles. `settled` reads (and nulls) it,
+  // Held from the press until the reel settles. `settle` reads (and nulls) it,
   // which is what makes a second settle — the reel and the watchdog racing —
   // a no-op.
   const pending = useRef<HeldRoll | null>(null);
@@ -186,7 +194,8 @@ export function usePackMachine(opts: PackMachineOptions) {
     };
   }, []);
 
-  const settled = useCallback(() => {
+  /** The reel landed (or the watchdog says so). Idempotent. */
+  const settle = useCallback(() => {
     const held = pending.current;
     if (!held) return;
     pending.current = null;
@@ -215,10 +224,7 @@ export function usePackMachine(opts: PackMachineOptions) {
     setAnnounce(announceFor(batch));
 
     const t = timers.current;
-    const blastFor = blastMs(
-      batch.cards.some((c) => isTopRarity(c.rarity)),
-      reduced,
-    );
+    const blastFor = blastMs(isBigWin(batch), reduced);
     if (blastFor > 0) {
       setBlast(true);
       clearTimeout(t.blast);
@@ -242,7 +248,7 @@ export function usePackMachine(opts: PackMachineOptions) {
     setCooldown(true);
     clearTimeout(t.cooldown);
     t.cooldown = window.setTimeout(() => setCooldown(false), COOLDOWN_MS);
-    onSettled?.(batch);
+    onSettled(batch);
   }, [clearRevealTimers]);
 
   /**
@@ -261,7 +267,7 @@ export function usePackMachine(opts: PackMachineOptions) {
     setNeedsTopUp(false);
     setAnnounce('');
     setHasSpun(true);
-    live.current.onPress?.();
+    live.current.onPress();
     // The paying routes lock the button across the round-trip; the demo has
     // none and goes straight to spinning once its cards exist.
     if (request.mode !== 'demo') dispatch({ event: 'spin' });
@@ -322,7 +328,7 @@ export function usePackMachine(opts: PackMachineOptions) {
     pending.current = held;
     dispatch({ event: 'rolled', held });
     // Same batch as the dispatch above, so 'spinning' never renders.
-    if (mappingFailed) settled();
+    if (mappingFailed) settle();
   }
 
   // Settle watchdog: the customer is charged the moment the open returns ok,
@@ -335,11 +341,11 @@ export function usePackMachine(opts: PackMachineOptions) {
   useEffect(() => {
     if (spinningKey === null) return;
     const id = window.setTimeout(
-      settled,
+      settle,
       spinTotalMs(spinningReels) + WATCHDOG_SLACK_MS,
     );
     return () => clearTimeout(id);
-  }, [spinningKey, spinningReels, settled]);
+  }, [spinningKey, spinningReels, settle]);
 
   /** Fast-forward the post-landing theater to review. Never the spin itself. */
   const skip = useCallback(() => {
@@ -351,7 +357,7 @@ export function usePackMachine(opts: PackMachineOptions) {
   const conclude = useCallback(() => dispatch({ event: 'conclude' }), []);
 
   /** A press refused before the machine moved (logged out, can't afford). */
-  const refuse = useCallback((message: string, topUp = false) => {
+  const refuse = useCallback((message: string, topUp: boolean) => {
     setError(message);
     setNeedsTopUp(topUp);
   }, []);
@@ -366,7 +372,7 @@ export function usePackMachine(opts: PackMachineOptions) {
     announce,
     press,
     refuse,
-    settled,
+    settle,
     skip,
     conclude,
   };

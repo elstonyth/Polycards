@@ -96,6 +96,7 @@ function setup(over: Partial<PackMachineOptions> = {}) {
     deps,
     effects,
     toWinner: (c) => ({ dex: null, rarity: c.rarity, rarityRgb: '0 0 0' }),
+    onPress: vi.fn(),
     onSettled,
     ...over,
   };
@@ -131,7 +132,7 @@ describe('usePackMachine — a press through the reveal', () => {
     expect(effects.trackOpen).toHaveBeenCalledWith(1);
     expect(effects.refreshVaultDot).toHaveBeenCalledTimes(1);
 
-    act(() => h.current.settled());
+    act(() => h.current.settle());
     expect(h.current.state.phase).toBe('flood');
     expect(onSettled).toHaveBeenCalledTimes(1);
     expect(h.current.announce).toBe('Won a, RM 20.00');
@@ -142,8 +143,9 @@ describe('usePackMachine — a press through the reveal', () => {
     await advance(beats.reviewMs - FLOOD_MS);
     const s = h.current.state;
     expect(s.phase).toBe('review');
-    expect(s.phase !== 'idle' && s.phase !== 'resolving' && s.batch.offers)
-      .toHaveLength(1);
+    expect(
+      s.phase !== 'idle' && s.phase !== 'resolving' && s.batch.offers,
+    ).toHaveLength(1);
 
     act(() => h.current.conclude());
     expect(h.current.state).toEqual({ phase: 'idle' });
@@ -156,8 +158,8 @@ describe('usePackMachine — a press through the reveal', () => {
   test('a second settle is a no-op', async () => {
     const h = setup();
     await act(async () => h.current.press(request()));
-    act(() => h.current.settled());
-    act(() => h.current.settled());
+    act(() => h.current.settle());
+    act(() => h.current.settle());
     expect(onSettled).toHaveBeenCalledTimes(1);
     expect(effects.applyBalance).toHaveBeenCalledTimes(2); // charge + settle
     h.unmount();
@@ -166,7 +168,7 @@ describe('usePackMachine — a press through the reveal', () => {
   test('skip from the flood jumps to review; the stale beats change nothing', async () => {
     const h = setup();
     await act(async () => h.current.press(request()));
-    act(() => h.current.settled());
+    act(() => h.current.settle());
     act(() => h.current.skip());
     expect(h.current.state.phase).toBe('review');
     await advance(10_000);
@@ -177,7 +179,7 @@ describe('usePackMachine — a press through the reveal', () => {
   test('conclude before review holds the phase AND its batch', async () => {
     const h = setup();
     await act(async () => h.current.press(request()));
-    act(() => h.current.settled());
+    act(() => h.current.settle());
     await advance(FLOOD_MS);
     expect(h.current.state.phase).toBe('transform');
     act(() => h.current.conclude());
@@ -198,7 +200,7 @@ describe('usePackMachine — a press through the reveal', () => {
       giftsUsed: 0,
     });
     await act(async () => h.current.press(request()));
-    act(() => h.current.settled());
+    act(() => h.current.settle());
     await advance(0);
     expect(h.current.state.phase).toBe('review');
     expect(h.current.blast).toBe(false);
@@ -217,7 +219,7 @@ describe('usePackMachine — a press through the reveal', () => {
       giftsUsed: 0,
     });
     await act(async () => h.current.press(request()));
-    act(() => h.current.settled());
+    act(() => h.current.settle());
     expect(h.current.blast).toBe(true);
     await advance(BLAST_MS);
     expect(h.current.blast).toBe(false);
@@ -227,7 +229,7 @@ describe('usePackMachine — a press through the reveal', () => {
   test('the cooldown locks the button briefly after a settle', async () => {
     const h = setup();
     await act(async () => h.current.press(request()));
-    act(() => h.current.settled());
+    act(() => h.current.settle());
     expect(h.current.cooldown).toBe(true);
     await advance(600);
     expect(h.current.cooldown).toBe(false);
@@ -260,7 +262,7 @@ describe('usePackMachine — a press through the reveal', () => {
     const h = setup();
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     await act(async () => h.current.press(request()));
-    act(() => h.current.settled());
+    act(() => h.current.settle());
     h.unmount();
     await advance(10_000);
     expect(errors).not.toHaveBeenCalled();
@@ -274,7 +276,7 @@ describe('usePackMachine — identity', () => {
     await act(async () => h.current.press(request()));
     expect(effects.applyBalance).toHaveBeenCalledTimes(1);
     h.rerender({ ...props, customerId: 'cus_2' });
-    act(() => h.current.settled());
+    act(() => h.current.settle());
     expect(h.current.state).toEqual({ phase: 'idle' });
     expect(effects.applyBalance).toHaveBeenCalledTimes(1);
     expect(onSettled).not.toHaveBeenCalled();
@@ -317,14 +319,12 @@ describe('usePackMachine — identity', () => {
     const h = setup({ customerId: null });
     const pool = [won('d')];
     await act(async () =>
-      h.current.press(
-        request({ mode: 'demo', demoPool: pool, forId: null }),
-      ),
+      h.current.press(request({ mode: 'demo', demoPool: pool, forId: null })),
     );
     expect(deps.openBatch).not.toHaveBeenCalled();
     expect(h.current.state.phase).toBe('spinning');
     h.rerender({ ...props, customerId: 'cus_9' });
-    act(() => h.current.settled());
+    act(() => h.current.settle());
     const s = h.current.state;
     expect(s.phase).toBe('flood');
     expect(s.phase === 'flood' && s.batch.mode).toBe('demo');

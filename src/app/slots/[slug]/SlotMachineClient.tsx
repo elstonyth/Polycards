@@ -79,7 +79,7 @@ import { RevealStage } from './RevealStage';
 import { TicketReveal } from './TicketReveal';
 import { SuccessToast } from '@/components/ui/SuccessToast';
 import { CARD_BACK_SRC } from './SlabCard';
-import { isRevealState, usePackMachine } from './usePackMachine';
+import { hasRoll, isRevealState, usePackMachine } from './usePackMachine';
 
 // The server actions a press can reach — injected into the roll seam (see
 // roll-batch.ts), so the machine's own suite can fake them.
@@ -395,10 +395,10 @@ export default function SlotMachineClient({
       play('riser');
     },
   });
-  const { state, settled, skip, conclude } = machine;
+  const { state } = machine;
   const phase = state.phase;
   // The roll on screen: from the reel's launch until the reveal concludes.
-  const roll = phase === 'idle' || phase === 'resolving' ? null : state;
+  const roll = hasRoll(state) ? state : null;
   const spinNonce = roll?.batch.spinAt;
   // Type guard, not an inline comparison: it narrows to the reveal range, so
   // <RevealStage> can never be handed a phase it does not render.
@@ -833,7 +833,7 @@ export default function SlotMachineClient({
                   winners={roll?.winners ?? null}
                   reduced={reduced}
                   decoyPools={renderPools}
-                  onAllSettled={settled}
+                  onAllSettled={machine.settle}
                   onCellCross={handleCellCross}
                   onWinnerRect={(i, r) => {
                     winnerRects.current[i] = r;
@@ -869,8 +869,8 @@ export default function SlotMachineClient({
                     reduced={reduced}
                     demo={demoReveal}
                     onSignUp={demoReveal ? () => openAuth('signup') : undefined}
-                    onSkip={skip}
-                    onConclude={conclude}
+                    onSkip={machine.skip}
+                    onConclude={machine.conclude}
                     vibrate={vibrate}
                     playReveal={playReveal}
                   />
@@ -889,8 +889,8 @@ export default function SlotMachineClient({
                     demo={demoReveal}
                     locked={reveal.batch.locked}
                     onSignUp={demoReveal ? () => openAuth('signup') : undefined}
-                    onSkip={skip}
-                    onConclude={conclude}
+                    onSkip={machine.skip}
+                    onConclude={machine.conclude}
                     onCloseInstant={closeInstantWindow}
                     onSellBack={sellBackPull}
                     onReveal={revealPull}
