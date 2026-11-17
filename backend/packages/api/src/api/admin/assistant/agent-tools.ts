@@ -581,7 +581,7 @@ export const AGENT_TOOLS: Tool<Ctx>[] = [
           customerId,
           last4,
           bank,
-          await fromBanList(ctx.access),
+          await isAdmin(ctx),
         );
       } catch (err) {
         throw new Error(

@@ -131,7 +131,10 @@ describe('assistant tool policy', () => {
   });
 
   it('never lets a tool that needs the unban policy run unwatched', () => {
-    for (const tool of TOOLS.filter((t) => t.needs.includes(UNBAN_NEED))) {
+    const unban = needText(UNBAN_NEED);
+    for (const tool of TOOLS.filter((t) =>
+      t.needs.map(needText).includes(unban),
+    )) {
       expect([tool.name, tool.effect]).toEqual([tool.name, 'ban_change']);
     }
   });

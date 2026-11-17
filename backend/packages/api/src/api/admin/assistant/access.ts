@@ -4,6 +4,8 @@ import { CORE_READ_PREFIXES, CUSTOM_ADMIN_RESOURCES } from '../../admin-rbac';
 
 /** What running a tool does, declared on each tool. */
 export type Effect =
+  /** Changes nothing that lasts, so it may run with nobody watching. The
+   *  image tools count: what they make is a draft shown in the chat. */
   | 'read'
   /** Saves or deletes something that lasts (a note, a scheduled task). The
    *  engine runs it only before any tool output is in the turn: what was
