@@ -3,6 +3,8 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { submitHeldWithdrawal } from '../../../../../../modules/packs/gateway-withdrawal';
+import { PACKS_MODULE } from '../../../../../../modules/packs';
+import type PacksModuleService from '../../../../../../modules/packs/service';
 import { payerIpOf } from '../../../../../utils/payer-ip';
 
 // POST /admin/payments/withdrawals/:id/approve — release a HELD payout to the
@@ -21,6 +23,7 @@ export async function POST(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
+  const body = (req.body ?? {}) as { verify_device_peers?: unknown };
   const result = await submitHeldWithdrawal(req.scope, {
     withdrawalId: req.params.id,
     adminId: req.auth_context.actor_id,
@@ -28,6 +31,25 @@ export async function POST(
     // note on why that is still the un-forgeable value the gateway wants.
     payerIp: payerIpOf(req),
   });
+  // The reviewer confirmed that the accounts sharing this one's browser are
+  // one household (ADR 0018): its later withdrawals are not held for them
+  // again. Only after the approval went through, so a refused approve leaves
+  // no stamp.
+  if (body.verify_device_peers === true) {
+    const packs = req.scope.resolve<PacksModuleService>(PACKS_MODULE);
+    const [row] = await packs.listGatewayWithdrawals(
+      { id: req.params.id },
+      { take: 1 },
+    );
+    if (row?.customer_id) {
+      await packs.verifyDevicePeers({
+        customerId: row.customer_id,
+        peerIds: await packs.sharedDeviceHoldPeers(row.customer_id),
+        adminId: req.auth_context.actor_id,
+        reason: `one household, confirmed approving held withdrawal ${row.id}`,
+      });
+    }
+  }
   res.setHeader('Cache-Control', 'no-store');
   res.json(result);
 }

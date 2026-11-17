@@ -8,6 +8,7 @@ import { hasPermission } from '@medusajs/framework';
 import { PARTNER_CREDENTIAL_KEY } from '../../utils/partner-accounts';
 import {
   BANK_SHARE_VERIFIED_KEY,
+  DEVICE_SHARE_VERIFIED_KEY,
   HOLDER_NAME_CLEARED_KEY,
   PAYOUT_BAN_LIFTED_KEY,
 } from '../../modules/packs/saved-accounts';
@@ -109,6 +110,19 @@ export function rejectAdminBankAccountsMetadata(
       new MedusaError(
         MedusaError.Types.INVALID_DATA,
         `${BANK_SHARE_VERIFIED_KEY} is not writable through this route. Use bank-accounts/verify, which is audited.`,
+      ),
+    );
+    return;
+  }
+  if (
+    metadata &&
+    typeof metadata === 'object' &&
+    DEVICE_SHARE_VERIFIED_KEY in metadata
+  ) {
+    next(
+      new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `${DEVICE_SHARE_VERIFIED_KEY} is not writable through this route. Approve the held withdrawal, which is audited.`,
       ),
     );
     return;

@@ -63,6 +63,8 @@ import {
   holderNameKey,
   normalizeHolderName,
   withClearedHolderName,
+  DEVICE_SHARE_VERIFIED_KEY,
+  verifiedDevicePeers,
   type SavedBankAccount,
 } from './saved-accounts';
 import { FRAME_LEVELS } from './avatar-frames';
@@ -182,6 +184,7 @@ import {
   BOARD_FETCH_N,
   disabledAccountSql,
   mayPlay as mayPlayFor,
+  realGroupMemberSql,
   topShown,
   type Game,
   type PlayRefusal,
@@ -10024,6 +10027,80 @@ class PacksModuleService extends MedusaService({
         'WHERE o.customer_id <> ? AND o.device_id IN (SELECT device_id FROM mine) ' +
         'GROUP BY o.customer_id LIMIT 50',
       [customerId, deviceId ?? '', deviceId ?? '', customerId, customerId],
+    );
+  }
+
+  // The earlier accounts on this account's browsers that support has not
+  // confirmed as one household (ADR 0018). While any remain, a withdrawal from
+  // this account waits for review. A real player group (partners, house) is
+  // exempt, as it is from the no-top-up gate.
+  @InjectManager()
+  async sharedDeviceHoldPeers(
+    customerId: string,
+    deviceId: string | null = null,
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<string[]> {
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const [me] = await em.execute<
+      { exempt: boolean; metadata: Record<string, unknown> | null }[]
+    >(
+      `SELECT ${realGroupMemberSql('c.id')} AS exempt, c.metadata FROM customer c WHERE c.id = ?`,
+      [customerId],
+    );
+    if (!me || me.exempt) return [];
+    const verified = verifiedDevicePeers(me.metadata ?? {});
+    return (
+      await this.sharedBrowserAccounts(customerId, deviceId, sharedContext)
+    )
+      .filter((other) => other.earlier && !(other.customer_id in verified))
+      .map((other) => other.customer_id);
+  }
+
+  // Support confirms that `peerIds` and this account are one household on one
+  // browser (ADR 0018), so the shared-device hold stops for those pairs. Never
+  // touches the one-welcome-pack rule. Audited on the customer.
+  @InjectTransactionManager()
+  async verifyDevicePeers(
+    input: {
+      customerId: string;
+      peerIds: string[];
+      adminId: string;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<void> {
+    if (!input.peerIds.length) return;
+    const at = new Date().toISOString();
+    let before: Record<string, string> = {};
+    let after: Record<string, string> = {};
+    await this.mutateCustomerMetadata(
+      {
+        customerId: input.customerId,
+        mutate: (current) => {
+          before = verifiedDevicePeers(current);
+          after = {
+            ...before,
+            ...Object.fromEntries(input.peerIds.map((id) => [id, at])),
+          };
+          return { ...current, [DEVICE_SHARE_VERIFIED_KEY]: after };
+        },
+      },
+      sharedContext,
+    );
+    await this.createAdminActionAudits(
+      [
+        {
+          admin_id: input.adminId,
+          entity_type: 'customer',
+          entity_id: input.customerId,
+          action: 'edit',
+          before: { [DEVICE_SHARE_VERIFIED_KEY]: before },
+          after: { [DEVICE_SHARE_VERIFIED_KEY]: after },
+          reason: input.reason,
+        },
+      ],
+      sharedContext,
     );
   }
 

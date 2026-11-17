@@ -187,6 +187,11 @@ export const SECRET_READS = [
     matcher: '/admin/payments/withdrawals/*/account',
     resource: 'customer_bank_account',
   },
+  // The held-withdrawal review drawer: banks, names, browsers (ADR 0018).
+  {
+    matcher: '/admin/payments/withdrawals/*/links',
+    resource: 'customer_bank_account',
+  },
 ] as const;
 
 const METHODS_BY_OPERATION = Object.entries(OPERATION_BY_METHOD).reduce<
