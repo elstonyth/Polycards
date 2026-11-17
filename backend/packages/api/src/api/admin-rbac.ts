@@ -440,6 +440,8 @@ export const ADMIN_ROUTES: readonly AdminRoute[] = [
   // unthrottled, a compromised admin token walks the table and re-derives
   // exactly the bulk view the masking removed.
   secretRead('/admin/payments/withdrawals/*/account', 'customer_bank_account'),
+  // The held-withdrawal review drawer: banks, names, browsers (ADR 0018).
+  secretRead('/admin/payments/withdrawals/*/links', 'customer_bank_account'),
   {
     // Release a HELD payout to the gateway (plan 094). The most literal money
     // mutation on this limiter: one call submits a real bank transfer. The

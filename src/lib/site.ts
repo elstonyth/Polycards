@@ -16,5 +16,6 @@ export const ROUTES: string[] = [
   '/how-it-works',
   '/about',
   '/contact',
+  '/rules',
   '/privacy',
 ];

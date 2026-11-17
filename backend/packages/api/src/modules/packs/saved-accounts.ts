@@ -550,6 +550,22 @@ export function verifiedBankAccounts(
   ) as Record<string, string>;
 }
 
+/** customer.metadata key: another account's id to when support confirmed the
+ *  two share a browser as one household (ADR 0018). Lifts the shared-device
+ *  withdrawal hold for that pair only, never the one-welcome-pack rule. Only
+ *  the admin approve route writes it; rejectCustomerMetadata refuses it. */
+export const DEVICE_SHARE_VERIFIED_KEY = 'device_share_verified';
+
+export function verifiedDevicePeers(
+  metadata: Record<string, unknown>,
+): Record<string, string> {
+  const stamps = metadata[DEVICE_SHARE_VERIFIED_KEY];
+  if (typeof stamps !== 'object' || stamps === null) return {};
+  return Object.fromEntries(
+    Object.entries(stamps).filter(([, at]) => typeof at === 'string'),
+  ) as Record<string, string>;
+}
+
 /** Holder names support cleared as a real clash (owner, 2026-11-04): another
  *  person with the same name holds it on another account, so this account's
  *  own saves stop counting THOSE accounts' use of it. `with` is who held it

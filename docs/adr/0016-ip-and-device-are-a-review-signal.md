@@ -1,5 +1,8 @@
 # IP address and browser id are a clue for support, never a block
 
+Superseded in part by ADR 0018 (2026-11-17): a shared browser now holds a withdrawal
+for review and limits the welcome pack to one per household.
+
 Owner's policy is one person, one account (ADR 0015). The bank rule stops cash-out,
 but a person with another bank and phone can still open accounts. So we record which
 network and browser each account was seen on, and show support the overlap on the

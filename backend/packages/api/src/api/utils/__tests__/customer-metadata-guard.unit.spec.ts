@@ -22,6 +22,7 @@ describe('hideStoreCustomerMetadata', () => {
           handle: 'x',
           holder_name_cleared: { tanahkow: { name: 'n', at: 't', with: ['cus_2'] } },
           payout_ban_lifted: { '512345670001': { bank_code: 'MBBEMYKL', at: 't' } },
+          device_share_verified: { cus_2: 't' },
         },
       },
     });
@@ -35,6 +36,7 @@ describe('rejectAdminBankAccountsMetadata', () => {
     'bank_share_verified',
     'holder_name_cleared',
     'payout_ban_lifted',
+    'device_share_verified',
   ])('refuses %s', (key) => {
     const next = run({ metadata: { handle: 'x', [key]: 'anything' } });
     expect(next).toHaveBeenCalledTimes(1);
