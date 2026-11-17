@@ -4,42 +4,31 @@
  * plans 004, 015, 044) — this test makes the next omission fail loudly
  * instead of waiting for an audit.
  *
- * Mostly a text scan: it reads the public RATE_LIMITS table, then scans
- * middlewares.ts and every src/api/admin/**\/route.ts with regexes. No Medusa
- * framework boot and no DB.
+ * Reads the admin route table (admin-rbac.ts ADMIN_ROUTES, which
+ * middlewares.ts spreads in through adminRouteLimits — admin-route-table.unit.spec.ts
+ * checks that wiring), then scans every src/api/admin/**\/route.ts with
+ * regexes. No Medusa framework boot and no DB.
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import { RATE_LIMITS } from '../utils/rate-limit';
+import { ADMIN_ROUTES } from '../admin-rbac';
 import {
   API_ROOT,
-  MIDDLEWARES_PATH,
   collectRouteFiles,
   routeFileToUrl,
   mutationMethodsOf,
   matcherToRegExp,
-  extractLimiterEntries,
-  type LimiterEntry,
 } from './rate-limit-coverage-helpers';
 
-/**
- * Extract every `{ matcher: '...', method: ..., middlewares: [...] }` entry
- * in middlewares.ts whose middlewares array includes `adminActionRateLimit`.
- * Relies on the file's consistent field order (matcher, method, middlewares)
- * and on none of those admin-block entries nesting a `[...]` inside
- * `middlewares` (true today — verified by the entry count assertion below).
- */
-function extractAdminActionRateLimitEntries(): LimiterEntry[] {
-  const src = fs.readFileSync(MIDDLEWARES_PATH, 'utf8');
-  const limiterName: keyof typeof RATE_LIMITS = 'admin-action';
-  const bindingMatch = src.match(
-    new RegExp(`const\\s+(\\w+)\\s*=\\s*rateLimit\\('${limiterName}'\\);`),
-  );
-  const bindingName = bindingMatch?.[1];
-  if (!bindingName) return [];
-  return extractLimiterEntries(src).filter((e) =>
-    e.middlewares.includes(bindingName),
+/** Every admin route on the shared admin-action limiter. */
+function adminActionRateLimitEntries(): {
+  matcher: string;
+  methods: string[];
+}[] {
+  return ADMIN_ROUTES.filter((r) => r.limits?.includes('admin-action')).map(
+    (r) => ({ matcher: r.matcher, methods: [r.method] }),
   );
 }
 
@@ -147,7 +136,7 @@ const EXEMPT: { path: string; method: string; reason: string }[] = [
 ];
 
 describe('admin mutation routes are rate-limited (plan 061 coverage guard)', () => {
-  const limiterEntries = extractAdminActionRateLimitEntries();
+  const limiterEntries = adminActionRateLimitEntries();
   const limiterRegexes = limiterEntries.map((e) => ({
     matcher: e.matcher,
     methods: e.methods,
@@ -165,9 +154,9 @@ describe('admin mutation routes are rate-limited (plan 061 coverage guard)', () 
     expect(mutationMethodsOf(synthetic).sort()).toEqual(['DELETE', 'POST']);
   });
 
-  it('extraction is not vacuous (finds real entries, not just /store noise)', () => {
+  it('the table is not vacuous (finds real entries, not just /store noise)', () => {
     expect(RATE_LIMITS['admin-action']).toBeDefined();
-    // Guards against a regex change silently matching nothing (green-for-the-
+    // Guards against a table change silently matching nothing (green-for-the-
     // wrong-reason, as happened with the axe/oklch a11y gate).
     expect(limiterEntries.length).toBeGreaterThan(20);
     expect(
@@ -230,8 +219,8 @@ describe('admin mutation routes are rate-limited (plan 061 coverage guard)', () 
       }
     }
 
-    // Guards MUTATION_METHOD_RE itself, the same way the extraction test above
-    // guards extractAdminActionRateLimitEntries: without this floor, a regex
+    // Guards MUTATION_METHOD_RE itself, the same way the table test above
+    // guards adminActionRateLimitEntries: without this floor, a regex
     // change that silently matches nothing would make `failures` vacuously
     // empty and this whole test green-for-the-wrong-reason (the axe/oklch
     // trap this file's header comment already warns about). 20 is a safe
@@ -291,7 +280,7 @@ describe('admin mutation routes are rate-limited (plan 061 coverage guard)', () 
       options: { sensitive: boolean; strict: boolean; end: boolean },
       fn: () => void,
     ) => { match(path: string): boolean };
-    const grn = extractAdminActionRateLimitEntries()
+    const grn = adminActionRateLimitEntries()
       .filter((e) => e.matcher.startsWith('/admin/goods-receive-notes'))
       .map(
         (e) =>

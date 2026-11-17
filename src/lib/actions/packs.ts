@@ -115,6 +115,9 @@ const PACKS_RULES: ErrorRule[] = [
     /add your bank account/i,
     'To claim your welcome pack, add your bank account.',
   ],
+  // One per person or household (ADR 0018, FREE_PACK_HOUSEHOLD_MESSAGE): the
+  // backend sentence is the copy, so it is shown as is.
+  [/fraud detection flagged/i, (text) => text],
   // A pack whose prize pool is empty/zero-weight (mid-setup in admin). Must
   // precede the generic not-found rule: the backend throws it as NOT_FOUND.
   [

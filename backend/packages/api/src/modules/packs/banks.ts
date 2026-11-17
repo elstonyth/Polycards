@@ -36,9 +36,9 @@ export type Bank = {
   legacyAliases: readonly string[];
   /**
    * This destination's own payout floor, RM, on top of the gateway's band.
-   * Touch 'n Go: TGPay refused every TNG payout under ~RM 70 on 2026-10-09
-   * ("No payout provider is available for this order") while paying RM 313,
-   * so the floor is RM 100 until TGPay states the real limit.
+   * Touch 'n Go: RM 50, the minimum TGPay announced for TNG payouts on
+   * 2026-11-17 (it was RM 100 after TGPay refused every TNG payout under
+   * ~RM 70 on 2026-10-09).
    */
   payoutMinRm?: number;
   /**
@@ -100,6 +100,10 @@ export const MY_BANKS: readonly Bank[] = [
   bank('BSNAMYK1', 'Bank Simpanan Nasional (BSN)', { code: 'MYBSNB', name: 'Bank Simpanan National' }, { code: 'BSNAMYK1', name: 'Bank Simpanan Nasional Berhad' }, [16]),
   bank('CIBBMYKL', 'CIMB Bank', { code: 'MYCIMB', name: 'CIMB Bank Berhad' }, { code: 'CIBBMYKL', name: 'CIMB Bank Berhad' }, [10, 14]),
   bank('CITIMYKL', 'Citibank', null, { code: 'CITIMYKL', name: 'Citibank Berhad' }, [9, 10, 11, 12, 13, 14, 15, 16]),
+  // GX Bank: TGPay payout code from their payout-bank list (2026-11-17; the
+  // older GXBKMYKL is still accepted). TGPay pays GX from RM 50, the gateway
+  // floor, so no floor of its own.
+  bank('GXBANKMY', 'GX Bank', { code: 'MYGXSP', name: 'GX Bank Berhad' }, { code: 'GXSPMYKL', name: 'GX Bank Berhad' }, [11, 13, 14]),
   bank('HLBBMYKL', 'Hong Leong Bank', { code: 'MYHLBB', name: 'Hong Leong Bank Berhad' }, { code: 'HLBBMYKL', name: 'Hong Leong Bank Berhad' }, [11, 13]),
   bank('HBMBMYKL', 'HSBC Bank', { code: 'MYHSBC', name: 'HSBC Bank' }, { code: 'HBMBMYKL', name: 'HSBC Bank Malaysia Berhad' }, [12, 13, 14, 15, 17]),
   bank('KFHOMYKL', 'Kuwait Finance House', null, { code: 'KFHOMYKL', name: 'Kuwait Finance House' }, [12]),
@@ -114,7 +118,7 @@ export const MY_BANKS: readonly Bank[] = [
   // the week to 2026-10-14 ("No payout provider is available for this order")
   // and customers retried up to 16 times a day. Turn it on once TGPay confirms
   // the route (set it on the backend service and worker; the app redeploys).
-  { ...bank('TNGMY', "Touch 'n Go eWallet", { code: 'MYTNGO', name: 'Touch N Go' }, { code: 'TNGDRMYKL', name: "Touch 'n Go" }, [12]), payoutMinRm: 100, payoutSwitch: 'TNG_PAYOUTS_ENABLED' },
+  { ...bank('TNGMY', "Touch 'n Go eWallet", { code: 'MYTNGO', name: 'Touch N Go' }, { code: 'TNGDRMYKL', name: "Touch 'n Go" }, [12]), payoutMinRm: 50, payoutSwitch: 'TNG_PAYOUTS_ENABLED' },
   bank('UOVBMYKL', 'UOB', { code: 'MYUOBB', name: 'United Overseas Bank' }, { code: 'UOVBMYKL', name: 'United Overseas Bank (Malaysia) Berhad' }, [7, 9, 10, 11, 12, 13, 14, 17]),
   // No TGPay payout code today (e-wallets, digital and foreign banks): kept so
   // a saved account under one still resolves and reads as "not available with
@@ -128,7 +132,6 @@ export const MY_BANKS: readonly Bank[] = [
   bank('BOCMY', 'Bank of China', { code: 'MYBOCM', name: 'Bank Of China' }, null, [13, 15]),
   bank('BOFAMY', 'Bank of America', { code: 'MYBOFA', name: 'Bank Of America' }, null, [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17]),
   bank('JPMMY', 'JP Morgan', { code: 'MYCHAS', name: 'JP Morgan' }, null, [10, 11, 12, 13, 14, 15, 16, 17]),
-  bank('GXBANKMY', 'GX Bank', { code: 'MYGXSP', name: 'GX Bank Berhad' }, null, [11, 13, 14]),
   bank('MTRADEMY', 'Merchant Trade', { code: 'MYMSSH', name: 'Merchant Trade' }, null, [12]),
   bank('RYTMY', 'Ryt Bank', { code: 'SCCH', name: 'Ryt Bank' }, null, [10]),
 ];
