@@ -12,7 +12,7 @@ two places.
   account not deleted: banned and disabled ones count).
   The ids checked are the ones recorded for the account plus the one on the open
   request (`vouchedVisitorDevice`). A lock per browser id makes two accounts claiming
-  at once take turns. The refusal says "one per person or household" and never names
+  at once take turns. The refusal says fraud detection flagged the account and never names
   the browser, so it teaches nothing to work around. No browser id means no match.
   A confirmed household does not unlock a second pack.
 - **A withdrawal from a later account on a shared browser waits for review.** If an

@@ -18,7 +18,7 @@ export const FREE_PACK_SHARED_PHONE_MESSAGE =
  *  pack (owner 2026-11-17, ADR 0018): one welcome pack per person or
  *  household. Never names the browser, so it teaches nothing to work around. */
 export const FREE_PACK_HOUSEHOLD_MESSAGE =
-  'The welcome pack is one per person or household, and it has already been claimed. Contact customer service if this is a mistake.';
+  'Our fraud detection flagged this account, so the welcome pack can’t be claimed. Contact customer service if this is a mistake.';
 
 /** Refusal when the account has no bank account saved (owner, 2026-11-03): a
  *  bank number sits on one account only (ADR 0015), so one welcome pack. */

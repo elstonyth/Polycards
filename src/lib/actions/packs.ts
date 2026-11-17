@@ -117,7 +117,7 @@ const PACKS_RULES: ErrorRule[] = [
   ],
   // One per person or household (ADR 0018, FREE_PACK_HOUSEHOLD_MESSAGE): the
   // backend sentence is the copy, so it is shown as is.
-  [/one per person or household/i, (text) => text],
+  [/fraud detection flagged/i, (text) => text],
   // A pack whose prize pool is empty/zero-weight (mid-setup in admin). Must
   // precede the generic not-found rule: the backend throws it as NOT_FOUND.
   [
