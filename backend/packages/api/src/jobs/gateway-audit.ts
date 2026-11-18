@@ -139,7 +139,10 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
       await packs.updateGatewayDeposits({
         id: row.id,
         audited_at: now,
-        ...stampNote(row, `gateway "${row.gateway}" is not configured here — not audited`),
+        ...stampNote(
+          row,
+          `gateway "${row.gateway}" is not configured here — not audited`,
+        ),
       });
       findings += 1;
       continue;
@@ -170,6 +173,7 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
     const audited = {
       status: row.status,
       amount: toOptionalMoney(row.amount_settled),
+      requested: toOptionalMoney(row.amount_requested),
     };
     // Rewritten against the ledger only when the gateway disagrees: most rows
     // agree, and this costs two more reads.
@@ -217,7 +221,10 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
     if (!config) {
       await stampWithdrawalAudit(packs, row.id, {
         audited_at: now,
-        ...stampNote(row, `gateway "${row.gateway}" is not configured here — not audited`),
+        ...stampNote(
+          row,
+          `gateway "${row.gateway}" is not configured here — not audited`,
+        ),
       });
       findings += 1;
       continue;

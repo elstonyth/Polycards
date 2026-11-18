@@ -368,6 +368,50 @@ describe('gateway audit job', () => {
     });
   });
 
+  // From the real 2026-11-08 row: asked RM 64.56, 14 of 16 USDT arrived,
+  // credited RM 56.49 by hand; the gateway keeps the order FAILED.
+  describe('a short payment credited by hand', () => {
+    const short = {
+      ...settledDeposit,
+      id: 'gpd_short',
+      customer_id: 'cus_s',
+      amount_settled: '56.49',
+      amount_requested: '64.56',
+    };
+    const run = async (row: Record<string, unknown>) => {
+      fakeGateway.script({ getDepositDetail: { state: 'failed', amount: 0 } });
+      const h = harness([row]);
+      await gatewayAuditJob(h.container as never);
+      return (
+        h.packs.updateGatewayDeposits.mock.calls as unknown as [
+          Record<string, unknown>,
+        ][]
+      )[0][0];
+    };
+
+    it('gets the short-payment note, not the alarm', async () => {
+      const update = await run(short);
+      expect(update.audit_note).toMatch(
+        /credited RM 56\.49 of RM 64\.56 asked/,
+      );
+      expect(update.audit_note).not.toMatch(/without gateway confirmation/);
+    });
+
+    it('keeps an acknowledgement of the alarm it replaces', async () => {
+      const alarm =
+        'gateway says FAILED but the row is settled — credit issued without gateway confirmation, investigate';
+      const update = await run({
+        ...short,
+        audit_note: alarm,
+        audit_ack_note: alarm,
+        audit_ack_by: 'ops@test.dev',
+        audit_ack_at: new Date(0),
+      });
+      expect(update.audit_ack_note).toBe(update.audit_note);
+      expect(update).not.toHaveProperty('audit_ack_by');
+    });
+  });
+
   it('does nothing while the real-gateway switch is off', async () => {
     process.env.GATEWAY_ENABLED = 'false';
     const h = harness([settledDeposit]);
@@ -392,7 +436,8 @@ describe('gateway audit job — payout net_amount', () => {
   });
   const lastWithdrawalUpdate = (h: ReturnType<typeof harness>) =>
     (h.packs.updateGatewayWithdrawals.mock.calls as unknown[][]).at(-1)?.[0] as
-      Record<string, unknown> | undefined;
+      | Record<string, unknown>
+      | undefined;
 
   it('backfills a NULL payout net from the gateway’s answer', async () => {
     fakeGateway.script({

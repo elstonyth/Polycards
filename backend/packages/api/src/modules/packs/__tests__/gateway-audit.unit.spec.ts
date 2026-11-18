@@ -1,6 +1,8 @@
 import {
+  SETTLED_BUT_FAILED_NOTE,
   depositAuditNote,
   ledgerTrail,
+  shortCreditNote,
   stampNote,
   withdrawalAuditNote,
 } from '../gateway-audit';
@@ -172,8 +174,63 @@ describe('a note that knows what the ledger holds', () => {
       'gateway says FAILED but the row is settled — credit issued without gateway confirmation, investigate',
     );
     expect(
-      withdrawalAuditNote({ status: 'failed', amount: 100 }, paid(100), nothing),
+      withdrawalAuditNote(
+        { status: 'failed', amount: 100 },
+        paid(100),
+        nothing,
+      ),
     ).toMatch(/DOUBLE PAYMENT/);
+  });
+
+  // 2026-10-26 to 11-08, four USDT top-ups: an exchange took its fee out of
+  // the transfer, the gateway kept each order FAILED and booked what arrived
+  // under its own reference, and we credited what arrived by hand. A requery
+  // can also settle short on its own, so the note names the check rather than
+  // asserting a hand credit.
+  describe('a settled row credited less than it asked', () => {
+    const ledger = { anchored: true, hand: false };
+    const settled = (amount: number | null, requested?: number | null) => ({
+      status: 'settled',
+      amount,
+      requested,
+    });
+
+    it('reads as a short payment, with the check that clears it', () => {
+      const note = depositAuditNote(settled(197.03, 201.88), failed, ledger);
+      expect(note).toBe(shortCreditNote(197.03, 201.88));
+      expect(note).toMatch(/FAILED/);
+      expect(note).toMatch(/credited RM 197\.03 of RM 201\.88 asked/);
+      expect(note).toMatch(/paid short/);
+      expect(note).toMatch(/If the amount that arrived was credited by hand/);
+      expect(note).toMatch(/manual entry/);
+      expect(note).toMatch(/With no such entry, investigate$/);
+      expect(note).not.toMatch(/without gateway confirmation/);
+    });
+
+    it('keeps the alarm when the row is not short by at least a cent', () => {
+      for (const row of [
+        settled(50, 50),
+        settled(50, 50.004),
+        settled(60, 50),
+        settled(50, null),
+        settled(50),
+        settled(null, 50),
+      ]) {
+        expect(depositAuditNote(row, failed, ledger)).toBe(
+          SETTLED_BUT_FAILED_NOTE,
+        );
+      }
+    });
+
+    it('changes no other verdict on a short row', () => {
+      expect(depositAuditNote(settled(56.49, 64.56), paid(56.49))).toBeNull();
+      expect(depositAuditNote(settled(56.49, 64.56), pending)).toMatch(
+        /still reports pending/,
+      );
+      expect(depositAuditNote(settled(56.49, 64.56), missing)).toMatch(
+        /NO record/,
+      );
+    });
   });
 });
 
@@ -249,7 +306,40 @@ describe('stampNote', () => {
     expect(stampNote(acked, null)).toEqual({ audit_note: null, ...cleared });
   });
   it('writes only the note on a row nobody acknowledged', () => {
-    expect(stampNote({ audit_ack_note: null }, 'n')).toEqual({ audit_note: 'n' });
+    expect(stampNote({ audit_ack_note: null }, 'n')).toEqual({
+      audit_note: 'n',
+    });
     expect(stampNote({}, null)).toEqual({ audit_note: null });
+  });
+
+  // The gateway's answer is the same; only our wording softened. An operator
+  // who acknowledged the alarm has already checked what the softer note asks.
+  describe('the alarm softened to a short-payment note', () => {
+    const soft = shortCreditNote(399.76, 405.85);
+    const ackedAlarm = {
+      audit_note: SETTLED_BUT_FAILED_NOTE,
+      audit_ack_note: SETTLED_BUT_FAILED_NOTE,
+    };
+    it('carries the acknowledgement over', () => {
+      expect(stampNote(ackedAlarm, soft)).toEqual({
+        audit_note: soft,
+        audit_ack_note: soft,
+      });
+    });
+    it('carries nothing to any other note', () => {
+      expect(
+        stampNote(ackedAlarm, 'gateway paid 1.00, row credited 2.00'),
+      ).toEqual({
+        audit_note: 'gateway paid 1.00, row credited 2.00',
+        audit_ack_note: null,
+        audit_ack_by: null,
+        audit_ack_at: null,
+      });
+    });
+    it('carries nothing from an acknowledgement of another note', () => {
+      expect(
+        stampNote({ audit_note: 'old note', audit_ack_note: 'old note' }, soft),
+      ).toMatchObject({ audit_note: soft, audit_ack_note: null });
+    });
   });
 });
