@@ -199,6 +199,19 @@ describe('PackDetailClient — vault packs', () => {
     expect(mocks.push).toHaveBeenCalledWith('/slots/bronze/spin?count=1');
     expect(container.textContent).not.toContain('Not enough balance');
   });
+
+  // A failed read may hide a gift: the reel re-reads and offers Retry, so the
+  // pack page must not refuse a broke holder before they get there.
+  test('no "Not enough balance" when the gift read failed', async () => {
+    mocks.getPackGifts.mockResolvedValue(null);
+    await render(1);
+    const open = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Open Pack',
+    );
+    await act(async () => open!.click());
+    expect(mocks.push).toHaveBeenCalledWith('/slots/bronze/spin?count=1');
+    expect(container.textContent).not.toContain('Not enough balance');
+  });
 });
 
 // Sold out (admin): listed, but the backend refuses a paid open — so both CTAs

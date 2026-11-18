@@ -1,9 +1,5 @@
 import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
-import {
-  resolvePacks,
-  type GatewayDeposits,
-  type GatewayWithdrawals,
-} from '../../modules/packs/facets';
+import { resolvePacks, type GatewayDeposits } from '../../modules/packs/facets';
 import {
   TGPAY_FAMILY,
   tgpayCallbackAuthorized,
@@ -14,15 +10,7 @@ import {
 } from '../../modules/packs/tgpay-client';
 import { GATEWAYS, rowGateway } from '../../modules/packs/gateway';
 import { applyDepositOutcome } from '../../modules/packs/gateway-deposit';
-import {
-  applyWithdrawalOutcome,
-  refundWithdrawal,
-} from '../../modules/packs/gateway-withdrawal';
-import { alertOps } from '../../modules/packs/ops-alert';
-import {
-  stampNote,
-  withdrawalAuditNote,
-} from '../../modules/packs/gateway-audit';
+import { handleWithdrawalCallback } from '../../modules/packs/withdrawal-callback';
 import { payoutCost, toOptionalMoney } from '../../modules/packs/money';
 
 // The server-notify handlers for every gateway on the TGPay platform (TGPay,
@@ -208,8 +196,8 @@ type PayoutNotify = {
 /**
  * Payout server-notify (docs "Payout callback"). Flat body, no wrapper, and —
  * unlike every other message — NO merchantRefNum: the row is found by the
- * transactionRefNum we stored at create time. The refund path is the shared
- * helper the sweep and the admin deny route already use.
+ * transactionRefNum we stored at create time. Everything after the decode is
+ * the shared payout-callback state machine (modules/packs/withdrawal-callback.ts).
  */
 export function tgpayWithdrawalCallback(kind: TgpayKind): Handler {
   const tag = `[${kind}]`;
@@ -245,142 +233,43 @@ export function tgpayWithdrawalCallback(kind: TgpayKind): Handler {
       res.status(400).send('rejected');
       return;
     }
-    const state = tgpayPayoutState(String(data.status ?? ''));
-
-    const packs = resolvePacks<GatewayWithdrawals>(req.scope);
-    // Primary key: the transactionRefNum stored right after create-payout. If
-    // the callback outruns that write (their id is issued in the same response
-    // we are still handling), fall back to OUR reference — on the sandbox the
-    // two are the same string. A miss after both is acknowledged and left to
-    // the payout sweep, which queries by our reference.
-    let [withdrawal] = await packs.listGatewayWithdrawals(
-      { gateway_transaction_id: gatewayTransactionId, gateway: kind },
-      { take: 1 },
-    );
-    if (!withdrawal) {
-      [withdrawal] = await packs.listGatewayWithdrawals(
-        { merchant_transaction_id: gatewayTransactionId, gateway: kind },
-        { take: 1 },
-      );
-    }
-    if (!withdrawal) {
-      logger.error(
-        `${tag} verified withdrawal callback for UNKNOWN payout ${gatewayTransactionId} (status ${String(data.status)}) — nothing changed; the sweep will requery`,
-      );
-      res.status(200).send('success');
-      return;
-    }
-    // Belt and braces with the gateway filter on both selectors above: a row
-    // that somehow answered without being this gateway's is refused, not paid.
-    if (rowGateway(withdrawal) !== kind) {
-      logger.error(
-        `${tag} callback names payout ${withdrawal.merchant_transaction_id}, which belongs to gateway "${withdrawal.gateway}" — ignored`,
-      );
-      res.status(200).send('success');
-      return;
-    }
-    const merchantTransactionId = withdrawal.merchant_transaction_id;
-
-    if (withdrawal.status !== 'pending') {
-      const contradicts =
-        (state === 'success' && withdrawal.status !== 'settled') ||
-        (state === 'failed' && withdrawal.status !== 'failed');
-      if (contradicts) {
-        logger.error(
-          `${tag} withdrawal ${merchantTransactionId} callback says ${String(data.status)} (${state}) but the row is already ${withdrawal.status} — possible double payment, investigate (gateway ${gatewayTransactionId})`,
-        );
-        // A log line alone is read only when someone already suspects a problem;
-        // a paid-after-refund payout is real money gone twice. References only.
-        void alertOps(
-          req.scope,
-          'payout-contradiction',
-          `${label} says payout ${merchantTransactionId} is ${state}, but our row is already ${withdrawal.status}` +
-            (state === 'success'
-              ? ' — the customer may have been refunded AND paid.'
-              : '.') +
-            ` Investigate ${label} ${gatewayTransactionId}.`,
-        );
-        // On the row too, in the audit's own words, so the Settlement page and
-        // the Dashboard show it at once instead of at the next audit: the ops
-        // alert alone reaches nobody until its chat is set up (2026-10-15).
-        // Best-effort: the gateway still gets its 200 either way.
-        try {
-          const paid = Number(data.amount);
-          await packs.updateGatewayWithdrawals({
-            id: withdrawal.id,
-            audited_at: new Date(),
-            ...stampNote(
-              withdrawal,
-              withdrawalAuditNote(
-                {
-                  status: withdrawal.status,
-                  amount: toOptionalMoney(withdrawal.amount),
-                },
-                {
-                  kind: 'detail',
-                  state,
-                  amount: Number.isFinite(paid)
-                    ? paid
-                    : Number(withdrawal.amount),
-                },
-              ),
-            ),
-          });
-        } catch (error) {
-          logger.error(
-            `${tag} could not record the contradiction on ${merchantTransactionId}: ${(error as Error).message}`,
-          );
-        }
-      }
-      res.status(200).send('success');
-      return;
-    }
-
-    if (state === 'pending') {
-      res.status(200).send('success');
-      return;
-    }
-
-    if (state === 'failed') {
-      try {
-        await refundWithdrawal(
-          req.scope,
-          withdrawal,
-          null,
-          'pending',
-          `callback ${String(data.status)} at ${String(data.paymentAt ?? '')}`,
-        );
-      } catch (error) {
-        logger.error(
-          `${tag} failed to refund withdrawal ${merchantTransactionId}: ${(error as Error).message}`,
-        );
-        res.status(500).send('error');
-        return;
-      }
-      res.status(200).send('success');
-      return;
-    }
-
-    if (Number(data.amount) !== Number(withdrawal.amount)) {
-      logger.error(
-        `${tag} withdrawal ${merchantTransactionId} settled at ${String(data.amount)}, but ${withdrawal.amount} was debited — investigate before adjusting`,
-      );
-    }
-
-    // Receipt -> claim -> feed, shared with the payout sweep. The callback
-    // carries no bank references, so those columns are left alone.
-    await applyWithdrawalOutcome(req.scope, withdrawal, {
-      gatewayRef: gatewayTransactionId,
-      gatewayTransactionId:
-        withdrawal.gateway_transaction_id ?? gatewayTransactionId,
-      amountSettled: toOptionalMoney(data.amount),
-      // net_amount on a payout is what the wallet PAID — amount + fee (the
-      // platform charges on top). NULL when the callback omits the fee — never
-      // a zero fee by omission.
-      netAmount: payoutCost(data.amount, data.fee),
-      settledAt: new Date(),
+    // The row is found by their id: this message carries no merchantRefNum.
+    // On the sandbox their id and our reference are the same string, so the
+    // shared fallback to our reference covers a callback that outruns the
+    // write storing their id.
+    const answer = await handleWithdrawalCallback(req.scope, {
+      kind,
+      label,
+      find: {
+        gatewayTransactionId,
+        merchantTransactionId: gatewayTransactionId,
+      },
+      rawStatus: String(data.status),
+      state: tgpayPayoutState(String(data.status ?? '')),
+      gatewayTransactionId: () => gatewayTransactionId,
+      paidAmount: () => Number(data.amount),
+      failureReason: () =>
+        `callback ${String(data.status)} at ${String(data.paymentAt ?? '')}`,
+      amountMismatch: (withdrawal) =>
+        Number(data.amount) !== Number(withdrawal.amount)
+          ? {
+              note: `withdrawal ${withdrawal.merchant_transaction_id} settled at ${String(data.amount)}, but ${withdrawal.amount} was debited — investigate before adjusting`,
+              alert: false,
+            }
+          : null,
+      // The callback carries no bank references, so those columns are left
+      // alone.
+      settlement: (withdrawal, reported) => ({
+        gatewayRef: reported,
+        gatewayTransactionId: withdrawal.gateway_transaction_id ?? reported,
+        amountSettled: toOptionalMoney(data.amount),
+        // net_amount on a payout is what the wallet PAID — amount + fee (the
+        // platform charges on top). NULL when the callback omits the fee —
+        // never a zero fee by omission.
+        netAmount: payoutCost(data.amount, data.fee),
+        settledAt: new Date(),
+      }),
     });
-
-    res.status(200).send('success');
+    res.status(answer.status).send(answer.body);
   };
 }

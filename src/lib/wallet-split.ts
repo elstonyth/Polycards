@@ -49,21 +49,32 @@ export function walletSplit(w: {
   };
 }
 
-/** The backend gate, exactly (withdrawable.ts): topped up, not frozen, money
- *  still to use on packs, so nothing is withdrawable. An older backend that
- *  still pays out part of it (withdrawable > 0) is not locked. */
-export function isWithdrawLocked(w: {
-  hasTopup: boolean;
+/** Why nothing may leave, as the backend gate names it (withdrawable.ts
+ *  `withdrawalHold`, wallet `hold`), in its order: frozen outranks no top-up,
+ *  which outranks money still to use on packs. The storefront shows it and
+ *  never re-derives it, except in legacyWithdrawHold below. */
+export const WITHDRAW_HOLDS = ['frozen', 'no_topup', 'locked'] as const;
+export type WithdrawHold = (typeof WITHDRAW_HOLDS)[number];
+
+/** The hold for a backend that does not send one yet.
+ *  shortcut: re-derives the backend gate (withdrawable.ts) for a
+ *  storefront-first deploy; drop once the backend sending `hold` and
+ *  `unlock_spend` on GET /store/credits is live. An older backend that still
+ *  pays part out (withdrawable > 0) is not locked. */
+export function legacyWithdrawHold(w: {
   isFrozen: boolean;
-  remaining: number;
+  hasTopup: boolean;
+  available: number;
   withdrawable: number;
-}): boolean {
-  return (
-    w.hasTopup &&
-    !w.isFrozen &&
-    sen(w.remaining) > 0 &&
-    sen(w.withdrawable) === 0
-  );
+  bonus: number;
+  remaining: number;
+}): { hold: WithdrawHold | null; unlockSpend: number } {
+  if (w.isFrozen) return { hold: 'frozen', unlockSpend: 0 };
+  if (!w.hasTopup) return { hold: 'no_topup', unlockSpend: 0 };
+  if (sen(w.remaining) > 0 && sen(w.withdrawable) === 0) {
+    return { hold: 'locked', unlockSpend: walletSplit(w).unlockSpend };
+  }
+  return { hold: null, unlockSpend: 0 };
 }
 
 /** /me's hint for an account that never topped up. */

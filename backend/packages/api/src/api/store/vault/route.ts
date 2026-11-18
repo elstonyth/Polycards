@@ -25,6 +25,8 @@ import {
   toCardView,
 } from '../../../modules/packs/card-view';
 import { toMoney } from '../../../modules/packs/money';
+import { wireDate } from '../../utils/wire-date';
+import type { StoreVaultResponse } from './types';
 import {
   DEFAULT_MARKET_MULTIPLIER,
   displayMarketPrice,
@@ -55,7 +57,7 @@ const VAULT_LIMIT = 500;
 
 export async function GET(
   req: AuthenticatedMedusaRequest,
-  res: MedusaResponse,
+  res: MedusaResponse<StoreVaultResponse>,
 ): Promise<void> {
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
   const customerId = req.auth_context.actor_id;
@@ -172,7 +174,7 @@ export async function GET(
       );
       return {
         pull_id: p.id,
-        rolled_at: p.rolled_at,
+        rolled_at: wireDate(p.rolled_at),
         pack_id: p.pack_id,
         // The synthetic `challenge-<week>` id is not a pack title anyone should
         // read; name the surface it was won on instead.

@@ -1,15 +1,50 @@
 import { hasPermission } from '@medusajs/framework';
 import type { MedusaContainer } from '@medusajs/framework/types';
+import { CORE_READ_PREFIXES, CUSTOM_ADMIN_RESOURCES } from '../../admin-rbac';
 
-// Tools that save something that lasts. The engine runs them only before any
-// tool output is in the turn (what was read may carry someone else's
-// instructions), and a scheduled run, which nobody watches, never gets them.
-export const LASTING_WRITES = new Set([
-  'remember',
-  'forget',
-  'schedule_task',
-  'cancel_schedule',
-]);
+/** What running a tool does, declared on each tool. */
+export type Effect =
+  /** Leaves no lasting state the model sees in later chats or runs, so it
+   *  may run with nobody watching. Not side-effect free: the image tools
+   *  store a file and spend image-model credit. */
+  | 'read'
+  /** Saves or deletes something that lasts (a note, a scheduled task). The
+   *  engine runs it only before any tool output is in the turn: what was
+   *  read may carry someone else's instructions. */
+  | 'lasting_write'
+  /** Proposes a ban or bank-number change, applied only on a tap
+   *  (confirm.ts). */
+  | 'ban_change';
+
+/** One assistant tool, whatever its context (tools.ts, agent-tools.ts). */
+export type Tool<Ctx> = {
+  name: string;
+  /** A short label for the chat's step timeline. */
+  label: string;
+  description: string;
+  parameters: Record<string, unknown>;
+  needs: Need[];
+  effect: Effect;
+  run(args: Record<string, unknown>, ctx: Ctx): Promise<string>;
+};
+
+/** A scheduled run has nobody watching and nobody to tap: read tools only,
+ *  no lasting writes and no ban changes. */
+export const scheduledRunAllows = (t: { effect: Effect }): boolean =>
+  t.effect === 'read';
+
+const SCREEN_RESOURCES = { ...CUSTOM_ADMIN_RESOURCES, ...CORE_READ_PREFIXES };
+
+/** Reading what the admin screen /admin/<prefix> shows: that screen's own
+ *  policy (admin-rbac.ts). The desk reports the tools call do no per-user
+ *  RBAC (bridge.ts), so this is their only gate. */
+export const screen = (prefix: keyof typeof SCREEN_RESOURCES): Need => ({
+  resource: SCREEN_RESOURCES[prefix],
+  operation: 'read',
+});
+
+/** Posters and AI images (policies/assistant.ts). */
+export const IMAGES: Need = { resource: 'assistant_image', operation: 'create' };
 
 // Who is asking, and what their admin roles let the assistant do for them
 // (spec 2026-10-29: answers follow the asker's admin login, enforced here,

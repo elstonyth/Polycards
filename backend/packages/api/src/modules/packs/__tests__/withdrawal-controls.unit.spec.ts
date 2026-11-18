@@ -155,15 +155,15 @@ describe('destinationMinRm — the Touch ’n Go floor', () => {
     tng: { ...DEFAULT_WITHDRAWAL_CONTROLS.tng, min_rm },
   });
 
-  it('is the provider floor (RM 100) until the admin sets one', () => {
-    expect(TNG_MIN_FLOOR_RM).toBe(100);
-    expect(destinationMinRm('TNGMY', withMin(null))).toBe(100);
+  it('is the provider floor (RM 50) until the admin sets one', () => {
+    expect(TNG_MIN_FLOOR_RM).toBe(50);
+    expect(destinationMinRm('TNGMY', withMin(null))).toBe(50);
   });
 
   it('takes the admin minimum, never below the provider floor', () => {
     expect(destinationMinRm('TNGMY', withMin(250))).toBe(250);
     expect(destinationMinRm('MYTNGO', withMin(250))).toBe(250);
-    expect(destinationMinRm('TNGMY', withMin(20))).toBe(100);
+    expect(destinationMinRm('TNGMY', withMin(20))).toBe(50);
   });
 
   it('leaves banks without a floor alone', () => {

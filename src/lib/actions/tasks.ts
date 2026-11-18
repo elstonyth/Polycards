@@ -13,7 +13,7 @@
  */
 import { store, type Failure } from '@/lib/store';
 import { logger } from '@/lib/logger';
-import { ACCOUNT_BLOCKED } from '@/lib/errors';
+import { ACCOUNT_BLOCKED, COPY, isLoggedOut } from '@/lib/errors';
 import {
   parseOne,
   TaskHubSchema,
@@ -30,9 +30,7 @@ import type { BuybackOffer, WonCard } from '@/lib/actions/packs';
  *  answered keeps the action's own single sentence, as it always has — this
  *  file has no rules table. */
 const loggedOut = (f: Failure): string | null =>
-  f.kind === 'unauthenticated' && f.status === undefined
-    ? 'Please log in first.'
-    : null;
+  isLoggedOut(f) ? COPY.loginRequired : null;
 
 /** …and a banned or disabled account, whose refusal says why. */
 const blocked = (f: Failure): string | null =>

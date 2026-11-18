@@ -1,10 +1,16 @@
 import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
 import { findBank } from '../../../../modules/packs/banks';
-import { spellings } from '../../../../modules/packs/payout-destination';
+import {
+  BANNED_KEYS_SQL,
+  DIGITS_SQL,
+  HOLDING_PAYOUT_SQL,
+  SAVED_ENTRIES_SQL,
+  banStanding,
+  spellings,
+} from '../../../../modules/packs/payout-destination';
 import {
   clearedHolderNames,
-  liftedPayoutBans,
   payoutAccountKey,
 } from '../../../../modules/packs/saved-accounts';
 import { PERMANENT_BAN_REASON_PREFIX } from '../../../utils/disabled-guard';
@@ -37,13 +43,13 @@ const LOOKUPS = [
   'holder_name',
 ] as const;
 
-const SAVED = `jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a`;
-const DIGITS = (col: string) =>
-  `ltrim(regexp_replace(${col}, '[^0-9]', '', 'g'), '0')`;
+// The Payout Destination module's own pieces (payout-destination.ts), so a
+// number here is matched as the save and withdrawal checks match it;
+// ban-report-parity.integration.spec pins that it finds the same holders.
 const NAME = (col: string) => `NULLIF(${realNameKeySql(col)}, '')`;
-const LIVE_PAYOUT = `deleted_at IS NULL AND status IN ('pending', 'held', 'settled')`;
+const LIVE_PAYOUT = `deleted_at IS NULL AND ${HOLDING_PAYOUT_SQL}`;
 const ANY_FORM = (col: string) =>
-  `${DIGITS(col)} = ANY(string_to_array(?, ','))`;
+  `${DIGITS_SQL(col)} = ANY(string_to_array(?, ','))`;
 
 type NumberRow = { bank_code: string; account_number: string };
 type AccountRow = {
@@ -94,7 +100,7 @@ async function payoutsTo(
 ) {
   const rows = (
     await db.raw<AtNumber & { customer_id: string; n: number; rm: string }>(
-      `SELECT customer_id, bank_code, ${DIGITS('account_number')} AS digits,
+      `SELECT customer_id, bank_code, ${DIGITS_SQL('account_number')} AS digits,
               count(*)::int AS n, coalesce(sum(amount), 0)::text AS rm FROM gateway_withdrawal
         WHERE deleted_at IS NULL AND status = 'settled' AND ${ANY_FORM('account_number')}
         GROUP BY 1, 2, 3`,
@@ -110,25 +116,19 @@ async function payoutsTo(
   };
 }
 
-/** Is a number banned, as payoutAccountBanned reads it: any of its spellings
- *  on the list (at any bank), and for a player, not one support lifted for
- *  them (setPayoutBanLifted keys the lift by the listed spelling). */
+/** Is a number banned, as numberStanding reads it (banStanding): any of its
+ *  spellings on the list (at any bank), and for a player, not one support
+ *  lifted for them. `lifted`: listed, and every listed spelling lifted. */
 async function banOf(
   db: ReportDb,
   forms: string[],
   metadata?: Record<string, unknown> | null,
 ) {
   const listed = (
-    await db.raw<{ account_key: string }>(
-      "SELECT account_key FROM banned_payout_account WHERE account_key = ANY(string_to_array(?, ','))",
-      [forms.join(',')],
-    )
-  ).rows;
-  const lifted = liftedPayoutBans(metadata ?? {});
-  return {
-    banned: listed.some((b) => !lifted[b.account_key]),
-    lifted: listed.length > 0 && listed.every((b) => lifted[b.account_key]),
-  };
+    await db.raw<{ account_key: string }>(BANNED_KEYS_SQL, [forms.join(',')])
+  ).rows.map((b) => b.account_key);
+  const { banned, bannedForPlayer } = banStanding(listed, metadata ?? {});
+  return { banned: bannedForPlayer, lifted: banned && !bannedForPlayer };
 }
 
 /** Every live account on one number (saved, or a payout that went out or is
@@ -141,11 +141,11 @@ async function accountsOn(
   const rows = (
     await db.raw<Omit<AccountRow, 'keys'> & AtNumber & { k: string | null }>(
       `WITH h AS (
-         SELECT c.id AS customer_id, a->>'bankCode' AS bank_code, ${DIGITS("a->>'accountNumber'")} AS digits,
+         SELECT c.id AS customer_id, a->>'bankCode' AS bank_code, ${DIGITS_SQL("a->>'accountNumber'")} AS digits,
                 ${NAME("a->>'accountHolderName'")} AS k
-           FROM customer c CROSS JOIN LATERAL ${SAVED}
+           FROM customer c CROSS JOIN LATERAL ${SAVED_ENTRIES_SQL}
           WHERE c.deleted_at IS NULL AND ${ANY_FORM("a->>'accountNumber'")}
-         UNION SELECT customer_id, bank_code, ${DIGITS('account_number')}, ${NAME('account_holder_name')} FROM gateway_withdrawal
+         UNION SELECT customer_id, bank_code, ${DIGITS_SQL('account_number')}, ${NAME('account_holder_name')} FROM gateway_withdrawal
           WHERE ${LIVE_PAYOUT} AND ${ANY_FORM('account_number')}
        )
        SELECT h.customer_id, h.bank_code, h.digits, h.k, c.first_name AS username,
@@ -184,7 +184,13 @@ async function accountsOn(
 }
 
 /** One player's ban and every bank they saved or were paid to. */
-async function playerView(db: ReportDb, id: string, lookupNote?: string) {
+// Also the bank and name half of the held-withdrawal review drawer
+// (admin/payments/withdrawals/[id]/links, ADR 0018).
+export async function playerView(
+  db: ReportDb,
+  id: string,
+  lookupNote?: string,
+) {
   const [state] = (
     await db.raw<{
       disabled: boolean | null;
@@ -212,7 +218,7 @@ async function playerView(db: ReportDb, id: string, lookupNote?: string) {
 
   const numbers = (
     await db.raw<NumberRow>(
-      `SELECT a->>'bankCode' AS bank_code, a->>'accountNumber' AS account_number FROM customer c CROSS JOIN LATERAL ${SAVED} WHERE c.id = ?
+      `SELECT a->>'bankCode' AS bank_code, a->>'accountNumber' AS account_number FROM customer c CROSS JOIN LATERAL ${SAVED_ENTRIES_SQL} WHERE c.id = ?
        UNION SELECT bank_code, account_number FROM gateway_withdrawal WHERE ${LIVE_PAYOUT} AND customer_id = ?
        ORDER BY 1, 2`,
       [id, id],
@@ -277,7 +283,7 @@ async function playerView(db: ReportDb, id: string, lookupNote?: string) {
         >(
           `WITH h AS (
              SELECT c.id AS customer_id, a->>'bankCode' AS bank_code, a->>'accountNumber' AS account_number
-               FROM customer c CROSS JOIN LATERAL ${SAVED}
+               FROM customer c CROSS JOIN LATERAL ${SAVED_ENTRIES_SQL}
               WHERE c.deleted_at IS NULL AND c.id <> ? AND ${NAME("a->>'accountHolderName'")} = ANY(string_to_array(?, ','))
              UNION SELECT customer_id, bank_code, account_number FROM gateway_withdrawal
               WHERE ${LIVE_PAYOUT} AND customer_id <> ? AND ${NAME('account_holder_name')} = ANY(string_to_array(?, ','))
@@ -411,7 +417,7 @@ async function nameView(db: ReportDb, name: string) {
     await db.raw<AccountRow & { bank_code: string; account_number: string }>(
       `WITH h AS (
          SELECT c.id AS customer_id, a->>'bankCode' AS bank_code, a->>'accountNumber' AS account_number
-           FROM customer c CROSS JOIN LATERAL ${SAVED}
+           FROM customer c CROSS JOIN LATERAL ${SAVED_ENTRIES_SQL}
           WHERE c.deleted_at IS NULL AND ${NAME("a->>'accountHolderName'")} = ${NAME('?::text')}
          UNION SELECT customer_id, bank_code, account_number FROM gateway_withdrawal
           WHERE ${LIVE_PAYOUT} AND ${NAME('account_holder_name')} = ${NAME('?::text')}

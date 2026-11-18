@@ -10,10 +10,14 @@ import type AssistantModuleService from '../../../modules/assistant/service';
 import { MAX_SCHEDULES, nextRun } from './schedule';
 import { PACKS_MODULE } from '../../../modules/packs';
 import type PacksModuleService from '../../../modules/packs/service';
-import { LASTING_WRITES, type Need } from './access';
+import type { Need } from './access';
 import { findBank } from '../../../modules/packs/banks';
 import { spellings } from '../../../modules/packs/payout-destination';
 import { PERMANENT_BAN_REASON_PREFIX } from '../../../modules/packs/saved-accounts';
+import {
+  BAN_LIST_NEED,
+  fromBanList,
+} from '../../../modules/packs/ban-list-access';
 
 // What lasts waits for a tap (security review 2026-10-29). A note or a
 // scheduled task would stay in front of the model in every later chat or run,
@@ -95,15 +99,6 @@ export const UNBAN_NEED: Need = {
   operation: 'update',
 };
 
-/** Unbanning a number the player never held (by the ban list) needs this too:
- *  admins, not the Support viewer (security review). So do freeing a number
- *  from other accounts and clearing a shared name (owner, 2026-11-04: admins
- *  only): they change other accounts, or let a name past them. */
-export const BAN_LIST_NEED: Need = {
-  resource: 'customer',
-  operation: 'update',
-};
-
 /** The card's fingerprint of a full bank number (utils/number-mark): the tap
  *  frees only the number it matches. */
 export function numberMark(accountKey: string, container: MedusaContainer): string {
@@ -131,20 +126,6 @@ export function oneNumber(
   }
   return hits.length === 1 ? hits[0].account_key : null;
 }
-
-/** A scheduled run has nobody to tap: no lasting writes, and no unban of any
- *  kind (every tool that needs the unban policy). */
-export const scheduledRunAllows = (t: {
-  name: string;
-  needs: Need[];
-}): boolean =>
-  !LASTING_WRITES.has(t.name) &&
-  !t.needs.some(
-    (n) =>
-      typeof n === 'object' &&
-      n.resource === UNBAN_NEED.resource &&
-      n.operation === UNBAN_NEED.operation,
-  );
 
 const TTL_MS = 30 * 60_000;
 const MAX_TOKEN = 8000;
@@ -278,8 +259,7 @@ export async function saveProposal(
         bankCode: proposal.bank_code || null,
         lifted: true,
         reason: proposal.reason,
-        fromBanList:
-          access.superAdmin || ((await access.can?.(BAN_LIST_NEED)) ?? false),
+        fromBanList: await fromBanList(access),
         // Lifted, or banned again, since this card was made: refused.
         since,
         numberMark: proposal.number_mark,

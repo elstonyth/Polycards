@@ -15,6 +15,10 @@ import {
 import { toOptionalMoney } from '../modules/packs/money';
 import { rowFx } from '../modules/packs/payment-fx';
 import {
+  failWithdrawal,
+  stampPendingWithdrawal,
+} from '../modules/packs/withdrawal-lifecycle';
+import {
   GATEWAY_RECONCILE_BATCH,
   GATEWAY_WD_HELD_STALE_AFTER_MS,
   GATEWAY_WD_SLOW_AFTER_MS,
@@ -187,9 +191,8 @@ export default async function withdrawalReconcileJob(
         // callback can find the row. A row that gets here with none is the
         // ambiguous-submit population, which is exactly where that matters.
         if (detail?.transactionId && !withdrawal.gateway_transaction_id) {
-          await packs.updateGatewayWithdrawals({
-            selector: { id: withdrawal.id, status: 'pending' },
-            data: { gateway_transaction_id: detail.transactionId },
+          await stampPendingWithdrawal(packs, withdrawal.id, {
+            gateway_transaction_id: detail.transactionId,
           });
         }
         // SUBMIT time, not created_at — the same reasoning as the
@@ -257,13 +260,17 @@ export default async function withdrawalReconcileJob(
         { take: 1 },
       );
       if (!debitRow) {
-        await packs.updateGatewayWithdrawals({
-          selector: { id: withdrawal.id, status: 'pending' },
-          data: { status: 'failed', gateway_status: gatewayStatus },
+        // A lost claim means a callback moved the row after this sweep read
+        // it: nothing was closed, so nothing is reported.
+        const closed = await failWithdrawal(packs, withdrawal.id, {
+          from: ['pending'],
+          gatewayStatus,
         });
-        logger.warn(
-          `[withdrawal-reconcile] closed ${withdrawal.merchant_transaction_id} without a refund — no debit ever landed for it`,
-        );
+        if (closed) {
+          logger.warn(
+            `[withdrawal-reconcile] closed ${withdrawal.merchant_transaction_id} without a refund — no debit ever landed for it`,
+          );
+        }
         continue;
       }
       // The four-step refund/receipt/close/notify ordering lives in

@@ -8,6 +8,7 @@ import { hasPermission } from '@medusajs/framework';
 import { PARTNER_CREDENTIAL_KEY } from '../../utils/partner-accounts';
 import {
   BANK_SHARE_VERIFIED_KEY,
+  DEVICE_SHARE_VERIFIED_KEY,
   HOLDER_NAME_CLEARED_KEY,
   PAYOUT_BAN_LIFTED_KEY,
 } from '../../modules/packs/saved-accounts';
@@ -113,6 +114,19 @@ export function rejectAdminBankAccountsMetadata(
     );
     return;
   }
+  if (
+    metadata &&
+    typeof metadata === 'object' &&
+    DEVICE_SHARE_VERIFIED_KEY in metadata
+  ) {
+    next(
+      new MedusaError(
+        MedusaError.Types.INVALID_DATA,
+        `${DEVICE_SHARE_VERIFIED_KEY} is not writable through this route. Approve the held withdrawal, which is audited.`,
+      ),
+    );
+    return;
+  }
   // Same for a name support cleared: written here it would skip the name check
   // with no audit row and no record of which accounts were checked.
   if (
@@ -151,6 +165,9 @@ const SECRET_METADATA = [
   { key: HOLDER_NAME_CLEARED_KEY, resource: 'customer_bank_account' },
   // Numbers unbanned for one player: full numbers, like the list's.
   { key: PAYOUT_BAN_LIFTED_KEY, resource: 'customer_bank_account' },
+  // Accounts confirmed as one household on one browser: same-browser links,
+  // like visitor-signals and the review drawer (ADR 0018).
+  { key: DEVICE_SHARE_VERIFIED_KEY, resource: 'customer_bank_account' },
   { key: PARTNER_CREDENTIAL_KEY, resource: 'partner_credential' },
 ] as const;
 
@@ -169,8 +186,13 @@ const stripSecretMetadata = (node: unknown, hidden: string[]): void => {
 
 /** Keys a customer never gets back on their own record: support's notes on
  *  OTHER accounts (holder_name_cleared lists who a name was checked against,
- *  by customer id, which public seeds can match to a handle). */
-const STORE_HIDDEN_METADATA = [HOLDER_NAME_CLEARED_KEY, PAYOUT_BAN_LIFTED_KEY];
+ *  by customer id, which public seeds can match to a handle;
+ *  device_share_verified names the accounts on the same browser, ADR 0018). */
+const STORE_HIDDEN_METADATA = [
+  HOLDER_NAME_CLEARED_KEY,
+  PAYOUT_BAN_LIFTED_KEY,
+  DEVICE_SHARE_VERIFIED_KEY,
+];
 
 /** Strips STORE_HIDDEN_METADATA from every store customer response. */
 export function hideStoreCustomerMetadata(

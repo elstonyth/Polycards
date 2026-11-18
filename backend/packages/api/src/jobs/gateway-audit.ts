@@ -27,6 +27,7 @@ import { withdrawalRefundReference } from '../modules/packs/gateway-withdrawal';
 import { toOptionalMoney } from '../modules/packs/money';
 import { rowFx } from '../modules/packs/payment-fx';
 import { topupIdempotencyReference } from '../modules/packs/topup';
+import { stampWithdrawalAudit } from '../modules/packs/withdrawal-lifecycle';
 
 /**
  * Gateway audit sweep (plan 130). Re-reads FINAL deposit and withdrawal rows
@@ -214,8 +215,7 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
     let netAmount: number | null = null;
     const config = configFor(row.gateway);
     if (!config) {
-      await packs.updateGatewayWithdrawals({
-        id: row.id,
+      await stampWithdrawalAudit(packs, row.id, {
         audited_at: now,
         ...stampNote(row, `gateway "${row.gateway}" is not configured here — not audited`),
       });
@@ -274,8 +274,7 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
       netAmount !== null &&
       row.status === 'settled' &&
       toOptionalMoney(row.net_amount) !== netAmount;
-    await packs.updateGatewayWithdrawals({
-      id: row.id,
+    await stampWithdrawalAudit(packs, row.id, {
       audited_at: now,
       ...stampNote(row, note),
       ...(row.net_amount == null &&

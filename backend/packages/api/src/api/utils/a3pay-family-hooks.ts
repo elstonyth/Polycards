@@ -23,17 +23,8 @@ import {
   applyDepositOutcome,
   isPayinVerifyFail,
 } from '../../modules/packs/gateway-deposit';
-import {
-  applyWithdrawalOutcome,
-  redactPayoutText,
-  refundWithdrawal,
-} from '../../modules/packs/gateway-withdrawal';
-import {
-  stampNote,
-  withdrawalAuditNote,
-} from '../../modules/packs/gateway-audit';
-import { toOptionalMoney } from '../../modules/packs/money';
-import { alertOps } from '../../modules/packs/ops-alert';
+import { redactPayoutText } from '../../modules/packs/gateway-withdrawal';
+import { handleWithdrawalCallback } from '../../modules/packs/withdrawal-callback';
 import {
   callbackLedgerAmount,
   rowFx,
@@ -253,9 +244,10 @@ export function a3payDepositCallback(kind: A3payKind): Handler {
 
 // A3Pay payout callback (handbook "Payout Callback"). Same authentication as
 // the deposit hook: decrypt, verify the signature, then read only the signed
-// Data. Same transitions as the TGPay payout hook — the refund and the settle
-// are the helpers the sweep and the admin routes share. Amounts are SGD and
-// are converted to RM through the row's locked quote before they are stored.
+// Data. Everything after the decode is the payout-callback state machine
+// shared with the TGPay hook (modules/packs/withdrawal-callback.ts). Amounts
+// are SGD and are converted to RM through the row's locked quote before they
+// are stored.
 
 type PayoutEnvelope = {
   TransactionId?: unknown;
@@ -331,128 +323,46 @@ export function a3payWithdrawalCallback(kind: A3payKind): Handler {
       res.status(400).send('rejected');
       return;
     }
-    const state = payoutState(data.Status);
-
-    const packs = resolvePacks<GatewayWithdrawals>(req.scope);
-    const [withdrawal] = await packs.listGatewayWithdrawals(
-      { merchant_transaction_id: merchantTransactionId, gateway: kind },
-      { take: 1 },
-    );
-    if (!withdrawal || rowGateway(withdrawal) !== kind) {
-      logger.error(
-        `${tag} verified withdrawal callback for UNKNOWN payout ${merchantTransactionId} (status ${String(data.Status)}) — nothing changed; the sweep will requery`,
-      );
-      res.status(200).send('success');
-      return;
-    }
-    const gatewayTransactionId =
-      withdrawal.gateway_transaction_id ||
-      (typeof body.TransactionId === 'string' ? body.TransactionId : '');
-
-    if (withdrawal.status !== 'pending') {
-      const contradicts =
-        (state === 'success' && withdrawal.status !== 'settled') ||
-        (state === 'failed' && withdrawal.status !== 'failed');
-      if (contradicts) {
-        logger.error(
-          `${tag} withdrawal ${merchantTransactionId} callback says ${String(data.Status)} (${state}) but the row is already ${withdrawal.status} — possible double payment, investigate (gateway ${gatewayTransactionId})`,
-        );
-        void alertOps(
-          req.scope,
-          'payout-contradiction',
-          `${label} says payout ${merchantTransactionId} is ${state}, but our row is already ${withdrawal.status}` +
-            (state === 'success'
-              ? ' — the customer may have been refunded AND paid.'
-              : '.') +
-            ` Investigate ${label} ${gatewayTransactionId}.`,
-        );
-        // On the row too, as the TGPay hook does, so Settlement and the
-        // Dashboard show it at once. In RM at the row's locked rate, the
-        // audit's own unit. Best-effort: the gateway still gets its answer.
-        try {
-          const paid = toLedgerAmount(rowFx(withdrawal), Number(data.Amount));
-          await packs.updateGatewayWithdrawals({
-            id: withdrawal.id,
-            audited_at: new Date(),
-            ...stampNote(
-              withdrawal,
-              withdrawalAuditNote(
-                {
-                  status: withdrawal.status,
-                  amount: toOptionalMoney(withdrawal.amount),
-                },
-                {
-                  kind: 'detail',
-                  state,
-                  amount: Number.isFinite(paid)
-                    ? paid
-                    : Number(withdrawal.amount),
-                },
-              ),
-            ),
-          });
-        } catch (error) {
-          logger.error(
-            `${tag} could not record the contradiction on ${merchantTransactionId}: ${(error as Error).message}`,
-          );
-        }
-      }
-      res.status(200).send('success');
-      return;
-    }
-
-    if (state === 'pending') {
-      res.status(200).send('success');
-      return;
-    }
-
-    if (state === 'failed') {
-      try {
-        await refundWithdrawal(
-          req.scope,
-          withdrawal,
-          null,
-          'pending',
-          // Free text a gateway operator typed: it can echo the account number
-          // or holder name, and this column renders on the admin list.
-          `callback status ${String(data.Status)}: ${redactPayoutText(String(data.Remark ?? ''), withdrawal.account_number, withdrawal.account_holder_name ?? '').slice(0, 200)}`,
-        );
-      } catch (error) {
-        logger.error(
-          `${tag} failed to refund withdrawal ${merchantTransactionId}: ${(error as Error).message}`,
-        );
-        res.status(500).send('error');
-        return;
-      }
-      res.status(200).send('success');
-      return;
-    }
-
-    if (
-      Math.round(Number(data.Amount) * 100) !==
-      Math.round(Number(withdrawal.gateway_amount) * 100)
-    ) {
-      const note = `${label} settled payout ${merchantTransactionId} at ${config.currencyCode} ${String(data.Amount)}, but ${config.currencyCode} ${String(withdrawal.gateway_amount)} was submitted (RM ${withdrawal.amount} debited) — investigate before adjusting.`;
-      logger.error(`${tag} ${note}`);
-      // Money left in a different amount than we debited for: someone must
-      // look, and a log line is read only by someone already suspicious.
-      void alertOps(req.scope, 'payout-contradiction', note);
-    }
-
-    const fx = rowFx(withdrawal);
-    const settledAmount = toLedgerAmount(fx, Number(data.Amount));
-    const net = toLedgerAmount(fx, Number(data.NetAmount));
-    await applyWithdrawalOutcome(req.scope, withdrawal, {
-      gatewayRef: gatewayTransactionId || merchantTransactionId,
-      gatewayTransactionId: gatewayTransactionId || null,
-      amountSettled: Number.isFinite(settledAmount) ? settledAmount : null,
-      // A payout's net is what our wallet PAID (amount + their fee), in RM at
-      // the locked rate. Unknown stays NULL, never a zero fee.
-      netAmount: Number.isFinite(net) ? net : null,
-      settledAt: new Date(),
+    const answer = await handleWithdrawalCallback(req.scope, {
+      kind,
+      label,
+      find: { merchantTransactionId },
+      rawStatus: String(data.Status),
+      state: payoutState(data.Status),
+      gatewayTransactionId: (withdrawal) =>
+        withdrawal.gateway_transaction_id ||
+        (typeof body.TransactionId === 'string' ? body.TransactionId : ''),
+      // In RM at the row's locked rate, the audit's own unit.
+      paidAmount: (withdrawal) =>
+        toLedgerAmount(rowFx(withdrawal), Number(data.Amount)),
+      // Free text a gateway operator typed: it can echo the account number or
+      // holder name, and this column renders on the admin list.
+      failureReason: (withdrawal) =>
+        `callback status ${String(data.Status)}: ${redactPayoutText(String(data.Remark ?? ''), withdrawal.account_number, withdrawal.account_holder_name ?? '').slice(0, 200)}`,
+      amountMismatch: (withdrawal) =>
+        Math.round(Number(data.Amount) * 100) !==
+        Math.round(Number(withdrawal.gateway_amount) * 100)
+          ? {
+              note: `${label} settled payout ${merchantTransactionId} at ${config.currencyCode} ${String(data.Amount)}, but ${config.currencyCode} ${String(withdrawal.gateway_amount)} was submitted (RM ${withdrawal.amount} debited) — investigate before adjusting.`,
+              alert: true,
+            }
+          : null,
+      settlement: (withdrawal, gatewayTransactionId) => {
+        const fx = rowFx(withdrawal);
+        const settledAmount = toLedgerAmount(fx, Number(data.Amount));
+        const net = toLedgerAmount(fx, Number(data.NetAmount));
+        return {
+          gatewayRef: gatewayTransactionId || merchantTransactionId,
+          gatewayTransactionId: gatewayTransactionId || null,
+          amountSettled: Number.isFinite(settledAmount) ? settledAmount : null,
+          // A payout's net is what our wallet PAID (amount + their fee), in RM
+          // at the locked rate. Unknown stays NULL, never a zero fee.
+          netAmount: Number.isFinite(net) ? net : null,
+          settledAt: new Date(),
+        };
+      },
     });
-
-    res.status(200).send('success');
+    res.status(answer.status).send(answer.body);
   };
 }
 

@@ -89,6 +89,16 @@ describe('getDeliveryOrders', () => {
     });
     expect(mem.requests).toEqual([]);
   });
+
+  // A 2xx that is not the page envelope says nothing about the session or the
+  // request: the same "unexpected response" copy every other action gives.
+  it('a malformed 2xx reads as an unexpected response', async () => {
+    backend({ 'GET /store/delivery-orders': { body: [] } });
+    expect(await getDeliveryOrders()).toStrictEqual({
+      ok: false,
+      error: 'Got an unexpected response. Please try again.',
+    });
+  });
 });
 
 describe('requestDelivery', () => {

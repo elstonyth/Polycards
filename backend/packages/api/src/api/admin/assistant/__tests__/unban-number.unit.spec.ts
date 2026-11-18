@@ -1,13 +1,14 @@
 import { MedusaError } from '@medusajs/framework/utils';
 import { AGENT_TOOLS } from '../agent-tools';
+import { TOOLS } from '../tools';
 import {
   ConfirmRefused,
   numberMark,
   saveProposal,
-  scheduledRunAllows,
   UNBAN_NEED,
   type Proposal,
 } from '../confirm';
+import { scheduledRunAllows } from '../access';
 
 // Unbanning a bank number through the assistant (owner, 2026-11-04): the model
 // only proposes, for a number the person named by its last 4 on a player they
@@ -224,7 +225,7 @@ describe('scheduled runs', () => {
       scheduledRunAllows(AGENT_TOOLS.find((t) => t.name === 'unban_account')!),
     ).toBe(false);
     expect(
-      scheduledRunAllows({ name: 'player', needs: [{ resource: 'customer', operation: 'read' }] }),
+      scheduledRunAllows(TOOLS.find((t) => t.name === 'player')!),
     ).toBe(true);
   });
 });

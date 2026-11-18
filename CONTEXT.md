@@ -231,7 +231,11 @@ below, the saved account, not the money-out event)
 
 **Held Withdrawal** / **Approval**:
 A Withdrawal above `GATEWAY_WD_APPROVAL_ABOVE_RM` (default RM 1,000,
-strictly greater-than) is written status `held` — debited from the customer
+strictly greater-than), or from a later account on a browser an earlier
+account shares and support has not confirmed as one household (ADR 0018,
+`hold_reason` 'amount' or 'shared_device', staff only; a real player group is
+exempt from the shared-device hold), is written status
+`held` — debited from the customer
 but never submitted to the gateway — until an admin approves or denies it
 from the admin `/withdrawals` queue, whose default view is `held`. Approve
 re-checks the customer's freeze state live at click time (the queue's
@@ -251,6 +255,17 @@ means unclear, and an unclear answer never moves money. Payouts switched off
 and a refusal raised before sending refund at once; any other refusal is first
 checked with the gateway, and what it cannot confirm waits for the sweep.
 _Avoid_: reading a gateway's own error codes outside its adapter
+
+**Withdrawal lifecycle**:
+The only code that changes a Withdrawal's status
+(`modules/packs/withdrawal-lifecycle.ts`, sealed by a source-scan spec). Its
+transitions: `claimHeldWithdrawal` (admin approve or deny, under the
+customer's credit lock), `settleWithdrawal` (pending to settled),
+`failWithdrawal` (to failed), and the stamps that never move status
+(`stampPendingWithdrawal`, `stampWithdrawalAudit`). Every status change is a
+conditional claim that answers whether this caller moved the row.
+_Avoid_: `updateGatewayWithdrawals({ selector, data })` for a status change
+(a find-then-write with no row lock)
 
 **Payout Destination**:
 A customer's saved bank account for Withdrawals. Adding one starts a
@@ -290,7 +305,9 @@ withdrawal-blocked group flips without the playthrough. The SQL twins
 (`disabledAccountSql`, `realGroupMemberSql`, `EFFECTIVE_GROUP_SQL`) are
 pinned to the JS readers by `eligibility.integration.spec.ts`.
 Automation-list accounts rank and get paid like any player (#875), and IP or
-device signals are a review clue, never a gate (ADR 0016).
+device signals are a review clue, never a gate (ADR 0016), except that a
+shared browser limits the welcome pack to one per household and holds a
+later account's withdrawal for review (ADR 0018).
 _Avoid_: eligible for cash-out (Withdrawals and Delivery Orders keep their
 own gates: the first top-up and the Withdrawable rule); the Flip
 eligibility stamp, which marks a Pull, not a player

@@ -102,6 +102,8 @@ function newPath(account = SAVED) {
     listGatewayWithdrawals: jest.fn().mockResolvedValue([]),
     creditBalance: jest.fn().mockResolvedValue(50),
     updateGatewayWithdrawals: jest.fn().mockResolvedValue(undefined),
+    // The Withdrawal lifecycle's status claims. `true` = this caller moved the row.
+    claimWithdrawalStatus: jest.fn().mockResolvedValue(true),
     listCreditTransactions: jest.fn().mockResolvedValue([]),
     // The destination locked at debit. Its holder name differs from the saved
     // copy on purpose: the gateway must be told the locked one.
@@ -175,12 +177,13 @@ const newRefund = (ref: string, bankCode = 'MBBEMYKL') => ({
 
 /** The new path's close after a refund. */
 const newClose = (reason: RegExp) =>
-  // Q5: closed through refundWithdrawal — scoped to 'pending', gateway_status
+  // Q5: closed through refundWithdrawal — a claim from 'pending', gateway_status
   // carried, first writer wins (was an unscoped `{ id, status, failure_reason }`).
   ({
-    selector: { id: 'gpw_1', status: 'pending' },
-    data: {
-      status: 'failed',
+    id: 'gpw_1',
+    from: ['pending'],
+    to: 'failed',
+    set: {
       gateway_status: null,
       failure_reason: expect.stringMatching(reason),
     },
@@ -233,6 +236,8 @@ function heldPath(row: Record<string, unknown> = HELD_ROW) {
       reference: null,
     }),
     updateGatewayWithdrawals: jest.fn().mockResolvedValue(undefined),
+    // The Withdrawal lifecycle's status claims. `true` = this caller moved the row.
+    claimWithdrawalStatus: jest.fn().mockResolvedValue(true),
   };
   const o = others('payee@example.test');
   const scope = {
@@ -262,9 +267,10 @@ const heldRefund = {
 };
 
 const heldClose = (reason: RegExp) => ({
-  selector: { id: 'gpw_h1', status: 'pending' },
-  data: {
-    status: 'failed',
+  id: 'gpw_h1',
+  from: ['pending'],
+  to: 'failed',
+  set: {
     gateway_status: null,
     failure_reason: expect.stringMatching(reason),
   },
@@ -368,13 +374,14 @@ describe('a new Withdrawal', () => {
     expect(h.packs.withdrawCreditsWithLedger.mock.calls).toEqual([
       [newRefund(h.ref())],
     ]);
-    expect(h.packs.updateGatewayWithdrawals.mock.calls).toEqual([
+    expect(h.packs.claimWithdrawalStatus.mock.calls).toEqual([
       [
         newClose(
           /^submit refused: codes=X1\S* httpStatus=501 bankCode=MBBEMYKL msg=fake payout failed \(HTTP 501\): Payout not available$/,
         ),
       ],
     ]);
+    expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
     // The customer is on screen: no receipt, no feed row.
     expect(channels(h.notify)).toEqual([]);
     expect(h.logger.warn.mock.calls).toEqual([
@@ -410,13 +417,14 @@ describe('a new Withdrawal', () => {
       expect(h.packs.withdrawCreditsWithLedger.mock.calls).toEqual([
         [newRefund(h.ref())],
       ]);
-      expect(h.packs.updateGatewayWithdrawals.mock.calls).toEqual([
+      expect(h.packs.claimWithdrawalStatus.mock.calls).toEqual([
         [
           newClose(
             /^submit refused: codes=X1\S* httpStatus=400 bankCode=MBBEMYKL msg=fake payout failed: Insufficient payout credit balance$/,
           ),
         ],
       ]);
+      expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
       expect(channels(h.notify)).toEqual([]);
       expect(jest.mocked(alertPayoutFloatEmpty).mock.calls).toEqual([
         [
@@ -474,13 +482,14 @@ describe('a new Withdrawal', () => {
     expect(h.packs.withdrawCreditsWithLedger.mock.calls).toEqual([
       [newRefund(h.ref())],
     ]);
-    expect(h.packs.updateGatewayWithdrawals.mock.calls).toEqual([
+    expect(h.packs.claimWithdrawalStatus.mock.calls).toEqual([
       [
         newClose(
           /^submit refused: codes=X1\S* httpStatus=400 bankCode=MBBEMYKL msg=.*No payout provider is available/,
         ),
       ],
     ]);
+    expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
     expect(channels(h.notify)).toEqual([]);
     expect(alertPayoutFloatEmpty).not.toHaveBeenCalled();
     expect(alertPayoutDisabled).not.toHaveBeenCalled();
@@ -536,13 +545,14 @@ describe('a new Withdrawal', () => {
       expect(h.packs.withdrawCreditsWithLedger.mock.calls).toEqual([
         [newRefund(h.ref())],
       ]);
-      expect(h.packs.updateGatewayWithdrawals.mock.calls).toEqual([
+      expect(h.packs.claimWithdrawalStatus.mock.calls).toEqual([
         [
           newClose(
             /^submit refused: codes=X1\S* httpStatus=400 bankCode=MBBEMYKL msg=fake payout failed: refused$/,
           ),
         ],
       ]);
+      expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
       expect(channels(h.notify)).toEqual([]);
       expect(alertPayoutFloatEmpty).not.toHaveBeenCalled();
       expect(alertPayoutDisabled).not.toHaveBeenCalled();
@@ -593,13 +603,14 @@ describe('a new Withdrawal', () => {
     expect(h.packs.withdrawCreditsWithLedger.mock.calls).toEqual([
       [newRefund(h.ref())],
     ]);
-    expect(h.packs.updateGatewayWithdrawals.mock.calls).toEqual([
+    expect(h.packs.claimWithdrawalStatus.mock.calls).toEqual([
       [
         newClose(
           /^submit refused: codes=X1\S* httpStatus=400 bankCode=MBBEMYKL msg=Fake: cannot pay to bank/,
         ),
       ],
     ]);
+    expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
     expect(channels(h.notify)).toEqual([]);
     expect(alertPayoutFloatEmpty).not.toHaveBeenCalled();
   });
@@ -684,13 +695,14 @@ describe('an admin-approved Held Withdrawal', () => {
     expect(h.packs.withdrawCreditsWithLedger.mock.calls).toEqual([
       [heldRefund],
     ]);
-    expect(h.packs.updateGatewayWithdrawals.mock.calls).toEqual([
+    expect(h.packs.claimWithdrawalStatus.mock.calls).toEqual([
       [
         heldClose(
           /^approve refused: codes=X1\S* httpStatus=501 bankCode=MBBEMYKL msg=fake payout failed \(HTTP 501\): Payout not available$/,
         ),
       ],
     ]);
+    expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
     expect(channels(h.notify)).toEqual(['email', 'customer_feed']);
     expect(h.logger.warn.mock.calls).toEqual([
       [
@@ -721,13 +733,14 @@ describe('an admin-approved Held Withdrawal', () => {
       expect(h.packs.withdrawCreditsWithLedger.mock.calls).toEqual([
         [heldRefund],
       ]);
-      expect(h.packs.updateGatewayWithdrawals.mock.calls).toEqual([
+      expect(h.packs.claimWithdrawalStatus.mock.calls).toEqual([
         [
           heldClose(
             /^approve refused: codes=X1\S* httpStatus=400 bankCode=MBBEMYKL msg=fake payout failed: Insufficient payout credit balance$/,
           ),
         ],
       ]);
+      expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
       expect(channels(h.notify)).toEqual(['email', 'customer_feed']);
       expect(jest.mocked(alertPayoutFloatEmpty).mock.calls).toEqual([
         [
@@ -791,9 +804,10 @@ describe('an admin-approved Held Withdrawal', () => {
       expect(h.packs.withdrawCreditsWithLedger.mock.calls).toEqual([
         [heldRefund],
       ]);
-      expect(h.packs.updateGatewayWithdrawals.mock.calls).toEqual([
+      expect(h.packs.claimWithdrawalStatus.mock.calls).toEqual([
         [heldClose(/^approve refused: codes=X1\S* httpStatus=400 /)],
       ]);
+      expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
       expect(jest.mocked(alertPayoutFloatEmpty).mock.calls).toEqual([
         [
           h.scope,
@@ -842,9 +856,10 @@ describe('an admin-approved Held Withdrawal', () => {
     expect(h.packs.withdrawCreditsWithLedger.mock.calls).toEqual([
       [heldRefund],
     ]);
-    expect(h.packs.updateGatewayWithdrawals.mock.calls).toEqual([
+    expect(h.packs.claimWithdrawalStatus.mock.calls).toEqual([
       [heldClose(/^approve refused: codes=X1\S* httpStatus=400 bankCode=MBBEMYKL msg=.*No payout provider is available/)],
     ]);
+    expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
     expect(channels(h.notify)).toEqual(['email', 'customer_feed']);
     expect(alertPayoutFloatEmpty).not.toHaveBeenCalled();
     expect(alertPayoutDisabled).not.toHaveBeenCalled();
@@ -887,13 +902,14 @@ describe('an admin-approved Held Withdrawal', () => {
       expect(h.packs.withdrawCreditsWithLedger.mock.calls).toEqual([
         [heldRefund],
       ]);
-      expect(h.packs.updateGatewayWithdrawals.mock.calls).toEqual([
+      expect(h.packs.claimWithdrawalStatus.mock.calls).toEqual([
         [
           heldClose(
             /^approve refused: codes=X1\S* httpStatus=400 bankCode=MBBEMYKL msg=fake payout failed: refused$/,
           ),
         ],
       ]);
+      expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
       expect(channels(h.notify)).toEqual(['email', 'customer_feed']);
       expect(alertPayoutFloatEmpty).not.toHaveBeenCalled();
     });
@@ -940,13 +956,14 @@ describe('an admin-approved Held Withdrawal', () => {
     expect(h.packs.withdrawCreditsWithLedger.mock.calls).toEqual([
       [heldRefund],
     ]);
-    expect(h.packs.updateGatewayWithdrawals.mock.calls).toEqual([
+    expect(h.packs.claimWithdrawalStatus.mock.calls).toEqual([
       [
         heldClose(
           /^approve refused: codes=X1\S* httpStatus=400 bankCode=MBBEMYKL msg=Fake: cannot pay to bank/,
         ),
       ],
     ]);
+    expect(h.packs.updateGatewayWithdrawals).not.toHaveBeenCalled();
     expect(channels(h.notify)).toEqual(['email', 'customer_feed']);
     expect(alertPayoutFloatEmpty).not.toHaveBeenCalled();
   });

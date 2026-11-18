@@ -92,6 +92,39 @@ export const holderNameKeySql = (expr: string): string => {
   return `regexp_replace(lower(CASE WHEN octet_length(${expr}) = length(${expr}) THEN ${expr} ELSE ${folded} END), '[^a-z]', '', 'g')`;
 };
 
+// The pieces are exported for the ban report (api/reports/support/ban), which
+// lists every account on a number with its names and payouts in its own SQL;
+// ban-report-parity.integration.spec pins that it finds the same holders.
+
+/** A customer's saved entries as rows `a`, for `customer c CROSS JOIN LATERAL`;
+ *  a blob that is not an array has none. */
+export const SAVED_ENTRIES_SQL =
+  "jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
+  "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a";
+/** A withdrawal that went out or is on its way (failed rows came back). */
+export const HOLDING_PAYOUT_SQL = "status IN ('pending', 'held', 'settled')";
+/** A number's digits as the holder lookups compare them: no separators, no
+ *  leading zeros. */
+export const DIGITS_SQL = (col: string) =>
+  `ltrim(regexp_replace(${col}, '[^0-9]', '', 'g'), '0')`;
+/** The listed keys among `?` (keys joined by commas). */
+export const BANNED_KEYS_SQL =
+  "SELECT account_key FROM banned_payout_account WHERE account_key = ANY(string_to_array(?, ','))";
+
+/** Banned for anyone: any key listed. For this player: a listed key support
+ *  has not lifted for them (setPayoutBanLifted keys a lift by the listed
+ *  spelling). `metadata` is the player's. */
+export function banStanding(
+  listedKeys: string[],
+  metadata: Record<string, unknown>,
+): { banned: boolean; bannedForPlayer: boolean } {
+  const lifted = liftedPayoutBans(metadata);
+  return {
+    banned: listedKeys.length > 0,
+    bannedForPlayer: listedKeys.some((k) => !lifted[k]),
+  };
+}
+
 // Other customers tied to one spelling: saved on a live account, or a withdrawal
 // to it that went out or is on its way (failed rows came back and prove
 // nothing). A deleted account frees its numbers: the deletion scrub cuts its
@@ -113,19 +146,16 @@ const othersSql = (q: {
   paid: string;
 }): string =>
   `SELECT ${q.savedCols} FROM customer c ` +
-  "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
-  "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a " +
+  `CROSS JOIN LATERAL ${SAVED_ENTRIES_SQL} ` +
   `WHERE c.deleted_at IS NULL AND c.id <> ? AND ${q.saved} ` +
   `UNION SELECT ${q.paidCols} FROM gateway_withdrawal ` +
   `WHERE deleted_at IS NULL AND customer_id <> ? AND ${q.paid} ` +
-  "AND status IN ('pending', 'held', 'settled')";
+  `AND ${HOLDING_PAYOUT_SQL}`;
 const HOLDER_COLS = {
   savedCols:
     "c.id AS customer_id, a->>'bankCode' AS bank_code, a->>'accountHolderName' AS holder_name",
   paidCols: 'customer_id, bank_code, NULL AS holder_name',
 };
-const DIGITS = (col: string) =>
-  `ltrim(regexp_replace(${col}, '[^0-9]', '', 'g'), '0')`;
 const HOLDERS_EXACT_SQL = othersSql({
   ...HOLDER_COLS,
   saved: "a->>'accountNumber' = ?",
@@ -133,8 +163,8 @@ const HOLDERS_EXACT_SQL = othersSql({
 });
 const HOLDERS_DIGITS_SQL = othersSql({
   ...HOLDER_COLS,
-  saved: `${DIGITS("a->>'accountNumber'")} = ${DIGITS('?')}`,
-  paid: `${DIGITS('account_number')} = ${DIGITS('?')} AND length(regexp_replace(account_number, '[^0-9]', '', 'g')) > 4`,
+  saved: `${DIGITS_SQL("a->>'accountNumber'")} = ${DIGITS_SQL('?')}`,
+  paid: `${DIGITS_SQL('account_number')} = ${DIGITS_SQL('?')} AND length(regexp_replace(account_number, '[^0-9]', '', 'g')) > 4`,
 });
 
 /** The number as one destination compares, banned and verified alike: digits
@@ -170,10 +200,9 @@ export async function numberStanding(
   const forms = spellings(n.bankCode, n.accountNumber);
   const keys = [...new Set(forms.map((f) => payoutAccountKey(f, wallet)))];
   const bannedKeys = (
-    await em.execute<{ account_key: string }[]>(
-      "SELECT account_key FROM banned_payout_account WHERE account_key = ANY(string_to_array(?, ','))",
-      [keys.join(',')],
-    )
+    await em.execute<{ account_key: string }[]>(BANNED_KEYS_SQL, [
+      keys.join(','),
+    ])
   ).map((r) => r.account_key);
   let bannedForPlayer = false;
   if (bannedKeys.length > 0) {
@@ -182,8 +211,7 @@ export async function numberStanding(
     >('SELECT metadata FROM customer WHERE id = ? AND deleted_at IS NULL', [
       customerId,
     ]);
-    const lifted = liftedPayoutBans(me?.metadata ?? {});
-    bannedForPlayer = bannedKeys.some((k) => !lifted[k]);
+    ({ bannedForPlayer } = banStanding(bannedKeys, me?.metadata ?? {}));
   }
   const paid = new Map<string, boolean>();
   for (const form of forms) {
@@ -293,9 +321,7 @@ const NAME_SOURCES: [from: string, col: string][] = [
     'real_name',
   ],
   [
-    'SELECT c.id FROM customer c ' +
-      "CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(c.metadata->'bank_accounts') = 'array' " +
-      "  THEN c.metadata->'bank_accounts' ELSE '[]'::jsonb END) a " +
+    `SELECT c.id FROM customer c CROSS JOIN LATERAL ${SAVED_ENTRIES_SQL} ` +
       'WHERE c.deleted_at IS NULL AND ',
     "a->>'accountHolderName'",
   ],

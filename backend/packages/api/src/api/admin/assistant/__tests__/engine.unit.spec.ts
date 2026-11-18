@@ -52,12 +52,17 @@ const access: Access = {
   can: async () => true,
 };
 
-const tool = (name: string, run: AssistantTool['run']): AssistantTool => ({
+const tool = (
+  name: string,
+  run: AssistantTool['run'],
+  effect: AssistantTool['effect'] = 'read',
+): AssistantTool => ({
   name,
   label: name,
   description: name,
   parameters: { type: 'object', properties: {} },
   needs: [],
+  effect,
   run,
 });
 
@@ -458,10 +463,14 @@ describe('runTurn', () => {
 
   it('runs a lasting write only before any tool output is in the turn', async () => {
     const saved: string[] = [];
-    const remember = tool('remember', async () => {
-      saved.push('note');
-      return 'saved';
-    });
+    const remember = tool(
+      'remember',
+      async () => {
+        saved.push('note');
+        return 'saved';
+      },
+      'lasting_write',
+    );
     // First step: allowed.
     const first = turn(
       [() => sse(toolCall('remember')), () => sse(say('ok'))],
@@ -737,10 +746,14 @@ describe('runTurn', () => {
     const t = turn(
       [() => sse(toolCall('remember')), () => sse(say('ok'))],
       [
-        tool('remember', async () => {
-          saved.push('note');
-          return 'saved';
-        }),
+        tool(
+          'remember',
+          async () => {
+            saved.push('note');
+            return 'saved';
+          },
+          'lasting_write',
+        ),
       ],
       undefined,
       undefined,

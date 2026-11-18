@@ -85,7 +85,19 @@ export function isLossless(
 /**
  * The pack with its instant rate lifted to LOSSLESS_PERCENT when lossless, else
  * the very same object. Returns a copy — the stored pack is never mutated.
+ * A pack in gives a pack out, so a typed response body keeps its row type.
  */
+export function withLossless<
+  P extends { slug: string; category: string; buyback_percent: unknown },
+>(pack: P, windows: LosslessWindow[], atMs: number, source?: string | null): P;
+export function withLossless<
+  P extends { slug: string; category: string; buyback_percent: unknown },
+>(
+  pack: P | null | undefined,
+  windows: LosslessWindow[],
+  atMs: number,
+  source?: string | null,
+): P | null | undefined;
 export function withLossless<
   P extends { slug: string; category: string; buyback_percent: unknown },
 >(

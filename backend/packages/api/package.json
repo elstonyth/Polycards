@@ -10,6 +10,9 @@
     },
     "./admin/*": {
       "types": "./src/api/admin/*/types.ts"
+    },
+    "./store/*": {
+      "types": "./src/api/store/*/types.ts"
     }
   },
   "keywords": [
@@ -57,7 +60,7 @@
     "multer": "^2.5.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "resend": "^6.37.0",
+    "resend": "^6.38.1",
     "sharp": "^0.35.5",
     "write-excel-file": "^4.1.1"
   },

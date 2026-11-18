@@ -14,14 +14,12 @@ import {
   localFileOrigin,
   MAX_DECODE_PIXELS,
 } from '../../utils/image-fetch';
-import type { Need } from './access';
+import { IMAGES, screen, type Need, type Tool } from './access';
+import { numberMark, oneNumber, UNBAN_NEED, type Proposal } from './confirm';
 import {
   BAN_LIST_NEED,
-  numberMark,
-  oneNumber,
-  UNBAN_NEED,
-  type Proposal,
-} from './confirm';
+  fromBanList,
+} from '../../../modules/packs/ban-list-access';
 import {
   HOLDER_NAME_INVALID_MESSAGE,
   holderNameInvalid,
@@ -85,16 +83,6 @@ const proposeOrRefuse = (ctx: Ctx, proposal: Proposal, summary: string) => {
 const WAITING =
   'Nothing is saved yet: a Save button is under your answer, and it is kept only when the person taps it. Tell them so in one short line.';
 
-type AgentTool = {
-  name: string;
-  label: string;
-  description: string;
-  parameters: Record<string, unknown>;
-  needs: Need[];
-  run(args: Record<string, unknown>, ctx: Ctx): Promise<string>;
-};
-
-const IMAGES: Need = { resource: 'assistant_image', operation: 'create' };
 // Anyone who may use the chat may keep notes and search their own chats.
 const USE: Need = { resource: 'assistant', operation: 'update' };
 const MAX_NOTE = 500;
@@ -179,8 +167,7 @@ const bankOf = (
 };
 
 /** The asker's role may free numbers and clear names: admins only. */
-const isAdmin = async (ctx: Ctx) =>
-  ctx.access.superAdmin || ((await ctx.access.can?.(BAN_LIST_NEED)) ?? false);
+const isAdmin = (ctx: Ctx) => fromBanList(ctx.access);
 
 /** Shown name, handle and ban for each account, as the card names them. */
 async function whoAre(ctx: Ctx, ids: string[]) {
@@ -439,7 +426,7 @@ async function conversationIds(ctx: Ctx): Promise<string[]> {
   return convs.map((c) => c.id);
 }
 
-export const AGENT_TOOLS: AgentTool[] = [
+export const AGENT_TOOLS: Tool<Ctx>[] = [
   {
     name: 'unban_account',
     label: 'Unban',
@@ -462,6 +449,7 @@ export const AGENT_TOOLS: AgentTool[] = [
       required: ['username'],
       additionalProperties: false,
     },
+    effect: 'ban_change',
     needs: [UNBAN_NEED],
     run: async (args, ctx) => {
       const username = str(args.username);
@@ -558,6 +546,7 @@ export const AGENT_TOOLS: AgentTool[] = [
       required: ['username', 'last4'],
       additionalProperties: false,
     },
+    effect: 'ban_change',
     needs: [UNBAN_NEED],
     run: async (args, ctx) => {
       const resend =
@@ -592,8 +581,7 @@ export const AGENT_TOOLS: AgentTool[] = [
           customerId,
           last4,
           bank,
-          ctx.access.superAdmin ||
-            ((await ctx.access.can?.(BAN_LIST_NEED)) ?? false),
+          await isAdmin(ctx),
         );
       } catch (err) {
         throw new Error(
@@ -654,10 +642,8 @@ export const AGENT_TOOLS: AgentTool[] = [
       additionalProperties: false,
     },
     // What ban_reason reads: bank and last 4 only, other accounts by name.
-    needs: [
-      { resource: 'customer', operation: 'read' },
-      { resource: 'payment', operation: 'read' },
-    ],
+    effect: 'read',
+    needs: [screen('customers'), screen('payments')],
     run: async (args, ctx) => {
       const packs = packsOf(ctx);
       const again = 'Ask staff for the player, the bank and the number again.';
@@ -857,7 +843,8 @@ export const AGENT_TOOLS: AgentTool[] = [
     },
     // Address and real name are on the admin player page; browser and network
     // are fenced like bank details, so that part is checked when it runs.
-    needs: [{ resource: 'customer', operation: 'read' }],
+    effect: 'read',
+    needs: [screen('customers')],
     run: async (args, ctx) => {
       const packs = packsOf(ctx);
       const customerId = await namedPlayer(
@@ -901,6 +888,7 @@ export const AGENT_TOOLS: AgentTool[] = [
       required: ['username'],
       additionalProperties: false,
     },
+    effect: 'ban_change',
     needs: [UNBAN_NEED, BAN_LIST_NEED],
     run: async (args, ctx) => {
       const resend =
@@ -975,6 +963,7 @@ export const AGENT_TOOLS: AgentTool[] = [
       required: ['username'],
       additionalProperties: false,
     },
+    effect: 'ban_change',
     needs: [UNBAN_NEED, BAN_LIST_NEED],
     run: async (args, ctx) => {
       const packs = packsOf(ctx);
@@ -1061,6 +1050,7 @@ export const AGENT_TOOLS: AgentTool[] = [
       required: ['note'],
       additionalProperties: false,
     },
+    effect: 'lasting_write',
     needs: [USE],
     run: async (args, ctx) => {
       const note = str(args.note);
@@ -1103,6 +1093,7 @@ export const AGENT_TOOLS: AgentTool[] = [
       },
       additionalProperties: false,
     },
+    effect: 'read',
     needs: [USE],
     run: async (args, ctx) => {
       const q = str(args.query);
@@ -1139,6 +1130,7 @@ export const AGENT_TOOLS: AgentTool[] = [
       required: ['id'],
       additionalProperties: false,
     },
+    effect: 'lasting_write',
     needs: [USE],
     run: async (args, ctx) => {
       const id = str(args.id);
@@ -1174,6 +1166,7 @@ export const AGENT_TOOLS: AgentTool[] = [
       required: ['query'],
       additionalProperties: false,
     },
+    effect: 'read',
     needs: [USE],
     run: async (args, ctx) => {
       const q = str(args.query);
@@ -1227,7 +1220,8 @@ export const AGENT_TOOLS: AgentTool[] = [
       additionalProperties: false,
     },
     // pack:read too: listPacks has no status filter, so it shows draft packs.
-    needs: [IMAGES, { resource: 'pack', operation: 'read' }],
+    effect: 'read',
+    needs: [IMAGES, screen('packs')],
     run: async (args, ctx) => {
       const q = str(args.query);
       if (!q) throw new Error('query is required.');
@@ -1337,6 +1331,7 @@ export const AGENT_TOOLS: AgentTool[] = [
       required: ['title', 'instruction', 'every', 'time'],
       additionalProperties: false,
     },
+    effect: 'lasting_write',
     needs: [USE],
     run: async (args, ctx) => {
       const title = str(args.title);
@@ -1394,6 +1389,7 @@ export const AGENT_TOOLS: AgentTool[] = [
       },
       additionalProperties: false,
     },
+    effect: 'read',
     needs: [USE],
     run: async (args, ctx) => {
       const all =
@@ -1433,6 +1429,7 @@ export const AGENT_TOOLS: AgentTool[] = [
       required: ['id'],
       additionalProperties: false,
     },
+    effect: 'lasting_write',
     needs: [USE],
     run: async (args, ctx) => {
       const id = str(args.id);

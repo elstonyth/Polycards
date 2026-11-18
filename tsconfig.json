@@ -20,7 +20,8 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@acme/api/store/*": ["./backend/packages/api/src/api/store/*/types.ts"]
     }
   },
   "include": [
