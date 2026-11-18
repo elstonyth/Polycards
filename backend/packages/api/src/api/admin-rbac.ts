@@ -89,7 +89,9 @@ type Policy = { resource: string; operation: Operation };
 
 /** The limiters an admin route can carry; middlewares.ts binds each one once. */
 export type AdminLimiter =
-  'admin-action' | 'assistant-chat' | 'assistant-speak';
+  | 'admin-action'
+  | 'assistant-chat'
+  | 'assistant-speak';
 
 /** One protected admin route: everything that guards it, in one place. */
 export interface AdminRoute {
@@ -191,12 +193,14 @@ export const ADMIN_ROUTES: readonly AdminRoute[] = [
     method: 'POST',
     limits: ['admin-action', 'assistant-chat'],
   },
-  ...['freeze', 'unfreeze', 'disable'].map((sub): AdminRoute => ({
-    matcher: `/admin/customers/*/${sub}`,
-    method: 'POST',
-    policy: customerWrite,
-    limits: ACTION,
-  })),
+  ...['freeze', 'unfreeze', 'disable'].map(
+    (sub): AdminRoute => ({
+      matcher: `/admin/customers/*/${sub}`,
+      method: 'POST',
+      policy: customerWrite,
+      limits: ACTION,
+    }),
+  ),
   {
     // A Super Admin resetting another admin's two-step sign-in (owner,
     // 2026-11-07): core's own write on users. The route also demands Super
@@ -229,12 +233,14 @@ export const ADMIN_ROUTES: readonly AdminRoute[] = [
   // payout-details GET below), and the writes are support's only way to
   // change a tied account.
   secretRead('/admin/customers/*/bank-accounts', 'customer_bank_account'),
-  ...['add', 'remove', 'verify', 'name-clash'].map((sub): AdminRoute => ({
-    matcher: `/admin/customers/*/bank-accounts/${sub}`,
-    method: 'POST',
-    policy: customerWrite,
-    limits: ACTION,
-  })),
+  ...['add', 'remove', 'verify', 'name-clash'].map(
+    (sub): AdminRoute => ({
+      matcher: `/admin/customers/*/bank-accounts/${sub}`,
+      method: 'POST',
+      policy: customerWrite,
+      limits: ACTION,
+    }),
+  ),
   {
     // Taking a bank number off the ban list is an unban (owner, 2026-11-04):
     // the same policy as the assistant's unban_bank_number, so one role
@@ -266,12 +272,14 @@ export const ADMIN_ROUTES: readonly AdminRoute[] = [
   secretRead('/admin/players/export', 'partner_credential'),
   // A player group's partner policy, draft access and odds set
   // (POST /admin/customer-groups/:id/<sub>).
-  ...['policy', 'draft-access', 'odds-set'].map((sub): AdminRoute => ({
-    matcher: `/admin/customer-groups/*/${sub}`,
-    method: 'POST',
-    policy: groupWrite,
-    limits: ACTION,
-  })),
+  ...['policy', 'draft-access', 'odds-set'].map(
+    (sub): AdminRoute => ({
+      matcher: `/admin/customer-groups/*/${sub}`,
+      method: 'POST',
+      policy: groupWrite,
+      limits: ACTION,
+    }),
+  ),
   { matcher: '/admin/rewards-settings', method: 'POST', limits: ACTION },
   {
     matcher: '/admin/customers/*/credits',
@@ -313,12 +321,14 @@ export const ADMIN_ROUTES: readonly AdminRoute[] = [
   ].map((matcher): AdminRoute => ({ matcher, method: 'POST', limits: ACTION })),
   // Admin set/fix of attribution (POST /admin/customers/:id/referral) and the
   // partner-rate flag on a customer (POST /admin/customers/:id/partner-rate).
-  ...['referral', 'partner-rate'].map((sub): AdminRoute => ({
-    matcher: `/admin/customers/*/${sub}`,
-    method: 'POST',
-    policy: customerWrite,
-    limits: ACTION,
-  })),
+  ...['referral', 'partner-rate'].map(
+    (sub): AdminRoute => ({
+      matcher: `/admin/customers/*/${sub}`,
+      method: 'POST',
+      policy: customerWrite,
+      limits: ACTION,
+    }),
+  ),
   // Task-definition CRUD (POST /admin/tasks).
   { matcher: '/admin/tasks', method: 'POST', limits: ACTION },
   // Coin Flip settings write (POST /admin/coin-flips/settings).
@@ -479,6 +489,14 @@ export const ADMIN_ROUTES: readonly AdminRoute[] = [
     policy: paymentWrite,
     limits: ACTION,
   },
+  {
+    // Settlement's Link gateway entry: moves no money, but it lets the audit
+    // stop flagging a hand credit, so it is guarded like Acknowledge.
+    matcher: '/admin/payments/deposits/*/adjustment-entry',
+    method: 'POST',
+    policy: paymentWrite,
+    limits: ACTION,
+  },
   // Purchase-invoice writer (POLYCARD-BACK §3.5) — raises real inventory
   // counters, up to 200 lines x 1,000,000 qty per call; same admin budget.
   { matcher: '/admin/purchase-invoices', method: 'POST', limits: ACTION },
@@ -548,12 +566,14 @@ export const ADMIN_ROUTES: readonly AdminRoute[] = [
   ...[
     '/admin/workflows-executions/*/run',
     '/admin/workflows-executions/*/steps/*',
-  ].map((matcher): AdminRoute => ({
-    matcher,
-    method: 'POST',
-    policy: update('workflow_execution'),
-    coreRoute: true,
-  })),
+  ].map(
+    (matcher): AdminRoute => ({
+      matcher,
+      method: 'POST',
+      policy: update('workflow_execution'),
+      coreRoute: true,
+    }),
+  ),
   {
     matcher: '/admin/inventory-items/*',
     method: 'DELETE',

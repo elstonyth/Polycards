@@ -28,7 +28,41 @@ export type AuditedRow = {
   status: string;
   /** What we recorded: amount_settled for deposits, amount for withdrawals. */
   amount: number | null;
+  /** Deposits only: amount_requested, what the row asked for. */
+  requested?: number | null;
 };
+
+export const SETTLED_BUT_FAILED_NOTE =
+  'gateway says FAILED but the row is settled — credit issued without gateway confirmation, investigate';
+
+const SHORT_CREDIT_PREFIX = 'gateway says FAILED, and the row was credited ';
+
+/**
+ * A settled row credited less than it asked, on a gateway that says FAILED.
+ * The usual cause is a short payment credited by hand for what arrived: the
+ * gateway will not approve a different amount, so it keeps the order FAILED
+ * and books the arrived sum under its own reference (four USDT top-ups,
+ * 2026-10-26 to 11-08). It is not the only cause: a requery credits the
+ * gateway's figure verbatim, so a bank gateway can settle short on its own and
+ * later turn FAILED. The audit sees neither the manual entry nor who credited
+ * the row, so the note names the check and keeps "investigate" for when the
+ * check fails. It stays a finding either way.
+ */
+export function shortCreditNote(credited: number, requested: number): string {
+  return `${SHORT_CREDIT_PREFIX}RM ${credited.toFixed(2)} of RM ${requested.toFixed(2)} asked, so the customer paid short. If the amount that arrived was credited by hand, confirm the gateway holds a manual entry for it, then acknowledge. With no such entry, investigate`;
+}
+
+const creditedShort = (
+  row: AuditedRow,
+): row is AuditedRow & {
+  amount: number;
+  requested: number;
+} =>
+  row.amount !== null &&
+  Number.isFinite(row.amount) &&
+  row.requested != null &&
+  Number.isFinite(row.requested) &&
+  row.requested - row.amount >= 0.005;
 
 export type GatewayAnswer =
   | { kind: 'detail'; state: SettlementState; amount: number }
@@ -56,7 +90,9 @@ export async function ledgerTrail(
 ): Promise<LedgerTrail> {
   const customer_id = input.customerId;
   const [anchored] = await packs.listCreditTransactions(
-    { customer_id, source_transaction_id: input.anchor } as { customer_id: string },
+    { customer_id, source_transaction_id: input.anchor } as {
+      customer_id: string;
+    },
     { take: 1 },
   );
   const adjustments = await packs.listCreditTransactions(
@@ -106,7 +142,9 @@ export function depositAuditNote(
         : `gateway paid ${amount.toFixed(2)}, row credited ${rowMoney(row.amount)}`;
     }
     if (state === 'failed') {
-      return 'gateway says FAILED but the row is settled — credit issued without gateway confirmation, investigate';
+      return creditedShort(row)
+        ? shortCreditNote(row.amount, row.requested)
+        : SETTLED_BUT_FAILED_NOTE;
     }
     return 'gateway still reports pending for a row we settled';
   }
@@ -130,6 +168,37 @@ export function depositAuditNote(
     return `gateway still reports pending for a row we marked ${row.status}`;
   }
   return null;
+}
+
+/**
+ * A settled row the gateway FAILED, linked (gateway_adjustment_ref) to the
+ * gateway's manual entry for what actually arrived: the order stays FAILED by
+ * the gateway's rule, so the entry is what backs the hand credit. Agreement
+ * needs the entry PAID for exactly what the row credited; anything else names
+ * the entry. `entry` is the gateway's answer for the ENTRY's reference.
+ */
+export function adjustmentAuditNote(
+  row: AuditedRow,
+  ref: string,
+  entry: GatewayAnswer,
+): string | null {
+  if (entry.kind === 'not-found') {
+    return `gateway has NO record of manual entry ${ref} linked to this settled deposit — investigate`;
+  }
+  const { state, amount } = entry;
+  if (state === 'success') {
+    // Unlike the order check, an unreadable figure is NOT agreement here: the
+    // entry is the only evidence for the credit, so it must show the money.
+    if (!Number.isFinite(amount)) {
+      return `gateway's manual entry ${ref} reports no readable amount — investigate`;
+    }
+    return row.amount !== null && sameMoney(row.amount, amount)
+      ? null
+      : `gateway's manual entry ${ref} paid ${amount.toFixed(2)}, row credited ${rowMoney(row.amount)} — investigate`;
+  }
+  return `gateway's manual entry ${ref} is ${
+    state === 'failed' ? 'FAILED' : 'still pending'
+  }, but the row is settled — investigate`;
 }
 
 export function withdrawalAuditNote(
@@ -182,11 +251,20 @@ function rowMoney(amount: number | null): string {
 // audit_note: the audit job and the TGPay-family and A3Pay payout callbacks.
 // An operator's acknowledgement (Settlement, 2026-10-15) is dropped when the
 // note it covered is not the one being written, so a new answer from the
-// gateway, agreement included, comes back unacknowledged.
+// gateway, agreement included, comes back unacknowledged. One exception: the
+// settled-but-FAILED alarm softened to a short-payment note is the same answer
+// from the gateway in calmer words, so its acknowledgement carries over.
 export function stampNote(
-  row: { audit_ack_note?: string | null },
+  row: { audit_note?: string | null; audit_ack_note?: string | null },
   note: string | null,
 ): Record<string, unknown> {
+  if (
+    row.audit_ack_note === SETTLED_BUT_FAILED_NOTE &&
+    row.audit_note === SETTLED_BUT_FAILED_NOTE &&
+    note?.startsWith(SHORT_CREDIT_PREFIX)
+  ) {
+    return { audit_note: note, audit_ack_note: note };
+  }
   return row.audit_ack_note != null && row.audit_ack_note !== note
     ? {
         audit_note: note,
