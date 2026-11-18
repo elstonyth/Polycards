@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom';
 import {
   Button,
   Container,
+  Input,
   Label,
   Prompt,
   StatusBadge,
@@ -18,10 +19,11 @@ import {
   useAcknowledgeFinding,
   useCreditDeposit,
   useGatewayAudit,
+  useLinkAdjustmentEntry,
 } from '../../lib/queries';
 import { rm } from '../../lib/format';
 import { paymentStatus } from '../../lib/dashboard';
-import { auditCounts, canCreditDeposit } from './audit-counts';
+import { auditCounts, canCreditDeposit, canLinkEntry } from './audit-counts';
 
 // The first few are enough to act on; the rest are one click away.
 const SHOWN = 10;
@@ -50,6 +52,13 @@ export const AuditFindings = ({ currency }: { currency: string }) => {
   );
   const [creditReason, setCreditReason] = useState('');
   const credit = useCreditDeposit();
+  // The same for the Link gateway entry prompt, plus the entry's reference.
+  const [linkTarget, setLinkTarget] = useState<GatewayAuditFinding | null>(
+    null,
+  );
+  const [linkRef, setLinkRef] = useState('');
+  const [linkReason, setLinkReason] = useState('');
+  const link = useLinkAdjustmentEntry();
   const a = audit.data;
   if (!a) return null;
   const n = auditCounts(a);
@@ -177,9 +186,22 @@ export const AuditFindings = ({ currency }: { currency: string }) => {
                       ) : null}
                     </Table.Cell>
                     <Table.Cell className="text-right">
-                      {acked || !canEdit ? null : (
+                      {!canEdit ? null : (
                         <div className="flex justify-end gap-2 whitespace-nowrap">
-                          {canCreditDeposit(f) ? (
+                          {canLinkEntry(f) ? (
+                            <Button
+                              size="small"
+                              variant="secondary"
+                              onClick={() => {
+                                setLinkRef('');
+                                setLinkReason('');
+                                setLinkTarget(f);
+                              }}
+                            >
+                              {t('settlement.linkEntry')}
+                            </Button>
+                          ) : null}
+                          {!acked && canCreditDeposit(f) ? (
                             <Button
                               size="small"
                               variant="secondary"
@@ -191,16 +213,18 @@ export const AuditFindings = ({ currency }: { currency: string }) => {
                               {t('settlement.creditDeposit')}
                             </Button>
                           ) : null}
-                          <Button
-                            size="small"
-                            variant="secondary"
-                            onClick={() => {
-                              setReason('');
-                              setTarget(f);
-                            }}
-                          >
-                            {t('settlement.acknowledge')}
-                          </Button>
+                          {acked ? null : (
+                            <Button
+                              size="small"
+                              variant="secondary"
+                              onClick={() => {
+                                setReason('');
+                                setTarget(f);
+                              }}
+                            >
+                              {t('settlement.acknowledge')}
+                            </Button>
+                          )}
                         </div>
                       )}
                     </Table.Cell>
@@ -336,6 +360,72 @@ export const AuditFindings = ({ currency }: { currency: string }) => {
               }}
             >
               {t('settlement.creditDeposit')}
+            </Prompt.Action>
+          </Prompt.Footer>
+        </Prompt.Content>
+      </Prompt>
+
+      <Prompt
+        variant="confirmation"
+        open={linkTarget !== null}
+        onOpenChange={(o) => {
+          if (!o) setLinkTarget(null);
+        }}
+      >
+        <Prompt.Content>
+          <Prompt.Header>
+            <Prompt.Title>{t('settlement.linkTitle')}</Prompt.Title>
+            <Prompt.Description>{t('settlement.linkDesc')}</Prompt.Description>
+          </Prompt.Header>
+          <div className="flex flex-col gap-1 px-6 pb-2">
+            <Text size="small" className="text-ui-fg-subtle">
+              {linkTarget
+                ? `${linkTarget.gateway_transaction_id ?? linkTarget.merchant_transaction_id} · ${
+                    linkTarget.amount === null ? '—' : rm(linkTarget.amount)
+                  }`
+                : null}
+            </Text>
+            <Label htmlFor="link-ref" size="small" className="mt-2">
+              {t('settlement.linkRef')}
+            </Label>
+            <Input
+              id="link-ref"
+              maxLength={64}
+              value={linkRef}
+              placeholder="MD20261108102020"
+              onChange={(e) => setLinkRef(e.target.value)}
+              autoFocus
+            />
+            <Text size="xsmall" className="text-ui-fg-muted">
+              {t('settlement.linkRefHint')}
+            </Text>
+            <Label htmlFor="link-reason" size="small" className="mt-2">
+              {t('settlement.ackReason')}
+            </Label>
+            <Textarea
+              id="link-reason"
+              maxLength={500}
+              value={linkReason}
+              placeholder={t('settlement.creditReasonPlaceholder')}
+              onChange={(e) => setLinkReason(e.target.value)}
+            />
+          </div>
+          <Prompt.Footer>
+            <Prompt.Cancel>{t('settlement.ackCancel')}</Prompt.Cancel>
+            <Prompt.Action
+              disabled={!linkRef.trim() || !linkReason.trim() || link.isPending}
+              onClick={() => {
+                if (!linkTarget || !linkRef.trim() || !linkReason.trim())
+                  return;
+                link.mutate({
+                  id: linkTarget.id,
+                  ref: linkRef.trim(),
+                  reason: linkReason.trim(),
+                });
+                setLinkTarget(null);
+              }}
+            >
+              {t('settlement.linkEntry')}
             </Prompt.Action>
           </Prompt.Footer>
         </Prompt.Content>

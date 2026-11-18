@@ -170,6 +170,37 @@ export function depositAuditNote(
   return null;
 }
 
+/**
+ * A settled row the gateway FAILED, linked (gateway_adjustment_ref) to the
+ * gateway's manual entry for what actually arrived: the order stays FAILED by
+ * the gateway's rule, so the entry is what backs the hand credit. Agreement
+ * needs the entry PAID for exactly what the row credited; anything else names
+ * the entry. `entry` is the gateway's answer for the ENTRY's reference.
+ */
+export function adjustmentAuditNote(
+  row: AuditedRow,
+  ref: string,
+  entry: GatewayAnswer,
+): string | null {
+  if (entry.kind === 'not-found') {
+    return `gateway has NO record of manual entry ${ref} linked to this settled deposit — investigate`;
+  }
+  const { state, amount } = entry;
+  if (state === 'success') {
+    // Unlike the order check, an unreadable figure is NOT agreement here: the
+    // entry is the only evidence for the credit, so it must show the money.
+    if (!Number.isFinite(amount)) {
+      return `gateway's manual entry ${ref} reports no readable amount — investigate`;
+    }
+    return row.amount !== null && sameMoney(row.amount, amount)
+      ? null
+      : `gateway's manual entry ${ref} paid ${amount.toFixed(2)}, row credited ${rowMoney(row.amount)} — investigate`;
+  }
+  return `gateway's manual entry ${ref} is ${
+    state === 'failed' ? 'FAILED' : 'still pending'
+  }, but the row is settled — investigate`;
+}
+
 export function withdrawalAuditNote(
   row: AuditedRow,
   gateway: GatewayAnswer,

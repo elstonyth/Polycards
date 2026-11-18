@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { auditCounts, canCreditDeposit, gatewayCheck } from './audit-counts';
+import {
+  auditCounts,
+  canCreditDeposit,
+  canLinkEntry,
+  gatewayCheck,
+} from './audit-counts';
 
 const rows = (n: number) => Array.from({ length: n }, () => ({}));
 
@@ -31,6 +36,34 @@ describe('canCreditDeposit', () => {
     expect(
       canCreditDeposit({ kind: 'deposit', status: 'settled', note: owed }),
     ).toBe(false);
+  });
+});
+
+describe('canLinkEntry', () => {
+  const alarm =
+    'gateway says FAILED but the row is settled — credit issued without gateway confirmation, investigate';
+  const short =
+    'gateway says FAILED, and the row was credited RM 56.49 of RM 64.56 asked, so the customer paid short. If the amount that arrived was credited by hand, confirm the gateway holds a manual entry for it, then acknowledge. With no such entry, investigate';
+
+  it('offers the link on a settled deposit the gateway calls FAILED', () => {
+    for (const note of [alarm, short]) {
+      expect(canLinkEntry({ kind: 'deposit', status: 'settled', note })).toBe(
+        true,
+      );
+    }
+  });
+
+  it.each([
+    ['withdrawal', 'settled', alarm],
+    ['deposit', 'failed', alarm],
+    ['deposit', 'settled', 'gateway paid 50.00, row credited 56.49'],
+    [
+      'deposit',
+      'settled',
+      "gateway's manual entry MD1 paid 50.00, row credited 56.49 — investigate",
+    ],
+  ])('never on a %s that is %s with another note', (kind, status, note) => {
+    expect(canLinkEntry({ kind, status, note })).toBe(false);
   });
 });
 
@@ -89,13 +122,21 @@ describe('gatewayCheck', () => {
   const at = '2026-10-15T10:00:00Z';
   it('open findings: they differ', () => {
     expect(
-      gatewayCheck({ findings_total: 2, acknowledged_total: 1, last_audited_at: at }),
+      gatewayCheck({
+        findings_total: 2,
+        acknowledged_total: 1,
+        last_audited_at: at,
+      }),
     ).toEqual({ tone: 'differs', count: 2 });
   });
   // Acknowledged is not agreed: the gateway still disagrees with those rows.
   it('only acknowledged findings: never "all match"', () => {
     expect(
-      gatewayCheck({ findings_total: 0, acknowledged_total: 3, last_audited_at: at }),
+      gatewayCheck({
+        findings_total: 0,
+        acknowledged_total: 3,
+        last_audited_at: at,
+      }),
     ).toEqual({ tone: 'acknowledged', count: 3 });
   });
   it('nothing open or acknowledged: all match once audited, else never ran', () => {

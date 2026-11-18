@@ -1,5 +1,6 @@
 import {
   SETTLED_BUT_FAILED_NOTE,
+  adjustmentAuditNote,
   depositAuditNote,
   ledgerTrail,
   shortCreditNote,
@@ -231,6 +232,52 @@ describe('a note that knows what the ledger holds', () => {
         /NO record/,
       );
     });
+  });
+});
+
+// A short payment credited by hand, linked to the gateway's manual entry for
+// what arrived. The order itself stays FAILED at the gateway; the entry is
+// the record that backs the credit.
+describe('adjustmentAuditNote', () => {
+  const row = { status: 'settled', amount: 56.49, requested: 64.56 };
+  const ref = 'MD20261108102020';
+
+  it('agrees when the entry is paid for exactly what the row credited', () => {
+    expect(adjustmentAuditNote(row, ref, paid(56.49))).toBeNull();
+    expect(adjustmentAuditNote(row, ref, paid(56.494))).toBeNull();
+  });
+
+  it('names the entry and the gap when the entry paid a different sum', () => {
+    expect(adjustmentAuditNote(row, ref, paid(50))).toBe(
+      "gateway's manual entry MD20261108102020 paid 50.00, row credited 56.49 — investigate",
+    );
+  });
+
+  it('is loud when the entry is not paid', () => {
+    expect(adjustmentAuditNote(row, ref, failed)).toBe(
+      "gateway's manual entry MD20261108102020 is FAILED, but the row is settled — investigate",
+    );
+    expect(adjustmentAuditNote(row, ref, pending)).toBe(
+      "gateway's manual entry MD20261108102020 is still pending, but the row is settled — investigate",
+    );
+  });
+
+  it('is loud when the gateway has no such entry', () => {
+    expect(adjustmentAuditNote(row, ref, missing)).toBe(
+      'gateway has NO record of manual entry MD20261108102020 linked to this settled deposit — investigate',
+    );
+  });
+
+  it('never reads an unreadable entry amount as agreement', () => {
+    expect(adjustmentAuditNote(row, ref, paid(NaN))).toBe(
+      "gateway's manual entry MD20261108102020 reports no readable amount — investigate",
+    );
+  });
+
+  it('reads an absent credit as absent, never as agreement', () => {
+    expect(
+      adjustmentAuditNote({ status: 'settled', amount: null }, ref, paid(0)),
+    ).toMatch(/row credited nothing/);
   });
 });
 

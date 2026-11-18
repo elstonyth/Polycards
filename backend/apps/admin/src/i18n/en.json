@@ -1061,6 +1061,12 @@
     "creditDesc": "The gateway is asked again first. The customer is credited once, through the same step a gateway callback uses, so it can't be paid twice. Don't also make a hand adjustment.",
     "creditReasonPlaceholder": "What did you check? (recorded in the audit log)",
     "creditedToast": "Deposit credited",
+    "linkEntry": "Link gateway entry",
+    "linkTitle": "Link the gateway's manual entry?",
+    "linkDesc": "For a short payment credited by hand. The gateway keeps the order failed and books what arrived as its own manual entry. The gateway is asked about that entry now: it must show paid, for exactly what this deposit credited. After that, the hourly check looks at the entry instead of the order. No money moves.",
+    "linkRef": "Merchant Reference ID of the manual entry",
+    "linkRefHint": "From the gateway back office, the MD… number in the Merchant Reference ID column. Not the Deposit ID (D…).",
+    "linkedToast": "Gateway entry linked",
     "checkAcknowledged_one": "{{count, number}} acknowledged, still differs",
     "checkAcknowledged_other": "{{count, number}} acknowledged, still differ"
   },
