@@ -540,11 +540,12 @@ envs:
   # (deny still refunds). Every other A3PAY_* value stays ON PURPOSE: the
   # callbacks, the deposit/withdrawal sweeps and the gateway audit read the
   # credentials, not this flag, so rows already in flight still settle.
-  # Remove them only once no a3pay row is pending and the 7-day deposit
-  # re-read window has passed. Our egress 188.166.181.61 / .204 is on
-  # A3Pay's whitelist. A3PAY_CALLBACK_IPS is their documented outgoing
-  # address. A3PAY_PUBLIC_KEY is THEIR public key (verifies their callbacks)
-  # — public, so not a secret.
+  # Remove them only on the conditions in docs/payments/a3pay-setup.md
+  # ("Closed"): a late callback or audit re-check fails without them, and
+  # the sweeps run only while another rail (TGPay, GP365) is open. Our
+  # egress 188.166.181.61 / .204 is on A3Pay's whitelist. A3PAY_CALLBACK_IPS
+  # is their documented outgoing address. A3PAY_PUBLIC_KEY is THEIR public
+  # key (verifies their callbacks) — public, so not a secret.
   - key: A3PAY_ENABLED
     scope: RUN_TIME
     value: "false"
