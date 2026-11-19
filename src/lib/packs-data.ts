@@ -417,12 +417,7 @@ export function factoryVideo(
 // ---------------------------------------------------------------------------
 
 export type Rarity =
-  | 'Immortal'
-  | 'Legendary'
-  | 'Mythical'
-  | 'Rare'
-  | 'Uncommon'
-  | 'Common';
+  'Immortal' | 'Legendary' | 'Mythical' | 'Rare' | 'Uncommon' | 'Common';
 /** A card of a pack's prize pool (and, since the reveal shows the same shape,
  *  a won card — `WonCard` in actions/packs.ts is this type). The pool row's
  *  tier is REQUIRED: the odds schema drops a row without one, so unlike the
