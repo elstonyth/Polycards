@@ -78,24 +78,13 @@ import {
 // ---------------------------------------------------------------------------
 // The dynamic import boundary.
 //
-// INTERIM (until WP-B lands `./runtime/stage-runtime.ts`): the runtime is not
-// wired, so `loadRuntime()` rejects and the stage settles flat without any
-// request. The specifier is a non-literal `string` behind `webpackIgnore`, so
-// neither tsc nor webpack (`next build --webpack`) tries to resolve the
-// missing file. Wiring is a two-line swap to the final form:
-//
-//   return import(/* webpackChunkName: "pack-stage-3d" */ './runtime/stage-runtime');
-//
-// (and delete RUNTIME_WIRED / RUNTIME_SPECIFIER).
-const RUNTIME_WIRED = false;
-const RUNTIME_SPECIFIER: string = './runtime/stage-runtime';
-
+// The ONLY place the three.js runtime is reached: its own async chunk, loaded
+// after the gate passes (never for reduced motion, save-data, no WebGL2 or a
+// crash flag).
 function loadRuntime(): Promise<StageRuntimeModule> {
-  if (!RUNTIME_WIRED)
-    return Promise.reject(new Error('pack-stage: runtime not wired'));
   return import(
-    /* webpackIgnore: true */ RUNTIME_SPECIFIER
-  ) as Promise<StageRuntimeModule>;
+    /* webpackChunkName: "pack-stage-3d" */ './runtime/stage-runtime'
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -194,7 +183,7 @@ export function measureStageLayout(
   }
   // Tiles stacked in one place (positioned by transform only): no DOM step.
   if (!(step > 0)) step = art.offsetWidth * 1.1;
-  return { cx: host.clientWidth / 2, cy, step, artH };
+  return { cx: host.clientWidth / 2, cy, step, artH, artW: art.offsetWidth };
 }
 
 function sameSource(a: StageSlotSource, b: StageSlotSource): boolean {
@@ -593,7 +582,8 @@ class StageEngine {
     const token = this.runtimeToken;
     let p: Promise<void>;
     try {
-      p = rt.prepare();
+      // Boot the packs around the attached track (the start pack), not pack 0.
+      p = rt.prepare(this.state.track);
     } catch {
       this.fail('error');
       return;

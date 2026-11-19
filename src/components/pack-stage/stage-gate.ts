@@ -42,6 +42,14 @@ export type StageSignals = CheapSignals & {
   webgl2: boolean | null;
 };
 
+/**
+ * The visitor's choices (reduced motion, save-data, reduced data) and the
+ * crash flag: flat even under the preview's `?stage=3d|lite` override.
+ */
+export function refuses3d(s: CheapSignals): boolean {
+  return s.reducedMotion || s.saveData || s.reducedData || s.crashFlag;
+}
+
 /** Cheap rules, no WebGL: false means flat for sure. */
 export function cheapAllows3d(s: CheapSignals): boolean {
   if (s.reducedMotion || s.saveData || s.reducedData || s.crashFlag)
@@ -57,14 +65,18 @@ export function decideStageMode(
 ): GateMode {
   if (override === 'flat') return 'flat';
   if (override === '3d' || override === 'lite') {
-    // Forced for QA: still needs a WebGL2 context to exist at all.
+    // Forced for QA: skips the GPU caveat, the memory tiers and the watchdog,
+    // but never the visitor's choices or the crash flag, and still needs a
+    // WebGL2 context to exist at all.
+    if (refuses3d(s)) return 'flat';
     return s.webgl2 === false ? 'flat' : override;
   }
   if (!cheapAllows3d(s)) return 'flat';
   if (s.webgl2 !== true) return 'flat';
+  // Owner decision (2026-11-19): phones (coarse pointer) start on the full
+  // tier; only low memory, or the watchdog later, steps a device to lite.
   if (s.deviceMemory !== null && s.deviceMemory <= LITE_MAX_DEVICE_MEMORY)
     return 'lite';
-  if (s.coarsePointer) return 'lite';
   return '3d';
 }
 
@@ -156,8 +168,8 @@ export function gateStage(
   const override = opts.override ?? null;
   if (override === 'flat') return 'flat';
   const cheap = readCheapSignals(env, opts.crashFlag);
-  if (!override && !cheapAllows3d(cheap))
-    return decideStageMode({ ...cheap, webgl2: null });
+  if (refuses3d(cheap) || (!override && !cheapAllows3d(cheap)))
+    return decideStageMode({ ...cheap, webgl2: null }, override);
   // `?stage=3d|lite` skips the caveat flag so headless QA (SwiftShader) runs.
   const webgl2 = probeWebGL2(env, override === null);
   return decideStageMode({ ...cheap, webgl2 }, override);

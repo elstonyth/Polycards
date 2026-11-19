@@ -95,6 +95,19 @@ export function slotOpacity(d: number, desktop: boolean): number {
   return clamp01(reach + 1 - Math.abs(d));
 }
 
+/**
+ * A pack's whole opacity: its reach fade times the category switch's fade
+ * (sinking packs fade out, rising ones in, on the SPRING curve of `swap`).
+ * The canvas draws with this; the CSS tiles (`tileVars`) use the same formula.
+ */
+export function stageOpacity(
+  s: StageState,
+  i: number,
+  desktop: boolean,
+): number {
+  return slotOpacity(i - s.track, desktop) * (1 - stageSpring(clamp01(s.swap)));
+}
+
 function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
 }

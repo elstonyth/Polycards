@@ -90,17 +90,33 @@ describe('decideStageMode', () => {
     expect(decideStageMode({ ...CLEAN, ...over })).toBe('flat');
   });
 
-  it('starts weaker devices at lite', () => {
+  it('starts low-memory devices at lite; phones (coarse pointer) start full', () => {
     expect(decideStageMode({ ...CLEAN, deviceMemory: 4 })).toBe('lite');
     expect(decideStageMode({ ...CLEAN, deviceMemory: 3 })).toBe('lite');
-    expect(decideStageMode({ ...CLEAN, coarsePointer: true })).toBe('lite');
+    expect(decideStageMode({ ...CLEAN, coarsePointer: true })).toBe('3d');
+    expect(
+      decideStageMode({ ...CLEAN, coarsePointer: true, deviceMemory: 4 }),
+    ).toBe('lite');
+    expect(
+      decideStageMode({ ...CLEAN, coarsePointer: true, deviceMemory: null }),
+    ).toBe('3d');
   });
 
   it('honours the override, but forced 3D still needs a context', () => {
     expect(decideStageMode(CLEAN, 'flat')).toBe('flat');
-    expect(
-      decideStageMode({ ...CLEAN, reducedMotion: true, crashFlag: true }, '3d'),
-    ).toBe('3d');
+    // Forced 3D skips the device tiers...
+    expect(decideStageMode({ ...CLEAN, deviceMemory: 1 }, '3d')).toBe('3d');
+    expect(decideStageMode({ ...CLEAN, deviceMemory: 4 }, '3d')).toBe('3d');
+    expect(decideStageMode({ ...CLEAN, webgl2: null }, '3d')).toBe('3d');
+    // ...but never the visitor's choices or the crash flag.
+    for (const over of [
+      { reducedMotion: true },
+      { saveData: true },
+      { reducedData: true },
+      { crashFlag: true },
+    ])
+      for (const o of ['3d', 'lite'] as const)
+        expect(decideStageMode({ ...CLEAN, ...over }, o)).toBe('flat');
     expect(decideStageMode({ ...CLEAN, coarsePointer: true }, '3d')).toBe('3d');
     expect(decideStageMode(CLEAN, 'lite')).toBe('lite');
     expect(decideStageMode({ ...CLEAN, webgl2: false }, '3d')).toBe('flat');
@@ -188,6 +204,9 @@ describe('gateStage', () => {
       gateStage(env({ webgl2: 'ok', queries: [COARSE_POINTER_QUERY] }).e, {
         crashFlag: false,
       }),
+    ).toBe('3d');
+    expect(
+      gateStage(env({ webgl2: 'ok', deviceMemory: 4 }).e, { crashFlag: false }),
     ).toBe('lite');
     expect(gateStage(env({ webgl2: 'caveat' }).e, { crashFlag: false })).toBe(
       'flat',
@@ -204,11 +223,21 @@ describe('gateStage', () => {
     );
     expect(flat.canvases()).toBe(0);
 
-    const headless = env({ webgl2: 'caveat', queries: [REDUCED_MOTION_QUERY] });
-    expect(gateStage(headless.e, { crashFlag: true, override: '3d' })).toBe(
+    const headless = env({ webgl2: 'caveat', deviceMemory: 2 });
+    expect(gateStage(headless.e, { crashFlag: false, override: '3d' })).toBe(
       '3d',
     );
     expect(headless.contexts[0]?.opts.failIfMajorPerformanceCaveat).toBe(false);
+    // Reduced motion and the crash flag win over the override, without a probe.
+    const reduced = env({ webgl2: 'ok', queries: [REDUCED_MOTION_QUERY] });
+    expect(gateStage(reduced.e, { crashFlag: false, override: '3d' })).toBe(
+      'flat',
+    );
+    const crashed = env({ webgl2: 'ok' });
+    expect(gateStage(crashed.e, { crashFlag: true, override: '3d' })).toBe(
+      'flat',
+    );
+    expect(reduced.canvases() + crashed.canvases()).toBe(0);
     expect(
       gateStage(env({ webgl2: 'caveat' }).e, {
         crashFlag: false,

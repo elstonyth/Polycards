@@ -10,6 +10,7 @@ import {
   restState,
   slotIntro,
   slotOpacity,
+  stageOpacity,
 } from '../stage-pose';
 
 const PHONE: StageLayout = { cx: 195, cy: 330, step: 210, artH: 352 };
@@ -69,6 +70,16 @@ describe('poseAt: rest', () => {
     expect(slotOpacity(2, false)).toBe(0);
     expect(slotOpacity(2, true)).toBe(1);
     expect(slotOpacity(-3, true)).toBe(0);
+  });
+
+  it('fades whole packs with reach and the category switch', () => {
+    expect(stageOpacity(state(), 4, false)).toBe(1);
+    expect(stageOpacity(state(), 6, false)).toBe(0);
+    expect(stageOpacity(state({ track: 4 }), 5.5, false)).toBe(0.5);
+    expect(stageOpacity(state({ swap: 1 }), 4, true)).toBe(0);
+    const half = stageOpacity(state({ swap: 0.3 }), 4, true);
+    expect(half).toBeGreaterThan(0);
+    expect(half).toBeLessThan(0.7); // eased: fades faster than linear
   });
 
   it('turns neighbours toward the centre', () => {

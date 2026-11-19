@@ -26,7 +26,7 @@ import type {
   StageRuntimeStats,
   StageState,
 } from '../contract';
-import { poseAt, slotOpacity } from '../stage-pose';
+import { poseAt, stageOpacity } from '../stage-pose';
 import {
   NO_PROMOTION,
   PROMOTE_MIN_DPR,
@@ -503,7 +503,7 @@ export function createStageRuntime(
 
   const setLayout = (l: StageLayout) => {
     if (dead()) return;
-    layout = { cx: l.cx, cy: l.cy, step: l.step, artH: l.artH };
+    layout = { cx: l.cx, cy: l.cy, step: l.step, artH: l.artH, artW: l.artW };
     needsDraw = true;
   };
 
@@ -620,17 +620,24 @@ export function createStageRuntime(
             if (v?.model && v !== shown) v.model.visible = false;
           const model = shown?.model;
           if (!shown || !model) continue;
-          const opacity = slotOpacity(slot.index - track, desktop);
+          // The same fade as the CSS tiles: reach, and the category switch.
+          const opacity = stageOpacity(s, slot.index, desktop);
           if (opacity <= 0) {
             model.visible = false;
             continue;
           }
           const pose = poseAt(s, slot.index, l, desktop, slot.soldOut);
+          // The picture is `object-fit: contain` in the art box: a pack wider
+          // than the box draws shorter than artH, so the model does too.
+          const fit =
+            l.artW && slot.width > 0 && slot.height > 0
+              ? Math.min(1, l.artW / l.artH / (slot.width / slot.height))
+              : 1;
           placeModel(
             model,
             pose,
             l.cx + (slot.index - track) * l.step,
-            l,
+            fit < 1 ? { ...l, artH: l.artH * fit } : l,
             hostW,
             hostH,
           );

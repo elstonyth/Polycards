@@ -49,6 +49,12 @@ export type StageLayout = {
   cy: number;
   step: number;
   artH: number;
+  /**
+   * ADDITION (optional): the art box width. Pictures are `object-fit: contain`
+   * in an `artW x artH` box, so a pack wider than the box draws shorter than
+   * `artH`; the runtime fits each model the same way.
+   */
+  artW?: number;
 }; // host CSS px
 export type Pose = {
   dx: number;
@@ -162,7 +168,8 @@ export type StageRuntime = {
   resize(w: number, h: number, dpr: number): void;
   setPacks(p: StageRuntimePack[] | null): void;
   setLayout(l: StageLayout): void;
-  prepare(): Promise<void>;
+  /** ADDITION: optional start centre (the attached track); default: first pack in stock. */
+  prepare(track?: number): Promise<void>;
   render(
     s: Readonly<StageState>,
     now: number,
