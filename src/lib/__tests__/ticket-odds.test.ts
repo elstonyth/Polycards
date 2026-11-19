@@ -9,7 +9,7 @@ import {
 } from '@/lib/packs-format';
 
 // A ticket pack's odds panel runs the same sums as a card pack's, with the ticket
-// amount standing in for the price. The rates are always the published ones.
+// amount standing in for the price. The rates are always the Pull Odds.
 
 const POOL = [
   ticketCard(10, 'Common'),
@@ -29,18 +29,18 @@ describe('ticketOddsPool', () => {
     });
   });
 
-  test('the average weighs each tier by its published chance', () => {
+  test('the average weighs each tier by its Pull Odds chance', () => {
     // Common averages 15, so 15 x 0.9 + 50 x 0.09 + 1000 x 0.01 = 28
     expect(poolExpectedValue(rows, { Common: 90, Rare: 9, Immortal: 1 })).toBe(
       28,
     );
   });
 
-  test('published odds that do not add up give no average', () => {
+  test('Pull Odds that do not add up give no average', () => {
     expect(poolExpectedValue(rows, { Common: 50 })).toBeNull();
   });
 
-  test('a published tier with no amounts gives no average', () => {
+  test('a Pull Odds tier with no amounts gives no average', () => {
     expect(poolExpectedValue(rows, { Common: 90, Mythical: 10 })).toBeNull();
   });
 

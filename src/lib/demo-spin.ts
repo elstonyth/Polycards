@@ -1,24 +1,24 @@
 /**
  * Guest demo-spin draw — pure theater for logged-out visitors.
  *
- * Samples a rarity from whichever odds the caller picked (the published display
- * odds, else the static `ODDS` in packs-data.ts) and picks a card of that tier
+ * Samples a rarity from whichever odds the caller picked (the pack's Pull Odds,
+ * else the static `ODDS` in packs-data.ts) and picks a card of that tier
  * from the public pool. Runs entirely client-side: no backend call, no Pull
  * row, no credit/stock effects. `Math.random` quality is fine — nothing is at
  * stake.
  *
  * FIDELITY CEILING: the card WITHIN a tier is uniform — per-card weights are
  * secret and never reach the client, so a demo pull is never quite the real
- * distribution. Only published odds may reach a customer (owner, 2026-11-11;
+ * distribution. Only the Pull Odds may reach a customer (owner, 2026-11-11;
  * docs/adr/0005-demo-spin-publishes-set-3-tier-odds.md is superseded).
  *
  * Rolls are injected as arguments so the weighting math stays unit-testable.
  */
 import type { PackCard, Rarity } from '@/lib/packs-data';
 
-export interface PublishedOdd {
+export interface PullOdd {
   rarity: Rarity;
-  /** Published percentage, e.g. "0.5%". */
+  /** Pull Odds percentage, e.g. "0.5%". */
   chance: string;
 }
 
@@ -29,11 +29,11 @@ export function parseChance(chance: string): number {
 }
 
 /**
- * Weighted rarity sample. `roll` ∈ [0,1) walks the cumulative published
+ * Weighted rarity sample. `roll` ∈ [0,1) walks the cumulative Pull Odds
  * chances in display order (rarest first); degenerate rolls (≥ total weight)
  * resolve to the last — most common — tier.
  */
-export function sampleRarity(odds: PublishedOdd[], roll: number): Rarity {
+export function sampleRarity(odds: PullOdd[], roll: number): Rarity {
   const total = odds.reduce((sum, o) => sum + parseChance(o.chance), 0);
   let cursor = roll * total;
   for (const o of odds) {
@@ -46,13 +46,13 @@ export function sampleRarity(odds: PublishedOdd[], roll: number): Rarity {
 
 /**
  * Draw a demo card: sample a tier (`rarityRoll`), then pick uniformly within
- * it (`cardRoll`). A pool may not stock every published tier — fall back to
+ * it (`cardRoll`). A pool may not stock every Pull Odds tier — fall back to
  * the nearest MORE COMMON tier first (cheaper-feeling miss beats a windfall),
  * then rarer ones. Returns null only for an empty pool.
  */
 export function demoDraw(
   pool: PackCard[],
-  odds: PublishedOdd[],
+  odds: PullOdd[],
   rarityRoll: number,
   cardRoll: number,
 ): PackCard | null {
@@ -75,7 +75,7 @@ export function demoDraw(
       ]!;
     }
   }
-  // Pool rarities all outside the published odds (can't happen with the full
+  // Pool rarities all outside the Pull Odds (can't happen with the full
   // static ODDS, but keeps the "null only on empty pool" contract honest).
   // pool.length > 0 is checked at the top of the function
   return pool[0] ?? null;

@@ -136,7 +136,7 @@ describe('getDraftPackDetail', () => {
           body: {
             prize_type: 'tickets',
             odds: [{ tickets: 100, rarity: 'Rare' }],
-            published_odds: { tiers: { Rare: 100 } },
+            pull_odds: { tiers: { Rare: 100 } },
             demo_odds: null,
           },
         },
@@ -145,7 +145,7 @@ describe('getDraftPackDetail', () => {
     );
     const d = await getDraftPackDetail('gold-capsule');
     expect(d?.pool.map((c) => c.tickets)).toEqual([100]);
-    expect(d?.publishedOdds).toEqual({ tiers: { Rare: 100 } });
+    expect(d?.pullOdds).toEqual({ tiers: { Rare: 100 } });
     expect(asked(b, `${LIST}/gold-capsule`)).toBe(true);
   });
 

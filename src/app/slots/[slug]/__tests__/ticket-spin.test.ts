@@ -205,7 +205,7 @@ async function render(props: { count?: number; demo?: boolean } = {}) {
         pack: LUCKY,
         recentPulls: [],
         count: props.count ?? 1,
-        publishedOdds: null,
+        pullOdds: null,
         pool: POOL,
         demoPool: props.demo ? POOL : null,
       }),

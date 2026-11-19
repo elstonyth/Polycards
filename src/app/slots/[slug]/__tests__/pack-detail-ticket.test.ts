@@ -6,7 +6,7 @@ import { ticketCard, type ResolvedPack } from '@/lib/packs-data';
 import type { PackDetail } from '@/lib/data/packs';
 
 // A ticket pack has no card to show, value or sell, so the pack page drops
-// everything that assumes one. It keeps the published odds, with ticket amounts
+// everything that assumes one. It keeps the Pull Odds, with ticket amounts
 // where a card pack has values, and Top Hits with ticket prizes. The real odds
 // panel renders here. The same page with a card pack is the control.
 
@@ -80,7 +80,7 @@ const BASE: ResolvedPack = {
 const TICKET_DETAIL: PackDetail = {
   topHits: [],
   pool: [ticketCard(10, 'Common'), ticketCard(1000, 'Immortal')],
-  publishedOdds: { tiers: { Immortal: 0.1, Common: 99.9 } },
+  pullOdds: { tiers: { Immortal: 0.1, Common: 99.9 } },
 };
 
 const CARD_DETAIL: PackDetail = {
@@ -97,7 +97,7 @@ const CARD_DETAIL: PackDetail = {
       spriteImage: null,
     },
   ],
-  publishedOdds: { tiers: { Immortal: 100 } },
+  pullOdds: { tiers: { Immortal: 100 } },
 };
 
 let container: HTMLDivElement;
@@ -170,7 +170,7 @@ describe('PackDetailClient — ticket pack', () => {
     }
   });
 
-  test('keeps the published odds panel and the open', async () => {
+  test('keeps the Pull Odds panel and the open', async () => {
     const text = await render({ ...BASE, prizeType: 'tickets' }, TICKET_DETAIL);
     expect(text).toContain('Pull Odds');
     expect(text).toContain('Immortal');
@@ -289,23 +289,23 @@ describe('PackDetailClient — ticket pack', () => {
       {
         ...TICKET_DETAIL,
         pool: [ticketCard(10, 'Common'), ticketCard(50, 'Common')],
-        publishedOdds: { tiers: { Common: 100 } },
+        pullOdds: { tiers: { Common: 100 } },
       },
     );
     expect(text).toContain('10 – 50 tickets');
   });
 
   // 1000 x 0.001 + 10 x 0.999 = 10.99, shown to one decimal.
-  test('the odds panel states the average from the published odds', async () => {
+  test('the odds panel states the average from the Pull Odds', async () => {
     const text = await render({ ...BASE, prizeType: 'tickets' }, TICKET_DETAIL);
     expect(text).toContain('Average per pull');
     expect(text).toContain('11 tickets');
   });
 
-  test('published odds that do not add up show no average', async () => {
+  test('Pull Odds that do not add up show no average', async () => {
     const text = await render(
       { ...BASE, prizeType: 'tickets' },
-      { ...TICKET_DETAIL, publishedOdds: { tiers: { Common: 50 } } },
+      { ...TICKET_DETAIL, pullOdds: { tiers: { Common: 50 } } },
     );
     expect(text).not.toContain('Average per pull');
     expect(text).toContain('Tickets per pull');

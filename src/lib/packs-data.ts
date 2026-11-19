@@ -1,5 +1,5 @@
 // Pack catalog TYPES + presentational category meta (labels/icons) + the
-// statically-published odds display. Pack `id` doubles as the route slug
+// static fallback odds display. Pack `id` doubles as the route slug
 // (/slots/<id>).
 //
 // NOTE: there is no static pack list here any more. Every pack the storefront
@@ -412,12 +412,17 @@ export function factoryVideo(
 }
 
 // ---------------------------------------------------------------------------
-// Card display types + the statically-published odds (real pool data comes
+// Card display types + the static fallback odds (real pool data comes
 // from the backend — the storefront renders no mock cards).
 // ---------------------------------------------------------------------------
 
 export type Rarity =
-  'Immortal' | 'Legendary' | 'Mythical' | 'Rare' | 'Uncommon' | 'Common';
+  | 'Immortal'
+  | 'Legendary'
+  | 'Mythical'
+  | 'Rare'
+  | 'Uncommon'
+  | 'Common';
 /** A card of a pack's prize pool (and, since the reveal shows the same shape,
  *  a won card — `WonCard` in actions/packs.ts is this type). The pool row's
  *  tier is REQUIRED: the odds schema drops a row without one, so unlike the
@@ -453,8 +458,8 @@ export function ticketCard(tickets: number, rarity: Rarity): PackCard {
   };
 }
 
-// Per-rarity pull odds — the statically-PUBLISHED display, decoupled by design
-// from the backend's secret per-card weights (admin-configurable in Step 4).
+// Per-rarity pull odds — a STATIC display used when a pack has no Pull Odds,
+// decoupled by design from the backend's secret per-card weights.
 // All six tiers, rarest first; dots match RARITY_RGB in src/lib/rarity.ts.
 export const ODDS: { rarity: Rarity; chance: string; dot: string }[] = [
   { rarity: 'Immortal', chance: '0.1%', dot: 'bg-orange-400' },
