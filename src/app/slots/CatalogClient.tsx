@@ -20,6 +20,7 @@ import {
   SPRING,
 } from '@/components/ui/soft';
 import Reveal from '@/components/Reveal';
+import { AmbientVideo } from '@/components/AmbientVideo';
 import QtyStepper from '@/components/QtyStepper';
 import FreePackBadge from '@/components/FreePackBadge';
 import PackCategoryTabs from '@/components/PackCategoryTabs';
@@ -107,12 +108,11 @@ function PackCard({
   const facts = lead
     ? packFacts({ ...pack, categoryId: '', categoryName, icon })
     : [];
-  // The pack's own factory scene, as a still: the loop belongs to the pack
-  // page (it starts on hydration, visible or not), and three of them here
-  // would download for cards nobody scrolled to. None on a pack without one.
-  const scene = withScene
-    ? (factoryVideo(pack.displayImage)?.poster ?? pack.displayImage)
-    : undefined;
+  // The pack's own factory scene. Its still paints first (the loop's own first
+  // frame); the loop plays over it only while the card is on screen, so a
+  // card nobody scrolled to downloads no clip. None on a pack without one.
+  const loop = withScene ? factoryVideo(pack.displayImage) : null;
+  const scene = withScene ? (loop?.poster ?? pack.displayImage) : undefined;
   return (
     <Bezel
       className={cn(
@@ -224,6 +224,14 @@ function PackCard({
               unoptimized={!isOptimizableImage(scene)}
               className="object-cover"
             />
+            {loop && (
+              <AmbientVideo
+                mp4={loop.mp4}
+                webm={loop.webm}
+                whenVisible
+                className="absolute inset-0 h-full w-full"
+              />
+            )}
           </div>
         )}
 
