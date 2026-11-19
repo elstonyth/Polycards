@@ -134,6 +134,25 @@ describe('usePackBuy', () => {
     h.unmount();
   });
 
+  it("a quantity tap keeps the entry's own state (the flow's marker), never Next's", () => {
+    window.history.replaceState(
+      { __flow: 'f1', __NA: true, __PRIVATE_NEXTJS_INTERNALS_TREE: {} },
+      '',
+      '/slots/gold-pack',
+    );
+    const h = hook({ pack: GOLD, detail: DETAIL });
+    act(() => h.current.setQ(2));
+    expect(window.history.state).toEqual({ __flow: 'f1' });
+    expect(window.location.search).toBe('?count=2');
+    h.unmount();
+    // The pack page's own entries carry nothing of ours: written as before.
+    window.history.replaceState(null, '', '/slots/gold-pack');
+    const p = hook({ pack: GOLD, detail: DETAIL });
+    act(() => p.current.setQ(3));
+    expect(window.history.state).toBeNull();
+    p.unmount();
+  });
+
   it('no count in the address: the server prop; junk: one', () => {
     const h = hook({ pack: GOLD, detail: DETAIL, qty: 2 });
     expect(h.current.qty).toBe(2);

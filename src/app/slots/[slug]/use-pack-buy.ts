@@ -114,6 +114,21 @@ const readCount = (): string | null =>
   new URLSearchParams(window.location.search).get('count');
 const serverCount = (): string | null => null;
 
+/**
+ * The current history entry's own keys (the homepage flow's focus marker),
+ * without Next's internal ones: Next adds those back itself, and handing them
+ * over would skip its router update. Null when there are none, which is what
+ * the pack page always had, so its entries are written exactly as before.
+ */
+export function ownHistoryState(): Record<string, unknown> | null {
+  const state: unknown = window.history.state;
+  if (!state || typeof state !== 'object') return null;
+  const own = Object.entries(state as Record<string, unknown>).filter(
+    ([k]) => !k.startsWith('__NA') && !k.startsWith('__PRIVATE_NEXTJS'),
+  );
+  return own.length > 0 ? Object.fromEntries(own) : null;
+}
+
 /** The raw `?count=` value; null before the browser's address can be read. */
 const useAddressCount = (): string | null =>
   useSyncExternalStore(subscribe, readCount, serverCount);
@@ -195,7 +210,7 @@ export function usePackBuy(
     // pack preserve the chosen quantity without adding an entry per tap.
     const url = new URL(window.location.href);
     url.searchParams.set('count', String(next));
-    window.history.replaceState(null, '', url);
+    window.history.replaceState(ownHistoryState(), '', url);
     notify();
   };
 

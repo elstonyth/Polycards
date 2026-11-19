@@ -169,7 +169,13 @@ function TierRail({
             (c, i) => (
               <li
                 key={c.handle}
-                className="max-w-[60%] flex-[1_0_44%] sm:max-w-[16rem] sm:flex-[1_0_10rem]"
+                className={
+                  // A capsule tier holds three prizes: three fit across a
+                  // phone and share the width (no swipe), as the plan says.
+                  tickets
+                    ? 'max-w-[60%] flex-[1_0_28%] sm:max-w-[16rem] sm:flex-[1_0_10rem]'
+                    : 'max-w-[60%] flex-[1_0_44%] sm:max-w-[16rem] sm:flex-[1_0_10rem]'
+                }
               >
                 {tickets ? (
                   <TicketTile card={c} rank={i + 1} />
