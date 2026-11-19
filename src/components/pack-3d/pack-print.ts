@@ -99,11 +99,7 @@ export type PackPrintSpec = {
 };
 
 export type PrintRole =
-  | 'price'
-  | 'productLine'
-  | 'oddsLabel'
-  | 'oddsValue'
-  | 'buyback';
+  'price' | 'productLine' | 'oddsLabel' | 'oddsValue' | 'buyback';
 
 /** One positioned run of text, in text-space px of the actual texture. */
 export type PrintRun = {

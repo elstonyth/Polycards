@@ -207,9 +207,32 @@ function rebuildZone(img, W, H, rect, rand) {
   // a smooth foil estimate independent of the pixel itself: box mean (radius r) of a buffer's
   // luminance. The foil is soft gloss, so ink (and its antialiased edge) stands above it.
   const smoothLum = (getL, r) => {
-    const t = new Float32Array(w * h), o = new Float32Array(w * h);
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let s = 0, n = 0; for (let d = -r; d <= r; d++) { const xx = x + d; if (xx < 0 || xx >= w) continue; s += getL(y * w + xx); n++; } t[y * w + x] = s / n; }
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { let s = 0, n = 0; for (let d = -r; d <= r; d++) { const yy = y + d; if (yy < 0 || yy >= h) continue; s += t[yy * w + x]; n++; } o[y * w + x] = s / n; }
+    const t = new Float32Array(w * h),
+      o = new Float32Array(w * h);
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        let s = 0,
+          n = 0;
+        for (let d = -r; d <= r; d++) {
+          const xx = x + d;
+          if (xx < 0 || xx >= w) continue;
+          s += getL(y * w + xx);
+          n++;
+        }
+        t[y * w + x] = s / n;
+      }
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        let s = 0,
+          n = 0;
+        for (let d = -r; d <= r; d++) {
+          const yy = y + d;
+          if (yy < 0 || yy >= h) continue;
+          s += t[yy * w + x];
+          n++;
+        }
+        o[y * w + x] = s / n;
+      }
     return o;
   };
 
@@ -317,9 +340,13 @@ function rebuildZone(img, W, H, rect, rand) {
   }
   // check c: against an independent smooth estimate of the FINISHED zone, the rebuilt pixels may
   // stand out no more than the untouched foil pixels of the same zone do
-  const outL = (j) => { const p = at(j % w, (j / w) | 0); return lum(img[p], img[p + 1], img[p + 2]); };
+  const outL = (j) => {
+    const p = at(j % w, (j / w) | 0);
+    return lum(img[p], img[p + 1], img[p + 2]);
+  };
   const smOut = smoothLum(outL, 4);
-  let worst = 0, foilWorst = 0;
+  let worst = 0,
+    foilWorst = 0;
   for (let i = 0; i < w * h; i++) {
     if (!inside(i % w, (i / w) | 0)) continue;
     const r = outL(i) - smOut[i];
@@ -345,7 +372,7 @@ function rebuildZone(img, W, H, rect, rand) {
     for (const r of rects) {
       const s = rebuildZone(img, W, H, r, rand);
       console.log(
-        `${set}: zone ${r.id} cols ${r.x0}-${r.x1 - 1} rows ${r.y0}-${r.y1 - 1}: rebuilt ${s.filled} px, foil grain ${s.foilGrain.toFixed(2)}, mask grown by evidence +${s.grown.join("/+")} px; brightest rebuilt px ${s.worst.toFixed(2)} levels above the smoothed zone (untouched foil: ${s.foilWorst.toFixed(2)})`,
+        `${set}: zone ${r.id} cols ${r.x0}-${r.x1 - 1} rows ${r.y0}-${r.y1 - 1}: rebuilt ${s.filled} px, foil grain ${s.foilGrain.toFixed(2)}, mask grown by evidence +${s.grown.join('/+')} px; brightest rebuilt px ${s.worst.toFixed(2)} levels above the smoothed zone (untouched foil: ${s.foilWorst.toFixed(2)})`,
       );
       if (s.worst > s.foilWorst + 3)
         throw new Error(

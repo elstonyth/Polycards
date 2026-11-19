@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports -- a CommonJS node tool */
 // Builds the storefront's 3D pack catalogue from the approved research files
 // (docs/research/home-3d/pack-back/, gitignored, so this runs only on the
 // machine that has them). Re-run it whenever a front, plate or setting there

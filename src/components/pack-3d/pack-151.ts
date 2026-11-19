@@ -10,60 +10,60 @@ export const PACK_151_GEOMETRY: PackGeometry = {
   pack: '151',
   image: {
     width: 897,
-    height: 1666
+    height: 1666,
   },
   alphaThreshold: 128,
   bounds: {
     x0: 0,
     x1: 0.9989,
     y0: 0.0012,
-    y1: 0.9994
+    y1: 0.9994,
   },
   body: {
     x0: 0.0212,
-    x1: 0.9766
+    x1: 0.9766,
   },
   crimpTop: {
     y0: 0.0012,
-    y1: 0.0594
+    y1: 0.0594,
   },
   crimpBottom: {
     y0: 0.9364,
-    y1: 0.9994
+    y1: 0.9994,
   },
   finSeal: {
     x0: 0.4939,
-    x1: 0.5853
+    x1: 0.5853,
   },
   printArea: {
     x0: 0.0803,
     x1: 0.9576,
     y0: 0.114,
-    y1: 0.8685
+    y1: 0.8685,
   },
   edges: {
     top: 0.00136,
-    bottom: 0.99918
+    bottom: 0.99918,
   },
   ridges: {
     top: {
       from: 0.0054,
       to: 0.05342,
       pitch: 0.00956,
-      crest: 0.00513
+      crest: 0.00513,
     },
     bottom: {
       from: 0.93637,
       to: 0.98439,
       pitch: 0.00987,
-      crest: 0.00146
+      crest: 0.00146,
     },
     fin: {
       from: 0.4961,
       to: 0.58082,
       pitch: 0.01547,
-      crest: 0.00148
-    }
+      crest: 0.00148,
+    },
   },
   outline: [
     [0.00136, 0.00356, 0.99543],

@@ -66,7 +66,9 @@ describe('polycards logo paths', () => {
     const { xs, ys } = coords(LOGO_MARK);
     expect(Math.min(...xs)).toBeGreaterThanOrEqual(0);
     expect(Math.min(...ys)).toBeGreaterThanOrEqual(0);
-    expect(Math.max(...xs)).toBeLessThan(Math.min(...LOGO_LETTERS.map((l) => l.x0)));
+    expect(Math.max(...xs)).toBeLessThan(
+      Math.min(...LOGO_LETTERS.map((l) => l.x0)),
+    );
     expect(LOGO_MARK_STROKE.width).toBeGreaterThan(0);
   });
 });
