@@ -93,7 +93,7 @@ export type Proposal =
     };
 
 /** What an unban needs, checked again when the person taps it: its own policy
- *  (policies/assistant.ts), held by super admins and the Support viewer. */
+ *  (policies/assistant.ts), held by super admins and the Customer support role. */
 export const UNBAN_NEED: Need = {
   resource: 'assistant_unban',
   operation: 'update',

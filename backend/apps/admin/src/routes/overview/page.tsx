@@ -38,7 +38,7 @@ export const config: RouteConfig = {
 };
 
 // Login lands here (via /orders). A role without the dashboard's figures goes
-// to the Players page instead — the Support viewer's home; the automation
+// to the Players page instead — the Customer support role's home; the automation
 // operator, without Players either, is passed on from there to Automation.
 export const handle = { permissions: 'stats:read', redirectTo: '/players' };
 

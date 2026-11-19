@@ -44,7 +44,7 @@ beforeEach(() => {
 });
 
 describe('unban_account', () => {
-  it('needs its own policy, which the Support viewer holds', () => {
+  it('needs its own policy, which the Customer support role holds', () => {
     expect(unban.needs).toEqual([UNBAN_NEED]);
     expect(UNBAN_NEED).toEqual({
       resource: 'assistant_unban',

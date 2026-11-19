@@ -269,7 +269,7 @@ export const TOOLS: AssistantTool[] = [
     effect: 'read',
     run: report('finance', 'groups'),
   },
-  // One customer (the Support viewer's scope).
+  // One customer (the Customer support role's scope).
   {
     name: 'player',
     label: "A player's money",
@@ -319,7 +319,7 @@ export const TOOLS: AssistantTool[] = [
       bank_account: str('A bank account number, any format.'),
       holder_name: str('A bank account holder name.'),
     }),
-    // Bank name and last 4 only, so the Support viewer (yu) may read it; it
+    // Bank name and last 4 only, so the Customer support role (yu) may read it; it
     // carries payout sums, so the payment screens' policy too.
     needs: [screen('customers'), screen('payments')],
     effect: 'read',

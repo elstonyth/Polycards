@@ -5,7 +5,7 @@ import {
   supportViewerRoleId,
 } from './create-support-viewer';
 
-// The view-only Support viewer role for an EXISTING admin login (owner's
+// The Customer support role for an EXISTING admin login (owner's
 // request, 2026-10-31, for anson@polycards.gg: "see the players same like Yu").
 // create-support-viewer.ts refuses an existing login, so this adds the same
 // shared role BESIDE the user's current ones: a later change to the role
@@ -16,7 +16,7 @@ import {
 
 type AdminUser = { id: string; email: string; rbac_roles?: { id: string }[] };
 
-/** Adds the Support viewer role to one existing admin user via core's
+/** Adds the Customer support role to one existing admin user via core's
  *  assign-user-roles workflow. That workflow checks the assigning actor holds
  *  every policy it hands out, so a super admin is the actor. Refuses an email
  *  with no admin user; a user who already has the role is left as is. */

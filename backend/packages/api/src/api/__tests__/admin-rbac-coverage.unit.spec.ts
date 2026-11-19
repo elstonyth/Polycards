@@ -93,7 +93,8 @@ describe('admin RBAC coverage', () => {
         .filter((r) => prefixOf(r.url) === p)
         .every((r) =>
           CORE_PREFIX_WRITES.some(
-            (w) => w.method === r.method && matcherToRegExp(w.matcher).test(r.url),
+            (w) =>
+              w.method === r.method && matcherToRegExp(w.matcher).test(r.url),
           ),
         );
     const unknown = [...new Set(routes.map((r) => prefixOf(r.url)))].filter(
@@ -148,6 +149,22 @@ describe('admin RBAC coverage', () => {
     expect(policyFor('POST', '/admin/customers/*/credits')).toEqual([
       'customer:update',
     ]);
+    // The support fixes ask their own policy, never customer:update (owner,
+    // 2026-11-19); clearing a name clash stays admins only.
+    for (const url of [
+      '/admin/customers/*/real-name',
+      '/admin/customers/*/bank-accounts/add',
+      '/admin/customers/*/bank-accounts/remove',
+      '/admin/customers/*/bank-accounts/verify',
+    ]) {
+      expect(policyFor('POST', url)).toEqual(['customer_support:update']);
+    }
+    expect(
+      policyFor('POST', '/admin/customers/*/bank-accounts/name-clash'),
+    ).toEqual(['customer:update']);
+    expect(policyFor('POST', '/admin/customers/*/phone')).toEqual([
+      'customer:update',
+    ]);
     // Unbanning a number is an unban: the assistant's policy, not customer:update.
     expect(
       policyFor('POST', '/admin/customers/*/bank-accounts/unban-number'),
@@ -158,8 +175,12 @@ describe('admin RBAC coverage', () => {
     expect(policyFor('GET', '/admin/referrals/settlements')).toEqual([
       'referral:read',
     ]);
-    expect(policyFor('GET', '/admin/coin-flips/settings')).toEqual(['coin_flip:read']);
-    expect(policyFor('POST', '/admin/coin-flips/settings')).toEqual(['coin_flip:update']);
+    expect(policyFor('GET', '/admin/coin-flips/settings')).toEqual([
+      'coin_flip:read',
+    ]);
+    expect(policyFor('POST', '/admin/coin-flips/settings')).toEqual([
+      'coin_flip:update',
+    ]);
     // Stock writes (spec 2026-10-28).
     expect(policyFor('POST', '/admin/goods-receive-notes')).toEqual([
       'goods_receive_note:update',
@@ -206,7 +227,7 @@ describe('admin RBAC coverage', () => {
       ]),
     );
     // Partner passwords and full bank numbers must not ride on a screen's read
-    // policy: the view-only Support viewer holds those but not these.
+    // policy: a read role needs these on top of the screen policy.
     const declared = new Set(
       secretReadPolicies.policies.map((p) => `${p.resource}:${p.operation}`),
     );
