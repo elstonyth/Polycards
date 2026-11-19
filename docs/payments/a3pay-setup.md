@@ -1,5 +1,13 @@
 # A3Pay (Singapore, SGD) setup
 
+> **Closed on 2026-11-19.** Singapore payments are moving to another gateway. `A3PAY_ENABLED` is `"false"` in `.do/backend.app.yaml`:
+>
+> - The S$ option is gone from the top-up sheet.
+> - New S$ top-ups, S$ payouts and approvals of held A3Pay payouts are refused. A held A3Pay payout can still be denied, which refunds it.
+> - A saved Singapore bank account shows as "not available with the current payout provider".
+>
+> The other `A3PAY_*` values stay set, so callbacks, the sweeps and the gateway audit still settle rows already in flight. Remove them, and let A3Pay close the merchant and the IP whitelist, only once no `a3pay` row is pending and the 7-day deposit re-read window has passed. To reopen, set the flag back to `"true"` and apply the spec.
+
 A3Pay is a **regional rail**. It runs beside the active RM gateway (TGPay) and never replaces it:
 
 - **Top-ups.** Singapore customers choose **Pay in S$** on the top-up sheet. They pay in SGD by PayNow QR (`BQR`) or bank transfer (`OB`), and are credited **RM** at today's rate minus our top-up fee (a percent).
