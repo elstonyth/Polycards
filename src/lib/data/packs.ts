@@ -74,10 +74,17 @@ type BackendPack = MaybeAbsent<
   | 'psa10'
   | 'prize_type'
   | 'status'
+  | 'pack_type'
+  | 'language'
 >;
 type BackendDetailPack = MaybeAbsent<
   StorePackDetailPack,
-  'buyback_percent' | 'in_stock' | 'prize_type' | 'status'
+  | 'buyback_percent'
+  | 'in_stock'
+  | 'prize_type'
+  | 'status'
+  | 'pack_type'
+  | 'language'
 >;
 
 const toPack = (p: BackendPack): Pack => ({
@@ -97,6 +104,8 @@ const toPack = (p: BackendPack): Pack => ({
   // passthrough. psa10 defaults false: never overclaim the guarantee.
   group: p.group ?? null,
   psa10: p.psa10 === true,
+  packType: p.pack_type ?? null,
+  language: p.language ?? null,
 });
 
 /** 'one-piece' → 'One Piece' — label for a category key the local meta lacks.

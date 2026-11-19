@@ -146,11 +146,16 @@ async function run() {
     await page.goto(`${BASE}${packHref}`, { waitUntil: 'load' });
 
     // The pool grid lives inside PoolByRarity's own modal, opened by the
-    // expand control (the only aria-haspopup="dialog" button on the page).
+    // expand control. Matched by its label too: the header's Games menu is
+    // also an aria-haspopup="dialog" button, and it comes first on the page.
     // WAIT for it rather than sampling isVisible() straight off `load` — the
     // pool section renders after hydration, so an immediate check is a race
     // that fails intermittently and reads like the control is gone.
-    const expand = page.locator('button[aria-haspopup="dialog"]').first();
+    const expand = page
+      .locator(
+        'button[aria-haspopup="dialog"][aria-label*="grouped by rarity"]',
+      )
+      .first();
     const reachable = await expand
       .waitFor({ state: 'visible', timeout: 10000 })
       .then(() => true)
@@ -208,7 +213,9 @@ async function run() {
         failures.push(
           `overlay did not render a CardDetail (h1=${JSON.stringify(overlay.h1)}, imgs=${overlay.imgs}, price=${JSON.stringify(overlay.price)}) — the absence checks below would have been vacuous`,
         );
-      } else if (!overlay.h1.toLowerCase().includes(cardName.toLowerCase())) {
+        // The tile's label goes on after the name ("<name>, <tier>, RM … est. —
+        // reel sprite …"), so the name the overlay shows must open it.
+      } else if (!cardName.toLowerCase().startsWith(overlay.h1.toLowerCase())) {
         failures.push(
           `overlay shows "${overlay.h1}" but the tile clicked was "${cardName}"`,
         );

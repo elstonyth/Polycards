@@ -22,7 +22,7 @@ export const hasPublishedOddsContent = (
   odds !== null && (odds.length > 0 || range !== null);
 
 /** "RM 10.00 – RM 50.00", or on a ticket pack "10 – 50 tickets". */
-const rangeLabel = (r: PoolValueRange, tickets: boolean): string => {
+export const rangeLabel = (r: PoolValueRange, tickets: boolean): string => {
   if (!tickets) {
     return r.min === r.max ? rm(r.min) : `${rm(r.min)} – ${rm(r.max)}`;
   }

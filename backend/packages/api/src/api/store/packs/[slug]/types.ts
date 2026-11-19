@@ -14,6 +14,10 @@ export type StorePackDetailPack = {
   boost: boolean;
   buyback_percent: number;
   in_stock: boolean;
+  /** Admin tag; null = untagged. */
+  pack_type: 'classic' | 'original' | 'special' | null;
+  /** Only an original pack has one. */
+  language: 'en' | 'jp' | null;
   rank: number;
   status: string;
 };

@@ -20,6 +20,10 @@ export type StorePackRow = {
   group: 'GRADED' | 'RAW' | 'MIX' | null;
   /** Every pooled card is a PSA 10. */
   psa10: boolean;
+  /** Admin tag; null = untagged. */
+  pack_type: 'classic' | 'original' | 'special' | null;
+  /** Only an original pack has one. */
+  language: 'en' | 'jp' | null;
   rank: number;
   status: string;
 };

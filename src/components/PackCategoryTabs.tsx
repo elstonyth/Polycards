@@ -8,15 +8,20 @@ import type { PackTab } from '@/lib/packs-data';
  * up because the franchise is the first choice a player makes. A few tabs
  * stretch to share the row; more than fit scroll sideways. A `soon` tab shows
  * "Coming soon" and can't be picked (packTabs).
+ *
+ * `compact` is the pack page's panel: the same switch at 44px, where it is one
+ * step of a configurator and not the head of a page.
  */
 export default function PackCategoryTabs({
   categories,
   active,
   onChange,
+  compact = false,
 }: {
   categories: PackTab[];
   active: string;
   onChange: (id: string) => void;
+  compact?: boolean;
 }) {
   return (
     <div
@@ -34,7 +39,10 @@ export default function PackCategoryTabs({
             onClick={() => onChange(c.id)}
             aria-pressed={on}
             className={cn(
-              'flex min-h-12 flex-1 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-2 text-sm font-semibold transition-colors sm:gap-2 sm:px-5 lg:min-h-14 lg:text-base',
+              'flex flex-1 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-2 text-sm font-semibold transition-colors sm:gap-2',
+              compact
+                ? 'min-h-11 sm:px-3'
+                : 'min-h-12 sm:px-5 lg:min-h-14 lg:text-base',
               'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
               on
                 ? 'bg-neutral-50 text-neutral-950'
@@ -50,7 +58,8 @@ export default function PackCategoryTabs({
               width={28}
               height={28}
               className={cn(
-                'h-5 w-5 shrink-0 object-contain sm:h-6 sm:w-6 lg:h-7 lg:w-7',
+                'h-5 w-5 shrink-0 object-contain',
+                !compact && 'sm:h-6 sm:w-6 lg:h-7 lg:w-7',
                 // The narrowest phones can't fit three icons and "Coming soon".
                 c.soon && 'hidden opacity-50 grayscale-[0.4] min-[360px]:block',
               )}
@@ -58,7 +67,12 @@ export default function PackCategoryTabs({
             {c.soon ? (
               <span className="flex flex-col items-start leading-tight">
                 {c.tab}
-                <span className="text-[10px] font-medium lg:text-[11px]">
+                <span
+                  className={cn(
+                    'text-[10px] font-medium',
+                    !compact && 'lg:text-[11px]',
+                  )}
+                >
                   Coming soon
                 </span>
               </span>

@@ -1,5 +1,8 @@
-// Pack detail sibling selector — verify the composition rails (Graded / Raw /
-// More) render and swipe, at phone width and at lg (sticky right column).
+// Pack detail picker — verify the shelves (pack type chips, language chips,
+// the Graded / Raw Cards / More groups and their tiles) at phone width and at
+// lg (sticky right column). The file keeps its old name: the picker was
+// sideways rails until 2026-11-18, and `pack-rail` is still the tile list's
+// test id.
 // Usage: node scripts/qa-pack-selector-rails.mjs [slug]
 import { chromium } from 'playwright';
 
@@ -19,10 +22,10 @@ for (const [label, viewport] of [
     window.localStorage.setItem('polycards.cookie-consent', 'rejected'),
   );
   const p = await ctx.newPage();
-  await p.goto(`${BASE}/slots/${SLUG}`, {
-    waitUntil: 'networkidle',
-    timeout: 60000,
-  });
+  // `load`, not `networkidle`: Next leaks duplicate RSC prefetches that never
+  // finish, so networkidle never fires on a page that navigates.
+  await p.goto(`${BASE}/slots/${SLUG}`, { waitUntil: 'load', timeout: 60000 });
+  await p.locator('h1').first().waitFor();
   await p.waitForTimeout(1200);
 
   const panel = p.locator('aside').first();
@@ -30,55 +33,50 @@ for (const [label, viewport] of [
   await p.waitForTimeout(400);
   await panel.screenshot({ path: `docs/research/pack-selector-${label}.png` });
 
-  // What the rails actually contain + whether the arrived-on pack is centred.
   // Anchored on the selector's test ids, so a copy or wrapper change in the
   // configurator doesn't silently turn this probe into "no groups found".
   const state = await p.evaluate(() => {
     const box = document.querySelector('[data-testid="pack-selector"]');
     if (!box) return { error: 'pack-selector not found' };
+    const chips = (name) =>
+      [...box.querySelectorAll(`[aria-label="${name}"] button`)].map((c) => ({
+        label: c.textContent?.trim(),
+        on: c.getAttribute('aria-pressed') === 'true',
+      }));
+    const aside = document.querySelector('aside');
+    const scroller = aside?.firstElementChild;
     return {
+      facts: document
+        .querySelector('[data-testid="pack-facts"]')
+        ?.textContent?.trim(),
+      types: chips('Pack type'),
+      languages: chips('Language'),
       groups: [
         ...box.querySelectorAll('[data-testid="pack-selector-group"]'),
       ].map((g) => {
-        const rail = g.querySelector('[data-testid="pack-rail"]');
-        if (!rail) return { error: 'pack-rail not found in group' };
-        const active = rail.querySelector('button[aria-pressed="true"]');
-        // How many px of a partially-visible tile are showing at each edge —
-        // the "peek" that tells a user the rail scrolls. 0 on a side with
-        // nothing to scroll to is correct; 0 on a side that still has packs
-        // is the bug.
-        const peek = (side) => {
-          const tiles = [...rail.querySelectorAll('button')];
-          const l = rail.scrollLeft;
-          const r = l + rail.clientWidth;
-          // offsetWidth, not clientWidth: the tiles carry a 1px border, which
-          // clientWidth excludes — enough to miss a barely-straddling tile.
-          const cut = tiles.find((t) =>
-            side === 'left'
-              ? t.offsetLeft < l - 1 && t.offsetLeft + t.offsetWidth > l + 1
-              : t.offsetLeft < r - 1 && t.offsetLeft + t.offsetWidth > r + 1,
-          );
-          if (!cut) return 0;
-          return Math.round(
-            side === 'left'
-              ? cut.offsetLeft + cut.offsetWidth - l
-              : r - cut.offsetLeft,
-          );
-        };
+        const list = g.querySelector('[data-testid="pack-rail"]');
+        if (!list) return { error: 'pack-rail not found in group' };
+        const tiles = [...list.querySelectorAll('a')];
+        const prices = tiles.map((t) =>
+          Number(
+            t.textContent?.replace(/,/g, '').match(/RM\s*([\d.]+)/)?.[1] ?? NaN,
+          ),
+        );
         return {
           heading: g.querySelector('p')?.textContent?.trim(),
-          tiles: rail.querySelectorAll('button').length,
-          scrollable: rail.scrollWidth > rail.clientWidth + 1,
-          scrollLeft: Math.round(rail.scrollLeft),
-          peekLeftPx: peek('left'),
-          peekRightPx: peek('right'),
-          activeVisible: active
-            ? active.offsetLeft >= rail.scrollLeft - 1 &&
-              active.offsetLeft + active.clientWidth <=
-                rail.scrollLeft + rail.clientWidth + 1
-            : null,
+          tiles: tiles.length,
+          cheapestFirst: prices.every((n, i) => i === 0 || prices[i - 1] <= n),
+          // Nothing may need a sideways swipe any more.
+          swipes: list.scrollWidth > list.clientWidth + 1,
+          current:
+            list.querySelector('a[aria-current="page"]')?.textContent?.trim() ??
+            null,
         };
       }),
+      // lg only: the panel scrolls inside itself when the shelf outgrows it.
+      panelScrolls: scroller
+        ? scroller.scrollHeight > scroller.clientHeight + 1
+        : null,
     };
   });
   console.log(label, JSON.stringify(state, null, 2));

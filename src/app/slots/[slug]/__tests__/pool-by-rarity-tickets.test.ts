@@ -10,7 +10,9 @@ import { ticketCard } from '@/lib/packs-data';
 vi.mock('next/image', () => ({
   default: ({ alt }: { alt: string }) => createElement('img', { alt }),
 }));
-vi.mock('@/components/cards/CardTile', () => ({
+// Only the tile is replaced: the strip also takes the module's rank label.
+vi.mock('@/components/cards/CardTile', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/components/cards/CardTile')>()),
   CardTile: () => createElement('div', null, 'a card tile'),
 }));
 vi.mock('@/lib/use-liquid-glass', () => ({

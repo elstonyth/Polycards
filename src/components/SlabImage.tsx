@@ -213,9 +213,9 @@ export const isGraded = (slabSrc?: string | null): boolean => Boolean(slabSrc);
  *
  * GEOMETRY CONTRACT: this glow reaches ~44px past the slab edge (the primary
  * shadow). Any surface that clips its overflow around a SlabImage must reserve
- * at least that much padding or the halo gets cut — see the rail padding in
- * src/app/slots/[slug]/PoolByRarity.tsx (py-12/px-10). Retune this radius and
- * that padding together.
+ * at least that much padding or the halo gets cut. The pack page's card tiles
+ * (src/components/cards/CardTile.tsx) cut it ON PURPOSE: their plate clips the
+ * halo so a tile is lit from inside, at a smaller `glowScale`.
  *
  * `scale` shrinks the halo for thumbnail-sized slabs (the /me showcase strip
  * renders 80px slabs — a full 44px halo there is wider than the slab and

@@ -58,6 +58,9 @@ export function freePackVerifyLink(missing: FreePackRequirement[]): {
     : { href: '/settings', label: 'Go to Settings →' };
 }
 
+export type PackType = 'classic' | 'original' | 'special';
+export type PackLanguage = 'en' | 'jp';
+
 export type Pack = {
   id: string;
   name: string;
@@ -95,6 +98,11 @@ export type Pack = {
   /** Set when the pack pays Lucky Draw tickets instead of cards. Absent on a
    *  card pack and on an older backend. */
   prizeType?: 'tickets';
+  /** Admin tag (#894): classic = the tier ladder, original = one set's own
+   *  cards, special = the rest. null/absent = untagged, or an older backend. */
+  packType?: PackType | null;
+  /** The cards' language. Only an original pack has one. */
+  language?: PackLanguage | null;
   /** A Draft pack, only ever seen by a member of a staff group that can see
    *  Drafts. Never set on a row from the public catalog. */
   draft?: boolean;
@@ -171,6 +179,89 @@ export function groupPacks(
     id,
     packs: by[id],
   }));
+}
+
+/** Shelf order and labels for the pack tags. One copy, shared by every surface
+ *  that sorts or labels packs by them. */
+export const PACK_TYPE_ORDER: readonly PackType[] = [
+  'classic',
+  'original',
+  'special',
+];
+export const PACK_TYPE_LABEL: Record<PackType, string> = {
+  classic: 'Classic',
+  original: 'Original',
+  special: 'Special',
+};
+export const PACK_LANGUAGE_ORDER: readonly PackLanguage[] = ['en', 'jp'];
+export const PACK_LANGUAGE_LABEL: Record<PackLanguage, string> = {
+  en: 'English',
+  jp: 'Japanese',
+};
+
+export type PackShelf = {
+  /** null = the packs no one has tagged. */
+  type: PackType | null;
+  /** Cheapest first. */
+  packs: Pack[];
+  /** The languages on this shelf, in PACK_LANGUAGE_ORDER. Two or more means
+   *  the shelf needs a language switch. */
+  languages: PackLanguage[];
+};
+
+/** One franchise's packs as the pack picker shelves them: a shelf per pack type
+ *  in PACK_TYPE_ORDER, untagged packs last, each shelf cheapest first (rank
+ *  order holds on a tie). Every pack lands on exactly one shelf, so a picker
+ *  that renders every shelf cannot lose one. A backend that sends no tags
+ *  yields a single untagged shelf. */
+export function shelvePacks(packs: Pack[]): PackShelf[] {
+  const order: (PackType | null)[] = [...PACK_TYPE_ORDER, null];
+  return order
+    .map((type) => {
+      const mine = packs
+        .filter((p) => (p.packType ?? null) === type)
+        // Array.prototype.sort is stable, so equal prices keep rank order.
+        .sort((a, b) => a.priceMyr - b.priceMyr);
+      return {
+        type,
+        packs: mine,
+        languages: PACK_LANGUAGE_ORDER.filter((l) =>
+          mine.some((p) => p.language === l),
+        ),
+      };
+    })
+    .filter((s) => s.packs.length > 0);
+}
+
+/** A shelf narrowed to one language. A pack that carries no language shows
+ *  under every language, so narrowing can never hide a pack for good. */
+export const shelfPacks = (
+  shelf: PackShelf,
+  language: PackLanguage | null,
+): Pack[] =>
+  language === null
+    ? shelf.packs
+    : shelf.packs.filter((p) => !p.language || p.language === language);
+
+/** What a pack page says about its pack, in reading order. Each fact is stated
+ *  only when the backend states it: an untagged pack has no Type, only an
+ *  original pack has a Language, and Cards follows catalogGroupOf, so "Graded"
+ *  appears only under the PSA 10 guarantee and a mixed pool says nothing. */
+export function packFacts(
+  pack: ResolvedPack,
+): { label: string; value: string }[] {
+  const facts = [{ label: 'Category', value: pack.categoryName }];
+  if (pack.packType)
+    facts.push({ label: 'Type', value: PACK_TYPE_LABEL[pack.packType] });
+  if (pack.language)
+    facts.push({
+      label: 'Language',
+      value: PACK_LANGUAGE_LABEL[pack.language],
+    });
+  const group = catalogGroupOf(pack);
+  if (!isTicketPack(pack) && group !== 'more')
+    facts.push({ label: 'Cards', value: CATALOG_GROUP_HEADING[group] });
+  return facts;
 }
 
 export type PackCategory = {

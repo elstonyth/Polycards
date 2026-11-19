@@ -182,7 +182,13 @@ try {
       // subset is small, and on wide viewports the negative-margin/padding
       // hack leaves a few sub-card pixels of scrollWidth that a drag can't
       // register against — that's not a drag regression.
-      if (dims.sw - dims.cw > 40) await rail.scrollIntoViewIfNeeded();
+      // Centre it: "in view" can mean the bottom of a phone screen, under the
+      // cookie banner and the buy dock, where the drag below would land on
+      // them instead.
+      if (dims.sw - dims.cw > 40) {
+        await rail.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+        await page.waitForTimeout(300);
+      }
       const box = dims.sw - dims.cw > 40 ? await rail.boundingBox() : null;
       if (box) {
         const cx = box.x + box.width / 2;
