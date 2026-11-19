@@ -163,6 +163,7 @@ describe('polled public JSON — same-origin fetches only', () => {
     expect(matches('/api/free-pack')).toBe(true);
     expect(matches('/api/announcements')).toBe(true);
     expect(matches('/api/lucky-draw-status')).toBe(true);
+    expect(matches('/api/pack-page/bronze-pack')).toBe(true);
     expect(matches('/api/me')).toBe(false);
     expect(matches('/api/presence')).toBe(false);
   });
@@ -177,6 +178,19 @@ describe('polled public JSON — same-origin fetches only', () => {
     ).toBeUndefined();
     expect(
       get('/api/cards/charizard-4', { 'sec-fetch-site': 'same-origin' }),
+    ).toBeUndefined();
+  });
+
+  it("guards the pack picker's in-place switch the same way", () => {
+    expect(get('/api/pack-page/bronze-pack')?.status).toBe(403);
+    expect(
+      get('/api/pack-page/bronze-pack', {
+        'sec-fetch-site': 'none',
+        'sec-fetch-dest': 'document',
+      })?.status,
+    ).toBe(403);
+    expect(
+      get('/api/pack-page/bronze-pack', { 'sec-fetch-site': 'same-origin' }),
     ).toBeUndefined();
   });
 

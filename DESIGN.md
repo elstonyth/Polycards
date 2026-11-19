@@ -287,8 +287,9 @@ The home page is a six-board editorial scroll story (spec:
   shipped code.)
 - **Franchise switch** — the home ladder and the `/slots` catalog show ONE
   pack category (Pokémon, One Piece, …) at a time, behind
-  `PackCategoryTabs.tsx`: the segmented pill sized up (48px, 56px at lg), with
-  the category icon (no pack count). Only categories with packs get a tab; with
+  `PackCategoryTabs.tsx`: the segmented pill sized up (48px, 56px at lg) on
+  the home ladder, and at its `compact` 44px in the `/slots` header and the
+  pack page's panel, with the category icon (no pack count). Only categories with packs get a tab; with
   one, the switch is hidden. A new franchise adds a tab, never a longer list.
   `/slots` keeps the pick in `?category=`.
 
@@ -323,6 +324,115 @@ One panel for the global feed and a pack's own history:
   one neutral series; the tier hue marks only the drought bar, the line and
   its tick (dataviz: text never wears the series colour). Bars grow from the
   baseline (`bar-grow`), re-keyed per tier.
+
+### Signature: Pack shelf (pack page, 2026-11-18)
+
+`src/app/slots/[slug]/PackPicker.tsx`, sorted by `shelvePacks` in
+`src/lib/packs-data.ts`. The pack page says what kind of pack it is and lets a
+player walk to any other one:
+
+- **Pack header** — the name at Display size above the stage, then a facts
+  row of small uppercase labels over values: Category, Type, Language, Cards.
+  Each fact shows only when the backend states it. Type and Language are the
+  admin's pack tags; Cards is the backend-derived composition, so "Graded"
+  appears only under the PSA 10 guarantee and a mixed pool says nothing.
+- **Franchise switch** — the same `PackCategoryTabs` as the home shelf and
+  `/slots`, in place of the old hidden dropdown.
+- **Type chips** — Classic · Original · Special, each with its pack count,
+  untagged packs last as Other. One shelf shows at a time and it opens on the
+  shelf of the pack on the page. Chips are the filter-chip pattern (graphite,
+  selected Paper White), 44px tall. With one shelf the chips are hidden.
+- **Language chips** — English · Japanese, only on a shelf that holds both.
+- **Pack tiles** — cheapest first, under the shelf's Graded / Raw Cards / More
+  Packs headings: art, full name (two lines, never truncated), price in Nekst.
+  Two across, three once the panel is 26rem wide; in two columns an odd pack
+  out takes the whole last row. The page's pack wears a Paper White hairline
+  and a tick; a sold-out pack dims and says so. Nothing swipes sideways.
+- The panel has three zones split by hairlines: choose, the terms of the open
+  (rate note, demo spin, quantity), open. Phones read the terms first, so the
+  guest demo spin stays on the first screens. On desktop the Open footer is
+  pinned to the panel's bottom edge and the panel scrolls inside itself only
+  when a shelf outgrows the screen (it does at 768px tall).
+
+### Signature: Soft catalog (/slots, 2026-11-18)
+
+`src/app/slots/CatalogClient.tsx`. The owner asked for the catalog in the
+"soft" direction (taste-skill-classics `soft-skill`), top to bottom. It is the
+one page that breaks two rules above, on purpose: containers round to 2rem
+(not 16px), and sections sit a full 6rem apart on desktop. Everything a colour
+or a heading MEANS is unchanged.
+
+- **Double bezel** — every card is a tray (white/4% fill, hairline ring, 6px
+  padding, 2rem radius) holding a plate (ink, a 1px top highlight, radius =
+  tray minus padding, so the curves are concentric). Phone rows use the 1.5rem
+  size. Opaque: no blur on anything that scrolls.
+- **Header** — an eyebrow pill (franchise icon, name, pack count), the page's
+  name at Display size (`Pick a pack`, `Pick a capsule` on a capsule tab), the
+  buyback sentence unchanged, and the franchise switch in its own tray. Two
+  pools of neutral light sit behind it; never a coloured glow (Signal Rule).
+- **Shelves** — the pack page's own `shelvePacks`: Classic, Original, Special,
+  untagged last, each cheapest first. A shelf's eyebrow names its type; its
+  eyebrow also names the language when every pack on show shares one
+  (`Original · English`), and its heading is still the composition claim (Graded + Guaranteed PSA 10, Raw
+  Cards + Ungraded, More Packs with no note). A shelf holding two languages
+  shows one at a time behind English · Japanese chips.
+- **Bento** (`src/lib/catalog-bento.ts`, lg and up) — the first pack in the
+  shelf's order leads: double width, and two rows tall from four packs up, with
+  the rest beside it. A last row is shared evenly, never left with a hole. The
+  lead is an order, not a recommendation: no "Featured" label. A card reads its
+  own width: narrow stacks art over details, wide sets them side by side, and
+  the wide lead also shows the pack's factory scene (a still, never the loop)
+  and lists the pack's facts.
+- **Tablets** — the same cards three across, no lead.
+- **Phones** — one column of rows (the bento's collapse): art, name, buyback
+  line, price pill. The row is the tap target; quantity lives on the pack page.
+- **Buttons** — Open is the white pill with its arrow in a nested disc that
+  nudges up and right on hover. The stepper is one pill of 44px round targets.
+- **Motion** — one curve, `cubic-bezier(0.32,0.72,0,1)`, on transform and
+  opacity only. Cards rise in through the stock `Reveal`; reduced motion shows
+  everything still.
+- **Not taken from the guide**: its floating island nav (the app shell is
+  shared), a second icon library (Lucide at a 1.25–1.5 stroke instead), its
+  purple/emerald glow, 10px eyebrow text (12px here) and blur on entry.
+- **The pack page wears it too** (`/slots/[slug]`, same day, owner's ask). Its
+  structure is the Pack shelf above, unchanged; the surfaces are the soft
+  ones: the stage, the configurator and the Pull Odds list each sit as a plate
+  in a 2rem tray, the demo spin and quantity controls are pills, Open carries
+  its arrow in a nested disc, and the name and section heads step up to the
+  soft scale. The building blocks live in `src/components/ui/soft.tsx`.
+- **The pack page's lower half** (same day, owner's ask: a new look for Top
+  Hits, Pull Odds and Recent Pulls, with no figure dropped). Each section
+  opens with an eyebrow pill that states a fact (`70 cards`, `6 tiers`,
+  `Live`) over its name:
+  - **Top Hits** (`PoolByRarity.tsx`, `cards/CardTile.tsx`) — one swipeable
+    row of ranked tiles (`01`, `02`, …), most valuable first; no card is set
+    apart above it (owner's call, 2026-11-18: one row, not two). Each tile is a
+    1.5rem tray whose plate clips the slab's halo, so a tile is lit from inside
+    and nothing bleeds onto its neighbours. Where the row runs past the screen
+    its far side fades and, from tablet up, the header gains previous / next
+    buttons; a row short enough to fit shares the width out instead. Every top
+    hit is on the page; `By rarity` opens the same cards grouped by tier.
+    Ticket prizes use the same tile and are not controls.
+  - **Pull Odds** (`OddsBoard.tsx`) — a side column (heading, the expected
+    value in its own plate, then a split bar of the tiers' shares over the
+    "Rates for this pack" line) beside one cell per tier: the chance in Nekst,
+    the value range, and a thin bar of that chance out of 100. The split bar
+    stays outside the expected-value plate, where it would read as a breakdown
+    of that RM figure. Both bars are pictures of numbers printed beside them
+    and are hidden from screen readers; tier hue only. The reel's odds sheet
+    keeps `PublishedOddsList`.
+  - **Recent Pulls** (`PullHistory` `variant="board"`; the home feed keeps the
+    default) — the same side column (heading, the drought counters as one
+    split plate, the tier filter as chips) beside a ledger: one tray, hairlines
+    between rows, two columns when wide. A row leads with the card (slab, name,
+    value, tier) and sets the puller and the time under the name; a chase-tier
+    row wears its hue down its left edge.
+  - **Labels follow the print.** A card tile's `aria-label` lists what the
+    tile prints in the order it prints it (name, tier, value, then the reel
+    sprite), and the tile's markup runs in that order with CSS `order` setting
+    the look. The place number and the "View Details" pill are CSS-drawn, not
+    text. A ledger row has no label: it is named by its own text.
+  - The card overlay and the Stats chart keep their own insides.
 
 ### Signature: Task Hub (/task, 2026-10-06)
 

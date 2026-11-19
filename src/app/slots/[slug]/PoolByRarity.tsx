@@ -1,22 +1,33 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { Maximize2, X } from 'lucide-react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import { createPortal, flushSync } from 'react-dom';
+import { ChevronLeft, ChevronRight, LayoutGrid, X } from 'lucide-react';
 import { ticketCount, type PackCard, type Rarity } from '@/lib/packs-data';
 import { rarityRgb, RARITY_ORDER } from '@/lib/rarity';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 import { useDragScroll } from '@/lib/use-drag-scroll';
-import { CardTile } from '@/components/cards/CardTile';
+import { CardTile, rankLabel } from '@/components/cards/CardTile';
 import { TicketArt } from '@/components/TicketArt';
+import { cn } from '@/lib/utils';
+import { SPRING, SectionHead } from '@/components/ui/soft';
 
 /**
  * The default header (`view.title` below) — the caller pre-filters the RAIL
  * to the top three tiers (Immortal/Legendary/Mythical — lower tiers are
- * catalogue noise there). The rail is ONE horizontally-swipeable strip of
- * that subset (value-sorted desc, so the top hits lead) — the catalog's
- * rail idiom, per the 90scard reference. The header's expand button opens a
+ * catalogue noise there). The subset is value-sorted desc and shown as ONE
+ * horizontally-swipeable row of ranked tiles (01, 02, …): every top hit is on
+ * the page, the most valuable first. Where the row runs past the screen its far
+ * side fades and, from tablet up, the header gains previous / next buttons (owner
+ * decision 2026-11-18: one row, no card set apart above it). A row short enough
+ * to fit shares the width out instead. The header's "By rarity" button opens a
  * full-screen dialog listing the SAME top-tier subset grouped by canonical
  * tier (rarest first) as a grid — operator decision 2026-08-08: the expanded
  * view is the rail's "see everything in this tier band" companion, and lower
@@ -85,42 +96,113 @@ export function PoolByRarity({
       ? `Show the ${view.cards.length} top-tier cards grouped by rarity`
       : `Show all ${view.cards.length} cards grouped by rarity`;
 
+  const noun = tickets ? 'prize' : 'card';
+  const strip = useStrip(rail.length);
+  const { edges } = strip;
+
   return (
-    <div className="flex flex-col gap-3">
-      <div>
-        <div className="mb-1 flex items-center justify-between gap-3">
-          <h2 className="font-heading text-lg font-bold tracking-tight text-white">
-            {view.title}
-          </h2>
+    <div className="flex flex-col gap-5">
+      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+        <div className="flex flex-col gap-2">
+          <SectionHead
+            eyebrow={`${view.cards.length} ${view.cards.length === 1 ? noun : `${noun}s`}`}
+            title={view.title}
+          />
+          <p className="text-sm text-neutral-400">{view.blurb}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {/* Only where the row runs past the screen, and not on a phone: a
+              thumb swipes it, and the peeking tile already says so. */}
+          {(edges.prev || edges.next) && (
+            <>
+              <StripArrow
+                label={`Previous ${noun}s`}
+                enabled={edges.prev}
+                onClick={() => strip.step(-1)}
+              >
+                <ChevronLeft
+                  className="h-4 w-4"
+                  strokeWidth={1.5}
+                  aria-hidden
+                />
+              </StripArrow>
+              <StripArrow
+                label={`Next ${noun}s`}
+                enabled={edges.next}
+                onClick={() => strip.step(1)}
+              >
+                <ChevronRight
+                  className="h-4 w-4"
+                  strokeWidth={1.5}
+                  aria-hidden
+                />
+              </StripArrow>
+            </>
+          )}
+          {/* Opens the same subset grouped by tier. The visible words are part
+              of the label ("…grouped by rarity"), so voice control can name it. */}
           <button
             type="button"
             onClick={() => setModalOpen(true)}
             aria-haspopup="dialog"
             aria-label={expandLabel}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-white/60 transition-colors hover:bg-white/10 hover:text-white"
+            className={cn(
+              'flex min-h-11 shrink-0 items-center gap-2 rounded-full bg-white/[0.06] pl-4 pr-3.5 text-[13px] font-semibold text-white outline-none ring-1 ring-white/10 transition-[background-color,transform] duration-300',
+              SPRING,
+              'hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/40 active:scale-[0.98] motion-reduce:transition-[background-color] motion-reduce:active:scale-100',
+            )}
           >
-            <Maximize2 className="h-4 w-4" aria-hidden />
+            By rarity
+            <LayoutGrid className="h-4 w-4" strokeWidth={1.5} aria-hidden />
           </button>
         </div>
-        <p className="text-[13px] text-white/70">{view.blurb}</p>
       </div>
-      {/* Teaser rail — a peeking partial card signals the sideways swipe;
-          hidden scrollbar matches the catalog rails. overflow-x-auto forces
-          overflow-y to compute to `auto` (CSS coupling), which clips each
-          slab's tier halo (box-shadow) on ALL four sides (the glow is an
-          offset-0 shadow, ~44px each way — the radius lives in glowStyle() in
-          src/components/SlabImage.tsx; keep this padding in sync with it).
-          overflow clips at the PADDING edge, so the halo room lives in the
-          padding: py-12/px-10 give it. -my-12 fully cancels the vertical
-          padding (no layout shift). -mx-4 is capped at the px-fluid gutter so
-          the rail never triggers page x-scroll on narrow viewports; it only
-          partly cancels px-10, leaving a small leading indent — the trade for
-          a fully-lit first card without horizontal overflow. Adjacent cards'
-          halos overlap across the gap and blend into one smooth glow.
-          Skipped entirely when the pack has no top-tier cards — an empty
-          strip would still eat the halo padding for nothing to tease. */}
+      {/* Skipped entirely when the pack has no top-tier cards: the header and
+          its dialog are then the pool's whole entry point. */}
       {hasRail && (
-        <Rail rail={rail} tickets={tickets} onOpen={onOpen} pokemon={pokemon} />
+        // The fade lives on this wrapper, not the strip: a mask on the strip
+        // itself would also erase its own focus ring. 6px of room (cancelled by
+        // the margin) keeps that ring inside the mask.
+        <div className="-m-1.5 p-1.5" style={edgeFade(edges)}>
+          <div
+            {...strip.drag}
+            onScroll={strip.onScroll}
+            // Ticket tiles are not controls, so nothing inside the strip can
+            // take focus: the strip does, and the arrow keys then scroll it.
+            {...(tickets
+              ? { tabIndex: 0, role: 'group', 'aria-label': 'Ticket prizes' }
+              : null)}
+            // A peeking partial tile signals the sideways swipe. overflow-x-auto
+            // makes overflow-y compute to auto as well, which would clip a
+            // tile's hover lift and its focus ring: the 4px of padding
+            // (cancelled by the margin) is their room.
+            // The scroll padding keeps a tile reached by Tab clear of the fade.
+            className="-m-1 flex cursor-grab scroll-px-[3.75rem] gap-3 overflow-x-auto rounded-[1.75rem] p-1 outline-none focus-visible:ring-2 focus-visible:ring-white/40 active:cursor-grabbing [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {(strip.grown ? rail : rail.slice(0, RAIL_FIRST_TILES)).map(
+              (c, i) => (
+                // A row that fits the screen shares it out (up to a cap); a
+                // longer one keeps its tile width and scrolls.
+                <div
+                  key={c.handle}
+                  className="max-w-[60%] flex-[1_0_44%] sm:max-w-[16rem] sm:flex-[1_0_13rem]"
+                >
+                  {tickets ? (
+                    <TicketTile card={c} rank={i + 1} />
+                  ) : (
+                    <CardTile
+                      card={c}
+                      sizes="(max-width: 640px) 45vw, 256px"
+                      onOpen={onOpen}
+                      pokemon={pokemon}
+                      rank={i + 1}
+                    />
+                  )}
+                </div>
+              ),
+            )}
+          </div>
+        </div>
       )}
       <PoolModal
         open={modalOpen}
@@ -136,85 +218,196 @@ export function PoolByRarity({
   );
 }
 
-/** Tiles rendered before the rail is reached: past a phone's first screen, and
- *  the rest are ~30 tiles of HTML and hydration on every pack page view. */
-const RAIL_FIRST_TILES = 8;
+/** A tier's own light behind its prize: plain gradient, no filter (Glow Is
+ *  Earned: the colour is the card's rarity and nothing else). */
+const tierLight = (rgb: string) =>
+  `radial-gradient(60% 70% at 50% 45%, rgba(${rgb}, 0.22), transparent 72%)`;
 
-function Rail({
-  rail,
-  tickets,
-  onOpen,
-  pokemon,
-}: {
-  rail: PackCard[];
-  tickets: boolean;
-  onOpen: (card: PackCard) => void;
-  pokemon?: boolean;
-}) {
-  // Mouse drag-to-scroll on the rail (touch swipes natively).
+/** Tiles rendered before the strip is reached: past a phone's first screen,
+ *  and the rest are ~30 tiles of HTML and hydration on every pack page view. */
+const RAIL_FIRST_TILES = 7;
+
+type Edges = { prev: boolean; next: boolean };
+
+/** How deep the row's edge fade runs at most (see edgeFade). The arrow step
+ *  and the strip's scroll padding clear the same distance. */
+const FADE_PX = 56;
+
+/** Fades the side of the row that has more behind it, so a cut-off tile reads
+ *  as "keeps going" and not as a clipped layout. */
+const edgeFade = ({ prev, next }: Edges) => {
+  if (!prev && !next) return undefined;
+  const depth = `min(${FADE_PX}px, 8%)`;
+  const mask = `linear-gradient(to right, transparent, #000 ${prev ? depth : '0px'}, #000 calc(100% - ${next ? depth : '0px'}), transparent)`;
+  return { maskImage: mask, WebkitMaskImage: mask };
+};
+
+/**
+ * The one row's scrolling: mouse drag (touch swipes natively), which sides
+ * still have tiles behind them, and the arrow buttons' step.
+ *
+ * The row renders its first few tiles and grows on the first scroll, so a
+ * fling never stops at a false end. A screen wide enough to show every tile
+ * has nothing to scroll, so it grows at once.
+ */
+function useStrip(count: number) {
   const drag = useDragScroll<HTMLDivElement>();
-  const [grown, setGrown] = useState(false);
-  // Grows on the first swipe, so a fling never stops at a false end. A screen
-  // wide enough to show every tile has nothing to swipe, so it grows at once.
   const { ref } = drag;
-  useEffect(() => {
+  const [grown, setGrown] = useState(false);
+  const [edges, setEdges] = useState<Edges>({ prev: false, next: false });
+
+  const measure = useCallback(() => {
     const el = ref.current;
-    if (el && el.scrollWidth <= el.clientWidth + 1) setGrown(true);
-  }, [ref, rail.length]);
+    if (!el) return;
+    const max = el.scrollWidth - el.clientWidth;
+    if (max <= 1) setGrown(true);
+    const prev = el.scrollLeft > 1;
+    const next = el.scrollLeft < max - 1;
+    setEdges((e) => (e.prev === prev && e.next === next ? e : { prev, next }));
+  }, [ref]);
+
+  // Re-measured when the row grows and when the screen resizes or turns.
+  useEffect(() => {
+    measure();
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref, measure, count, grown]);
+
+  return {
+    drag,
+    grown,
+    edges,
+    onScroll: () => {
+      setGrown(true);
+      measure();
+    },
+    /**
+     * A screen of tiles per press, landing on a tile's edge: the tile that was
+     * cut off becomes the first whole one, clear of the fade. A fixed distance
+     * would park a whole tile under the fade instead.
+     */
+    step: (dir: 1 | -1) => {
+      const el = ref.current;
+      if (!el) return;
+      // Grow first: the jump is measured against the row's real length.
+      if (!grown) flushSync(() => setGrown(true));
+      const box = el.getBoundingClientRect();
+      const tiles = Array.from(el.children, (tile) => {
+        const r = tile.getBoundingClientRect();
+        return {
+          start: r.left - box.left + el.scrollLeft,
+          end: r.right - box.left + el.scrollLeft,
+        };
+      });
+      const clear = FADE_PX + 4;
+      let from: (typeof tiles)[number] | undefined;
+      if (dir === 1) {
+        // Forward: the first tile the far edge cuts leads the next screen.
+        from = tiles.find(
+          (t) => t.end > el.scrollLeft + el.clientWidth - clear + 1,
+        );
+      } else {
+        // Back: the nearest tile hidden (or cut) on the near side becomes the
+        // last whole one, and the screen starts on the tile edge that allows.
+        const last = tiles.findLast((t) => t.start < el.scrollLeft + clear - 1);
+        if (!last) return;
+        const earliest = last.end - el.clientWidth + clear;
+        from = tiles.find((t) => t.start - clear >= earliest) ?? last;
+        if (earliest <= 0) from = tiles[0];
+      }
+      if (!from) return;
+      el.scrollTo({
+        // The first tile sits flush: nothing is behind it to fade.
+        left: from === tiles[0] ? 0 : from.start - clear,
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          ? 'auto'
+          : 'smooth',
+      });
+    },
+  };
+}
+
+/** Previous / next for the row. At an end it stays focusable but inert
+ *  (`aria-disabled`), so a keyboard user's focus isn't dropped mid-row. */
+function StripArrow({
+  label,
+  enabled,
+  onClick,
+  children,
+}: {
+  label: string;
+  enabled: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
   return (
-    <div
-      {...drag}
-      onScroll={() => setGrown(true)}
-      className="-mx-4 -my-12 flex cursor-grab gap-2 overflow-x-auto px-10 py-12 active:cursor-grabbing sm:gap-3 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+    <button
+      type="button"
+      aria-label={label}
+      aria-disabled={!enabled}
+      onClick={enabled ? onClick : undefined}
+      className={cn(
+        'hidden h-11 w-11 items-center justify-center rounded-full bg-white/[0.06] text-white outline-none ring-1 ring-white/10 transition-[background-color,opacity,transform] duration-300 sm:flex',
+        SPRING,
+        'focus-visible:ring-2 focus-visible:ring-white/40 motion-reduce:transition-[background-color,opacity]',
+        enabled
+          ? 'hover:bg-white/10 active:scale-[0.96] motion-reduce:active:scale-100'
+          : 'cursor-default opacity-40',
+      )}
     >
-      {(grown ? rail : rail.slice(0, RAIL_FIRST_TILES)).map((c) => (
-        <div key={c.handle} className="w-[38%] shrink-0 sm:w-40">
-          {tickets ? (
-            <TicketTile card={c} />
-          ) : (
-            <CardTile
-              card={c}
-              sizes="(max-width: 640px) 38vw, 160px"
-              onOpen={onOpen}
-              pokemon={pokemon}
-            />
-          )}
-        </div>
-      ))}
-    </div>
+      {children}
+    </button>
   );
 }
 
-/** One ticket prize: our ticket, its amount and its tier. The tier's glow plays
- *  the slab halo's part. Not a button: an amount has no details to open. */
-function TicketTile({ card }: { card: PackCard }) {
+/** One ticket prize: its place, our ticket, its amount and its tier, in the
+ *  card tile's tray. The tier's own light plays the slab halo's part. Not a
+ *  button: an amount has no details to open. */
+function TicketTile({ card, rank }: { card: PackCard; rank?: number }) {
   const rgb = rarityRgb(card.rarity);
   // Two lines on every tile, so a long amount can't make one taller than the rest.
   const [amount, unit] = ticketCount(card.tickets ?? 0).split(' ');
   return (
-    <div
-      className="flex w-full flex-col items-center gap-1.5 rounded-2xl border bg-white/[0.03] p-3 text-center"
-      style={{
-        borderColor: `rgba(${rgb}, 0.45)`,
-        boxShadow: `0 0 28px rgba(${rgb}, 0.28)`,
-      }}
-    >
-      <TicketArt width={160} className="h-auto w-full" />
-      <span className="flex flex-col items-center">
-        <span className="font-heading text-lg font-bold leading-tight tracking-tight tabular-nums text-white">
-          {amount}
-        </span>{' '}
-        <span className="text-[11px] leading-tight text-white/60">{unit}</span>
-      </span>
-      {/* The tier's name stays white: Rare's blue is too dark to read as 11px text. */}
-      <span className="flex items-center gap-1.5 text-[11px] font-medium text-white/80">
-        <span
-          aria-hidden
-          className="h-2 w-2 rounded-full"
-          style={{ background: `rgb(${rgb})` }}
-        />
-        {card.rarity}
-      </span>
+    <div className="h-full w-full rounded-[1.5rem] bg-white/[0.04] p-1 ring-1 ring-white/10">
+      <div
+        className="flex h-full flex-col items-center gap-2 rounded-[calc(1.5rem-0.25rem)] bg-neutral-950 p-3 text-center shadow-[inset_0_1px_1px_rgba(255,255,255,0.12)]"
+        style={{ backgroundImage: tierLight(rgb) }}
+      >
+        <span className="flex w-full items-center justify-between gap-2">
+          {rank != null && (
+            <span className="font-heading text-xs font-bold tabular-nums text-neutral-400">
+              {rankLabel(rank)}
+            </span>
+          )}
+          {/* The tier's name stays neutral: Rare's blue is too dark to read
+              as 11px text. */}
+          <span
+            className={cn(
+              'flex items-center gap-1.5 text-[11px] font-medium text-neutral-300',
+              rank == null && 'ml-auto',
+            )}
+          >
+            <span
+              aria-hidden
+              className="h-2 w-2 rounded-full"
+              style={{ background: `rgb(${rgb})` }}
+            />
+            {card.rarity}
+          </span>
+        </span>
+        <TicketArt width={160} className="h-auto w-full" />
+        <span className="flex flex-col items-center">
+          <span className="font-heading text-lg font-bold leading-tight tracking-tight tabular-nums text-white">
+            {amount}
+          </span>{' '}
+          <span className="text-[11px] leading-tight text-neutral-400">
+            {unit}
+          </span>
+        </span>
+      </div>
     </div>
   );
 }
@@ -318,12 +511,9 @@ function PoolModal({
                     </span>
                   )}
                 </div>
-                {/* The slab halo (offset-0 box-shadow) bleeds past each tile;
-                    inside this scroll container it clips at the panel's p-5
-                    edge. Adjacent halos blend across the gaps, and the soft
-                    edge loss at the panel border is an accepted trade — the
-                    rail's padding hack doesn't compose with a wrapping grid. */}
-                <div className="grid grid-cols-2 gap-x-3 gap-y-4 sm:grid-cols-3">
+                {/* Each tile's plate clips its own slab halo, so nothing
+                    bleeds across the gaps or past the panel's edge. */}
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                   {cards.map((c) =>
                     tickets ? (
                       <TicketTile key={c.handle} card={c} />

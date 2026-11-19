@@ -11,10 +11,16 @@ type QtyStepperProps = {
   className?: string;
 };
 
+// One 44px round hit area per control: the old 28px buttons were the smallest
+// targets on the catalog. The press is a spring-curve scale, never a layout move.
+const STEP =
+  'flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-neutral-300 outline-none transition-[background-color,color,transform] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-white/10 hover:text-white active:scale-[0.92] focus-visible:ring-2 focus-visible:ring-white/40 disabled:pointer-events-none disabled:opacity-35 motion-reduce:transition-[background-color,color] motion-reduce:active:scale-100';
+
 /**
- * Controlled quantity stepper — `− [n] + MAX`. Used by the /slots catalog pack
- * cards (the /repacks and /claw routes that also carried it are gone). The
- * caller owns the qty state; this clamps to [1, max] and reports the new value.
+ * Controlled quantity stepper — `− [n] + MAX`, one pill. Used by the /slots
+ * catalog pack cards (the /repacks and /claw routes that also carried it are
+ * gone). The caller owns the qty state; this clamps to [1, max] and reports
+ * the new value.
  */
 export default function QtyStepper({
   qty,
@@ -25,7 +31,7 @@ export default function QtyStepper({
   return (
     <div
       className={cn(
-        'flex items-center gap-1 rounded-xl border border-white/10 bg-white/5 p-1',
+        'flex h-11 items-center rounded-full bg-white/[0.06] ring-1 ring-white/10',
         className,
       )}
     >
@@ -34,11 +40,11 @@ export default function QtyStepper({
         onClick={() => onChange(Math.max(1, qty - 1))}
         disabled={qty <= 1}
         aria-label="Decrease quantity"
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+        className={STEP}
       >
-        <Minus className="h-3.5 w-3.5" aria-hidden />
+        <Minus className="h-4 w-4" strokeWidth={1.5} aria-hidden />
       </button>
-      <span className="min-w-[1.75rem] text-center text-[13px] font-semibold tabular-nums text-white">
+      <span className="min-w-5 text-center text-sm font-semibold tabular-nums text-white">
         {qty}
       </span>
       <button
@@ -46,16 +52,17 @@ export default function QtyStepper({
         onClick={() => onChange(Math.min(max, qty + 1))}
         disabled={qty >= max}
         aria-label="Increase quantity"
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+        className={STEP}
       >
-        <Plus className="h-3.5 w-3.5" aria-hidden />
+        <Plus className="h-4 w-4" strokeWidth={1.5} aria-hidden />
       </button>
       <button
         type="button"
         onClick={() => onChange(max)}
-        // min-h-6: the label is 10px, so padding alone left the box at 23px —
-        // one pixel under the WCAG 2.2 AA target-size minimum.
-        className="ml-auto flex min-h-6 items-center rounded-lg px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white/50 transition-colors hover:bg-white/10 hover:text-white"
+        className={cn(
+          STEP,
+          'ml-auto w-auto px-3 text-xs font-semibold uppercase tracking-[0.12em] text-neutral-400',
+        )}
       >
         Max
       </button>

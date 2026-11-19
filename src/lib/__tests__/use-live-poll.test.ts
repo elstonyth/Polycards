@@ -353,6 +353,35 @@ it('waits firstTickMs after a seeded mount, but a scope change fetches at once',
   h.unmount();
 });
 
+it('with seedFollowsKey a scope change waits firstTickMs too, pending until it lands', async () => {
+  const fetchJson = vi.fn(async (url: string) => url);
+  const h = renderHook(
+    (p: { url: string }) =>
+      useLivePoll<string>(p.url, 'seed', {
+        intervalMs: 60_000,
+        resetKey: p.url,
+        firstTickMs: 5_000,
+        seedFollowsKey: true,
+        fetchJson,
+      }),
+    { url: '/api/a' },
+  );
+  await flush();
+  h.rerender({ url: '/api/b' });
+  await flush();
+  // The caller was just handed b's data: nothing is downloaded again yet.
+  expect(fetchJson).not.toHaveBeenCalled();
+  expect(h.current.pending).toBe(true);
+  await act(async () => {
+    vi.advanceTimersByTime(5_000);
+  });
+  expect(fetchJson).toHaveBeenCalledTimes(1);
+  expect(fetchJson).toHaveBeenLastCalledWith('/api/b');
+  expect(h.current.pending).toBe(false);
+  expect(h.current.data).toBe('/api/b');
+  h.unmount();
+});
+
 it('leaves a firstTickMs of a full interval to the interval, with no double fetch', async () => {
   const fetchJson = vi.fn(async (url: string) => url);
   const h = renderHook(

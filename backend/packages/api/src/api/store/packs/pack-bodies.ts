@@ -60,6 +60,10 @@ export async function catalogRows(
     in_stock: p.in_stock,
     group: groupOf(p.slug),
     psa10: psa10Of(p.slug),
+    // Admin tags (#894), display only: the storefront sorts and labels its
+    // pack picker by them. null = untagged.
+    pack_type: p.pack_type ?? null,
+    language: p.language ?? null,
     rank: p.rank,
     status: p.status,
   }));
@@ -82,6 +86,8 @@ export async function packDetailBody(
     boost: pack.boost,
     buyback_percent: pack.buyback_percent,
     in_stock: pack.in_stock,
+    pack_type: pack.pack_type ?? null,
+    language: pack.language ?? null,
     rank: pack.rank,
     status: pack.status,
   };

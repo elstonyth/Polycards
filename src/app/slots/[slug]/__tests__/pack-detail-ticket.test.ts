@@ -239,7 +239,7 @@ describe('PackDetailClient — ticket pack', () => {
     expect(text).toContain('Recent Pulls');
     expect(text).toContain('capsules without');
     expect(text).toContain('Ann');
-    expect(text).toContain('300tickets');
+    expect(text).toContain('300 tickets');
     expect(packWord(text)).toBeUndefined();
     // An amount has no card page and no overlay: the row is not a control.
     expect(container.querySelector('a[href^="/card/"]')).toBeNull();
@@ -324,7 +324,7 @@ describe('PackDetailClient — ticket pack', () => {
   });
 });
 
-describe('PackDetailClient — category dropdown', () => {
+describe('PackDetailClient — category switch', () => {
   const tab = (id: string, tabName: string, firstPackId?: string) => ({
     id,
     tab: tabName,
@@ -351,16 +351,18 @@ describe('PackDetailClient — category dropdown', () => {
       );
     });
   }
-  const dropdown = () =>
-    container.querySelector<HTMLSelectElement>('select[aria-label="Category"]');
+  // The franchise switch (PackCategoryTabs): one button per franchise.
+  const tabs = () => [
+    ...container.querySelectorAll<HTMLButtonElement>(
+      '[aria-label="Pack categories"] button',
+    ),
+  ];
+  const tabNamed = (name: string) =>
+    tabs().find((b) => b.textContent?.startsWith(name));
 
   test("picking another franchise opens its first pack, keeping the page's scroll", async () => {
     await renderTabs(TABS);
-    await act(async () => {
-      const select = dropdown()!;
-      select.value = 'pokemon';
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    await act(async () => tabNamed('Pokémon')!.click());
     expect(mocks.push).toHaveBeenCalledWith('/slots/151?count=1', {
       scroll: false,
     });
@@ -368,22 +370,27 @@ describe('PackDetailClient — category dropdown', () => {
 
   test('it opens on the franchise on screen', async () => {
     await renderTabs(TABS);
-    expect(dropdown()!.value).toBe('poly');
+    expect(tabNamed('Poly')!.getAttribute('aria-pressed')).toBe('true');
+    expect(mocks.push).not.toHaveBeenCalled();
+  });
+
+  // Its own tab is not a move: it must not swap the pack for the first one.
+  test('the franchise on screen does not navigate when picked again', async () => {
+    await renderTabs(TABS);
+    await act(async () => tabNamed('Poly')!.click());
     expect(mocks.push).not.toHaveBeenCalled();
   });
 
   test('a franchise with nothing on sale is listed but cannot be picked', async () => {
     await renderTabs(TABS);
-    const onePiece = dropdown()!.querySelector<HTMLOptionElement>(
-      'option[value="one-piece"]',
-    )!;
+    const onePiece = tabNamed('One Piece')!;
     expect(onePiece.disabled).toBe(true);
-    expect(onePiece.textContent).toBe('One Piece (Coming soon)');
+    expect(onePiece.textContent).toBe('One PieceComing soon');
   });
 
   test('nothing to switch to: the category stays a plain label', async () => {
     await renderTabs([]);
-    expect(dropdown()).toBeNull();
+    expect(tabs()).toHaveLength(0);
     expect(container.textContent).toContain('Poly');
   });
 });

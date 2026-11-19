@@ -144,6 +144,12 @@ try {
       await page.goto(`${base}/slots/ah?count=1`, {
         waitUntil: 'domcontentloaded',
       });
+      // Ascended Heroes sits on the Original shelf, Bronze on Classic: the
+      // picker shows one shelf at a time (no chips on an untagged catalog).
+      const classic = page
+        .getByRole('group', { name: 'Pack type' })
+        .getByRole('button', { name: /^Classic/ });
+      if (await classic.count()) await classic.click();
       await page
         .locator('[data-testid="pack-rail"]')
         .getByRole('link', { name: /^Bronze\s/ })

@@ -13,6 +13,8 @@ const eslintConfig = defineConfig([
     // (gitignored) — without this, lint after a local serve reports thousands
     // of phantom problems in build output.
     '.next-serve/**',
+    // taste-skill capture kit and its before/after shots (gitignored).
+    '.taste-skill/**',
     'out/**',
     'build/**',
     'next-env.d.ts',

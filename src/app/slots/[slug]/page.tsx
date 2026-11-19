@@ -1,20 +1,10 @@
 // src/app/slots/[slug]/page.tsx
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import {
-  getDraftPackDetail,
-  getPackBaseForViewer,
-  getPackDetail,
-  getRecentPulls,
-} from '@/lib/data/packs';
-import {
-  canClaimFreePack,
-  freePackMissing,
-  getFreePackState,
-} from '@/lib/data/free-pack';
-import { FREE_WELCOME_CATEGORY } from '@/lib/packs-data';
+import { getPackBaseForViewer } from '@/lib/data/packs';
+import { loadPackPage } from '@/lib/data/pack-page';
 import { ProductJsonLd, shareImageMeta } from '@/lib/product-share';
-import PackDetailClient from './PackDetailClient';
+import PackPage from './PackPage';
 
 // The /slots pack detail — configurator/Top-Hits/odds; the "Open Pack" CTA
 // launches the slot-machine reel (./spin). Backend-driven (catalog + gacha
@@ -60,59 +50,22 @@ export default async function SlotsPackDetailPage({
   const { count: countRaw } = await searchParams;
   const parsed = Number(countRaw);
   const count = Number.isInteger(parsed) ? Math.min(3, Math.max(1, parsed)) : 1;
-  const [base, publicDetail, recentPulls] = await Promise.all([
-    getPackBaseForViewer(slug),
-    getPackDetail(slug),
-    // This pack's own history — the feed used to be global, so every pack
-    // showed identical rows.
-    getRecentPulls(slug),
-  ]);
-  if (!base) notFound();
-  const detail = base.pack.draft
-    ? await getDraftPackDetail(slug)
-    : publicDetail;
-
-  // The free welcome pack is hidden from the catalog but NOT from this route, so
-  // a shared link / history entry / stale badge lands an ineligible account on a
-  // page that would otherwise promise a gift the backend then refuses at the
-  // reel. One extra read, and only for that one pack.
-  //
-  // A rendered free pack is always the ACTIVE one (/store/packs/:slug 404s
-  // inactive packs, so this page would not exist otherwise), which is why a
-  // guest reliably lands on `signup` here rather than `hidden`. The state →
-  // eligibility mapping, including that guest case, is unit-tested in
-  // src/lib/data/__tests__/free-pack.test.ts.
-  const freeState =
-    base.pack.categoryId === FREE_WELCOME_CATEGORY
-      ? await getFreePackState()
-      : null;
-  const freePackEligible = freeState
-    ? canClaimFreePack(freeState, slug)
-    : undefined;
-  // Spec 2026-10-06: the pack is theirs but waits on verification — the page
-  // sends them to Settings instead of letting the reel refuse the open.
-  const missing = freeState ? freePackMissing(freeState, slug) : [];
+  // One loader for this render and for the picker's in-place switch
+  // (/api/pack-page/[slug]), so the two always agree.
+  const data = await loadPackPage(slug);
+  if (!data) notFound();
 
   return (
     <>
-      {!base.pack.draft && (
+      {!data.pack.draft && (
         <ProductJsonLd
-          name={base.pack.name}
-          description={`${base.pack.name} · ${base.pack.categoryName}`}
+          name={data.pack.name}
+          description={`${data.pack.name} · ${data.pack.categoryName}`}
           sku={slug}
           path={`/slots/${slug}`}
         />
       )}
-      <PackDetailClient
-        pack={base.pack}
-        siblings={base.siblings}
-        categoryTabs={base.tabs}
-        detail={detail}
-        recentPulls={recentPulls}
-        initialQty={count}
-        freePackEligible={freePackEligible}
-        freePackMissing={missing}
-      />
+      <PackPage initial={data} initialQty={count} />
     </>
   );
 }

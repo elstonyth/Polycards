@@ -23,7 +23,7 @@ vi.mock('@/lib/data/free-pack', () => ({
   freePackMissing: () => [],
   getFreePackState: async () => null,
 }));
-vi.mock('../PackDetailClient', () => ({ default: () => null }));
+vi.mock('../PackPage', () => ({ default: () => null }));
 
 const { default: PackPage, generateMetadata } = await import('../page');
 

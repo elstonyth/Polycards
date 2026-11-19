@@ -18,6 +18,14 @@ export const PackRowSchema = z.looseObject({
    *  than group === 'GRADED' — a PSA 9 or a BGS slab is graded but not psa10).
    *  Malformed/absent degrades to false: never overclaim the guarantee. */
   psa10: z.boolean().catch(false).optional(),
+  /** Admin tags (#894). Absent on an older backend; an unknown value degrades
+   *  to null (an untagged pack) rather than dropping the pack row. */
+  pack_type: z
+    .enum(['classic', 'original', 'special'])
+    .nullable()
+    .catch(null)
+    .optional(),
+  language: z.enum(['en', 'jp']).nullable().catch(null).optional(),
 });
 
 /** GET /store/packs — the catalog list. `droppableArray`, not `listOf`: a bad

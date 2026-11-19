@@ -13,7 +13,7 @@ import { usePrefersReducedMotion } from '@/lib/use-reveal';
  * and it doubles as the LCP image and the reduced-motion still — under
  * `prefers-reduced-motion` the clip never plays and the element just shows
  * the poster. The clip downloads from hydration on, never ahead of the page's
- * first paint. `webm` (VP9) is offered first for smaller bytes; `mp4` (H.264) is
+ * first paint; with `whenVisible`, only once it is on screen. `webm` (VP9) is offered first for smaller bytes; `mp4` (H.264) is
  * the universal fallback.
  *
  * It is `aria-hidden`: the motion is decoration whose meaning is always carried
@@ -29,18 +29,26 @@ export function AmbientVideo({
   className,
   fit = 'cover',
   testId,
+  whenVisible = false,
 }: {
   mp4: string;
   webm?: string;
-  poster: string;
+  /** Absent where a still image under the clip plays the poster's part (a
+   *  catalog card): a <video> poster downloads even while its box is hidden. */
+  poster?: string;
   className?: string;
   fit?: 'cover' | 'contain';
   /** Keeps a hero selector stable across the video and still-image branches
    *  (both a <video> and an <img> expose `.currentSrc`). */
   testId?: string;
+  /** Play only while on screen, and download nothing before then: for a clip
+   *  that is one of several on a page, or below the first screen. */
+  whenVisible?: boolean;
 }) {
   // The poster is the LCP, and a <video> poster is found late without this.
-  preload(poster, { as: 'image', fetchPriority: 'high' });
+  if (poster && !whenVisible) {
+    preload(poster, { as: 'image', fetchPriority: 'high' });
+  }
   const ref = useRef<HTMLVideoElement>(null);
   const reduced = usePrefersReducedMotion();
 
@@ -53,10 +61,24 @@ export function AmbientVideo({
     if (reduced || window.matchMedia(REDUCED_MOTION).matches) {
       v.pause();
       v.currentTime = 0;
-    } else {
-      v.play().catch(() => {});
+      return;
     }
-  }, [reduced]);
+    if (!whenVisible) {
+      v.play().catch(() => {});
+      return;
+    }
+    // A hidden box (display: none) never intersects, so it never downloads.
+    if (typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) v.play().catch(() => {});
+        else v.pause();
+      },
+      { threshold: 0.25 },
+    );
+    observer.observe(v);
+    return () => observer.disconnect();
+  }, [reduced, whenVisible]);
 
   return (
     <video

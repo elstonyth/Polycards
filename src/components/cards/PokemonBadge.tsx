@@ -43,6 +43,7 @@ export function PokemonBadge({
   slabSrc = null,
   className,
   pokemon,
+  decorative = false,
 }: {
   card: BadgeCard;
   rarity?: Rarity | null;
@@ -51,6 +52,10 @@ export function PokemonBadge({
   /** The card's baked composite; null = raw. Decides the art box to anchor to. */
   slabSrc?: string | null;
   className?: string;
+  /** The badge sits inside a control whose label already names the sprite
+   *  (CardTile): an alt here would be read, and matched by voice control, as
+   *  a second name for the same button. */
+  decorative?: boolean;
   /** false in a non-Pokémon pack: only the card's own sprite, never a guess. */
   pokemon?: boolean;
 }) {
@@ -121,7 +126,7 @@ export function PokemonBadge({
           src={src}
           // No Pokémon name for a custom non-Pokémon sprite (One Piece) — the
           // card's own name describes it.
-          alt={name ?? card.name}
+          alt={decorative ? '' : (name ?? card.name)}
           loading="lazy"
           decoding="async"
           onError={advance}

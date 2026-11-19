@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState, type CSSProperties } from 'react';
+import { useState, type CSSProperties, type ReactNode } from 'react';
 import { ChartNoAxesColumn } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useLiveRecentPulls } from '@/lib/use-recent-pulls';
@@ -9,6 +9,8 @@ import { FramedAvatar } from '@/components/FramedAvatar';
 import { SlabImage } from '@/components/SlabImage';
 import { TicketArt } from '@/components/TicketArt';
 import { TierBadge } from '@/components/TierBadge';
+import { Bezel } from '@/components/ui/soft';
+import { chipVariants } from '@/components/ui/chip';
 import { PullGapsChart } from '@/components/PullGapsChart';
 import {
   isTopRarity,
@@ -241,13 +243,178 @@ function Row({
   );
 }
 
+/**
+ * One pull in the pack page's ledger (`variant="board"`). It states what the
+ * card row above states, in a different order: the CARD leads (slab, name,
+ * value, tier) and the puller and the time sit under its name.
+ *
+ * As above, the puller's face is its own link beside the card control: one
+ * interactive element may not nest inside another.
+ */
+function BoardRow({
+  pull,
+  onSelect,
+}: {
+  pull: RecentPull;
+  onSelect?: (pull: RecentPull) => void;
+}) {
+  const rgb = rarityRgb(pull.rarity);
+  const top = isTopRarity(pull.rarity);
+  // A ticket win has no card to open or price, so the row is not a control.
+  const tickets = pull.tickets != null;
+  // Unpriced (an older backend sent no MYR price) reads '—', never RM 0.00.
+  const value = pull.priceMyr != null ? rm(pull.priceMyr) : '—';
+  // No aria-label here: the control is named by its own text, in the order it
+  // is printed (card, who, when, value, tier). A separate label drifted from
+  // what the row shows (it gave "4m ago" where the row prints the time), which
+  // voice control cannot match against.
+  const focusRing =
+    'outline-none focus-visible:ring-2 focus-visible:ring-white/40';
+  const cardClass = cn(
+    'flex min-w-0 flex-1 items-center gap-3 rounded-xl text-left',
+    focusRing,
+  );
+  const avatar = (
+    <FramedAvatar
+      src={pull.avatar}
+      initial={pull.who.charAt(0).toUpperCase() || '?'}
+      frameSrc={pull.frame}
+      size={40}
+    />
+  );
+  // The figure and the tier: beside the name on a wide row, under it on a
+  // narrow one (a phone's row has no room for a third column).
+  const figure = (
+    <>
+      {/* A ticket win's amount is its name line: no second figure. */}
+      {!tickets && (
+        <span className="whitespace-nowrap font-heading text-[15px] leading-none text-white tabular-nums @sm:text-base">
+          {value}
+        </span>
+      )}
+      <TierBadge rarity={pull.rarity} />
+    </>
+  );
+  const inner = (
+    <>
+      <span className="flex w-10 shrink-0 items-center justify-center">
+        {tickets ? (
+          <TicketArt width={40} className="h-auto w-full" />
+        ) : (
+          <SlabImage
+            card={pull}
+            // Decorative: the row prints the card's name beside it.
+            alt=""
+            sizes="40px"
+            className="w-9"
+            // 36px slab: the full-size halo would bleed over the rows around it.
+            glowScale={0.18}
+          />
+        )}
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-1">
+        {/* Two lines, not an ellipsis: a name cut to one line hides the very
+            words that name the card. */}
+        <span className="line-clamp-2 text-sm font-semibold leading-tight text-white [overflow-wrap:anywhere]">
+          {tickets ? ticketCount(pull.tickets ?? 0) : pull.name}
+        </span>
+        <span className="flex flex-wrap items-center gap-x-1.5 text-xs leading-snug text-neutral-400">
+          <span className="max-w-full truncate font-medium text-neutral-200">
+            <span className="sr-only">pulled by </span>
+            {pull.who}
+          </span>
+          <time dateTime={pull.rolledAt} className="tabular-nums">
+            {pullTime(pull.rolledAt)}
+          </time>
+        </span>
+        <span className="mt-0.5 flex items-center gap-2 @sm:hidden">
+          {figure}
+        </span>
+      </span>
+      <span className="hidden shrink-0 flex-col items-end gap-1.5 @sm:flex">
+        {figure}
+      </span>
+    </>
+  );
+  return (
+    <div
+      // A chase-tier row wears its own hue down its left edge and as a faint
+      // wash: the light is inherited from the pull (Glow Is Earned).
+      style={
+        top
+          ? {
+              backgroundImage: `linear-gradient(90deg, rgba(${rgb}, 0.14), transparent 55%)`,
+              boxShadow: `inset 3px 0 0 rgb(${rgb})`,
+            }
+          : undefined
+      }
+      className={cn(
+        'flex h-full items-center gap-3 px-4 py-3.5',
+        !tickets &&
+          'transition-colors duration-300 hover:bg-white/[0.04] motion-reduce:transition-none',
+      )}
+    >
+      {pull.profileHandle ? (
+        <Link
+          href={`/profile/${pull.profileHandle}?tab=activity`}
+          prefetch={false}
+          aria-label={`View ${pull.who}'s activity`}
+          // 40px face in a 44px target: the padding buys the 4px and the
+          // negative margin keeps the row's geometry where it was.
+          className={cn(
+            '-m-0.5 shrink-0 rounded-full p-0.5',
+            'transition-opacity hover:opacity-75 motion-reduce:transition-none',
+            focusRing,
+          )}
+        >
+          {avatar}
+        </Link>
+      ) : null}
+      {tickets ? (
+        <div className={cardClass}>
+          {!pull.profileHandle && avatar}
+          {inner}
+        </div>
+      ) : onSelect ? (
+        <button
+          type="button"
+          onClick={() => onSelect(pull)}
+          className={cardClass}
+        >
+          {/* A row with no public profile keeps its face INSIDE the card
+              control, so those 40px still open the card. */}
+          {!pull.profileHandle && avatar}
+          {inner}
+        </button>
+      ) : (
+        <Link
+          href={`/card/${pull.handle}`}
+          prefetch={false}
+          className={cardClass}
+        >
+          {!pull.profileHandle && avatar}
+          {inner}
+        </Link>
+      )}
+    </div>
+  );
+}
+
 export function PullHistory({
   initial,
   packSlug,
   category,
   onSelect,
   noun = 'pack',
+  variant = 'cards',
+  heading,
 }: {
+  /** `cards`: the panel as the home feed wears it. `board`: the pack page's
+   *  soft layout (counters and filter in a side column, the pulls as one
+   *  ledger). Same data, same controls, same words. */
+  variant?: 'cards' | 'board';
+  /** Board only: the section's heading, set at the top of the side column. */
+  heading?: ReactNode;
   initial: RecentFeed;
   /** Scope to one pack's history; omit for the global feed (rows then also
    *  name their pack). */
@@ -275,6 +442,139 @@ export function PullHistory({
     const n = drought[r];
     return n == null ? [] : [[r, n] as const];
   });
+
+  if (variant === 'board') {
+    return (
+      <div className="@container">
+        {/* scripts/qa-pull-history.mjs walks this grid: the filter group's
+            parent holds the rows, and the list (or the chart) is the group's
+            next sibling. Keep the three children in this order. */}
+        <div className="grid grid-cols-1 gap-5 @[56rem]:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] @[56rem]:grid-rows-[auto_1fr] @[56rem]:gap-x-10">
+          <div className="flex flex-col gap-5">
+            {heading}
+            {droughts.length > 0 && (
+              <Bezel
+                core={cn(
+                  'grid gap-px bg-white/10',
+                  droughts.length > 1 && 'grid-cols-2',
+                )}
+              >
+                {droughts.map(([r, n], i) => (
+                  <div
+                    key={r}
+                    className={cn(
+                      'bg-neutral-950 px-4 py-4',
+                      // An odd one out takes the whole last row.
+                      droughts.length > 1 &&
+                        droughts.length % 2 === 1 &&
+                        i === droughts.length - 1 &&
+                        'col-span-2',
+                    )}
+                    style={{
+                      boxShadow: `inset 0 -28px 40px -36px rgba(${rarityRgb(r)}, 0.7)`,
+                    }}
+                  >
+                    <p className="font-heading text-[2.5rem] leading-none tracking-[-0.02em] text-white tabular-nums">
+                      <span
+                        key={n}
+                        className="pull-row-in inline-block motion-reduce:animate-none"
+                      >
+                        {n}
+                      </span>
+                    </p>
+                    <p className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs text-neutral-400">
+                      {shownNoun}s without <TierBadge rarity={r} />
+                    </p>
+                  </div>
+                ))}
+              </Bezel>
+            )}
+          </div>
+
+          <div
+            role="group"
+            aria-label="Filter pulls by tier"
+            className="flex flex-wrap gap-2 self-start"
+          >
+            {TABS.map((t) => (
+              <button
+                key={t}
+                type="button"
+                aria-pressed={tab === t}
+                aria-label={t === 'Stats' ? 'Stats' : undefined}
+                onClick={() => setTab(t)}
+                className={cn(
+                  chipVariants(tab === t),
+                  t === 'Stats' ? 'w-11 justify-center px-0' : 'px-3.5',
+                )}
+              >
+                {t === 'Stats' ? (
+                  <ChartNoAxesColumn className="h-4 w-4" aria-hidden />
+                ) : (
+                  <>
+                    {t !== 'All' && (
+                      <span
+                        aria-hidden
+                        className="h-1.5 w-1.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: `rgb(${rarityRgb(t)})` }}
+                      />
+                    )}
+                    {t}
+                  </>
+                )}
+              </button>
+            ))}
+          </div>
+
+          <div className="@container min-w-0 @[56rem]:col-start-2 @[56rem]:row-span-2 @[56rem]:row-start-1">
+            {tab === 'Stats' ? (
+              // Re-fetches when a drought counter moves: a new pull landed.
+              <PullGapsChart
+                packSlug={packSlug}
+                category={shownCategory}
+                refreshKey={JSON.stringify(drought)}
+              />
+            ) : (
+              <div
+                aria-busy={pending}
+                className={cn(
+                  'transition-opacity duration-300',
+                  pending && 'opacity-50',
+                )}
+              >
+                <Bezel>
+                  {pulls.length === 0 ? (
+                    <p className="px-4 py-12 text-center text-sm text-neutral-400">
+                      {tab === 'All'
+                        ? `No pulls yet — be the first to open a ${shownNoun}.`
+                        : `No ${tab} pulls yet — the next rip could be the one.`}
+                    </p>
+                  ) : (
+                    // Keyed on the scope whose rows are on screen, NOT the
+                    // tab: the list re-enters once, when the new rows land.
+                    <ol
+                      key={shownScope}
+                      className="grid grid-cols-1 @[46rem]:grid-cols-2"
+                    >
+                      {pulls.map((pull, i) => (
+                        <li
+                          key={pull.id}
+                          className="pull-row-in border-b border-white/[0.08] motion-reduce:animate-none @[46rem]:odd:border-r"
+                          style={{ '--i': i } as CSSProperties}
+                        >
+                          <BoardRow pull={pull} onSelect={onSelect} />
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </Bezel>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="@container flex flex-col gap-4">

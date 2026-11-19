@@ -103,7 +103,10 @@ try {
   await page.screenshot({ path: 'docs/research/qa-pokemon-badge-rail.png' });
 
   // --- 2) Top Hits dialog ----------------------------------------------
-  await page.locator('button[aria-haspopup="dialog"]').first().click();
+  await page
+    .locator('button[aria-haspopup="dialog"][aria-label*="grouped by rarity"]')
+    .first()
+    .click();
   await page.waitForSelector(DIALOG_SEL, { timeout: 5000 });
   await page.waitForTimeout(2000);
   const dialogBadges = await page.locator(`${DIALOG_TILE} ${BADGE}`).count();
@@ -182,7 +185,12 @@ try {
     // skips it and falls back to the full pool inside the dialog), so the raw
     // pack's tiles only exist once the dialog is open. Measuring the page
     // first is how this probe silently skipped itself.
-    await rpg.locator('button[aria-haspopup="dialog"]').first().click();
+    await rpg
+      .locator(
+        'button[aria-haspopup="dialog"][aria-label*="grouped by rarity"]',
+      )
+      .first()
+      .click();
     await rpg.waitForSelector(DIALOG_SEL, { timeout: 5000 });
     await rpg.waitForTimeout(2000);
     if ((await rpg.locator(DIALOG_TILE).count()) === 0) {

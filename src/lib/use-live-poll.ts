@@ -33,8 +33,14 @@ export type LivePollOptions<T> = {
   /** `initial` came from the server for this `resetKey`, so the first tick can
    *  wait this long instead of downloading it again during page load. A value
    *  of `intervalMs` or more leaves it to the interval. A scope change still
-   *  fetches at once. */
+   *  fetches at once, unless `seedFollowsKey`. */
   firstTickMs?: number;
+  /** `initial` always belongs to the current `resetKey`: the caller swaps the
+   *  two together (the pack page switching packs in place brings each pack's
+   *  own server data). A scope change then waits `firstTickMs` like a mount
+   *  does, instead of downloading at once what the caller was just handed.
+   *  `pending` stays true until that tick, so the caller renders `initial`. */
+  seedFollowsKey?: boolean;
   /** Injected by tests; defaults to fetch → json, `null` on a non-2xx. */
   fetchJson?: (url: string) => Promise<unknown>;
 };
@@ -69,6 +75,7 @@ export function useLivePoll<T>(
     resetKey = '',
     accept,
     firstTickMs = 0,
+    seedFollowsKey = false,
     fetchJson,
   }: LivePollOptions<T>,
 ): LivePoll<T> {
@@ -87,10 +94,12 @@ export function useLivePoll<T>(
   const acceptRef = useRef(accept);
   const fetchRef = useRef(fetchJson);
   const firstTickRef = useRef(firstTickMs);
+  const seedFollowsRef = useRef(seedFollowsKey);
   useEffect(() => {
     acceptRef.current = accept;
     fetchRef.current = fetchJson;
     firstTickRef.current = firstTickMs;
+    seedFollowsRef.current = seedFollowsKey;
   });
 
   useEffect(() => {
@@ -120,7 +129,8 @@ export function useLivePoll<T>(
       }
     };
     // Swap in live data, then keep polling.
-    const wait = shownRef.current === resetKey ? firstTickRef.current : 0;
+    const seeded = shownRef.current === resetKey || seedFollowsRef.current;
+    const wait = seeded ? firstTickRef.current : 0;
     if (wait === 0) void tick();
     const first =
       wait > 0 && wait < intervalMs ? setTimeout(tick, wait) : undefined;

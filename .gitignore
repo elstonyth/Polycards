@@ -171,3 +171,6 @@ public/images/claw/polycards-factory-test.png
 # local agent/marketing work products (image-gen previews, video masters, QA
 # captures). Assets that ship are copied into public/ and committed there.
 /output/
+
+# taste-skill captures (screenshots hold live data)
+/.taste-skill/
