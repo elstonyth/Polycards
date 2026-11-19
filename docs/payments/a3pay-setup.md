@@ -1,5 +1,22 @@
 # A3Pay (Singapore, SGD) setup
 
+> **Closed on 2026-11-19.** Singapore payments are moving to another gateway. `A3PAY_ENABLED` is `"false"` in `.do/backend.app.yaml`:
+>
+> - The S$ option is gone from the top-up sheet.
+> - New S$ top-ups, S$ payouts and approvals of held A3Pay payouts are refused. A held A3Pay payout can still be denied, which refunds it.
+> - A saved Singapore bank account shows as "not available with the current payout provider".
+>
+> The other `A3PAY_*` values stay set, so callbacks, the sweeps and the gateway audit still settle rows already in flight. Without them a late callback gets a 503 and is never credited (the callback route recovers an `expired` deposit at any age), and the gateway audit skips the row. Remove them, and let A3Pay close the merchant and the IP whitelist, only when all of these hold:
+>
+> - No `a3pay` row is `pending` or `held`.
+> - The newest `a3pay` row is more than 7 days old (`GATEWAY_EXPIRED_RETRY_MS` and `GATEWAY_AUDIT_WINDOW_MS`), so not before 2026-11-27.
+> - Admin → Settlement → S$ shows no unacknowledged audit finding.
+> - A3Pay confirms that no order of ours is still open on their side.
+>
+> The deposit and withdrawal sweeps and the gateway audit run only while some rail is open (`anyGatewayEnabled`), and A3Pay no longer counts. Keep TGPay or GlobePay365 open until the conditions above hold. Callbacks do not depend on that switch.
+>
+> To reopen, set the flag back to `"true"` and apply the spec.
+
 A3Pay is a **regional rail**. It runs beside the active RM gateway (TGPay) and never replaces it:
 
 - **Top-ups.** Singapore customers choose **Pay in S$** on the top-up sheet. They pay in SGD by PayNow QR (`BQR`) or bank transfer (`OB`), and are credited **RM** at today's rate minus our top-up fee (a percent).

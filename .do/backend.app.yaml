@@ -534,16 +534,21 @@ envs:
     value: 54.251.58.7
   # A3Pay — the Singapore (SGD) rail, BESIDE the active RM gateway, never
   # instead of it (docs/payments/a3pay-setup.md). Keys and MID read from the
-  # A3Pay back office 2026-10-12; live preflight passed from the whitelisted
-  # office IP. A3PAY_ENABLED=true is safe to ship: SGD stays closed to
-  # customers until an admin sets a markup (> 0) on the Settlement page and a
-  # firm SGD_MYR rate exists (sync-payment-fx job, or check-a3pay.ts). Our
-  # egress 188.166.181.61 / .204 is on A3Pay's whitelist. A3PAY_CALLBACK_IPS is
-  # their documented outgoing address. A3PAY_PUBLIC_KEY is THEIR public key
-  # (verifies their callbacks) — public, so not a secret.
+  # A3Pay back office 2026-10-12. CLOSED 2026-11-19 (owner: moving Singapore
+  # payments to another gateway). A3PAY_ENABLED=false hides S$ on the top-up
+  # sheet and refuses new S$ top-ups, S$ payouts and held-payout approvals
+  # (deny still refunds). Every other A3PAY_* value stays ON PURPOSE: the
+  # callbacks, the deposit/withdrawal sweeps and the gateway audit read the
+  # credentials, not this flag, so rows already in flight still settle.
+  # Remove them only on the conditions in docs/payments/a3pay-setup.md
+  # ("Closed"): a late callback or audit re-check fails without them, and
+  # the sweeps run only while another rail (TGPay, GP365) is open. Our
+  # egress 188.166.181.61 / .204 is on A3Pay's whitelist. A3PAY_CALLBACK_IPS
+  # is their documented outgoing address. A3PAY_PUBLIC_KEY is THEIR public
+  # key (verifies their callbacks) — public, so not a secret.
   - key: A3PAY_ENABLED
     scope: RUN_TIME
-    value: "true"
+    value: "false"
   - key: A3PAY_API_BASE
     scope: RUN_TIME
     value: https://mapi.a3paysg.com
