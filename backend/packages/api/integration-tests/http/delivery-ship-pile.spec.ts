@@ -113,7 +113,7 @@ medusaIntegrationTestRunner({
           {},
         );
         expect(cleared.status).toBe(400);
-        expect(cleared.data.message).toMatch(/not cancelled from the ship pile/);
+        expect(cleared.data.message).toMatch(/has not left the ship pile/);
       });
 
       it('lists a cancel from the pile until the parcel is marked pulled, once', async () => {
@@ -128,19 +128,24 @@ medusaIntegrationTestRunner({
         expect(pile.data.open).toEqual([
           expect.objectContaining({
             order_id: id,
-            customer_id: 'cus_pile_c',
             from_status: 'pending_ship',
+            to_status: 'canceled',
             ship_name: 'Ali Bin Abu',
             ship_city: 'Ipoh',
-            canceled_by: ADMIN_EMAIL,
+            moved_by: ADMIN_EMAIL,
           }),
         ]);
+        expect(pile.data.truncated).toBe(false);
+        // No player email or staff reason on the packer's list.
+        expect(pile.data.open[0]).not.toHaveProperty('customer_email');
+        expect(pile.data.open[0]).not.toHaveProperty('reason');
 
         // The Orders table marks the row too, still open.
         const list = await get('/admin/delivery-orders?status=canceled');
         const row = list.data.orders.find((o: { id: string }) => o.id === id);
         expect(row.ship_pile).toMatchObject({
           from_status: 'pending_ship',
+          to_status: 'canceled',
           cleared_at: null,
         });
 
@@ -175,9 +180,11 @@ medusaIntegrationTestRunner({
         expect(await statusOf(id)).toBe('canceled');
       });
 
-      it('skips pile orders in an unchecked bulk cancel, and cancels them with the check', async () => {
+      it('checks only the ids the admin confirmed in a bulk cancel', async () => {
         const early = await seedOrder('cus_pile_d', 'requested');
         const packed = await seedOrder('cus_pile_e', 'ready_to_ship');
+        // Entered the pile after the admin's page loaded: never confirmed.
+        const late = await seedOrder('cus_pile_g', 'ready_to_ship');
 
         const unchecked = await post('/admin/delivery-orders/bulk', {
           ids: [early, packed],
@@ -191,16 +198,60 @@ medusaIntegrationTestRunner({
         expect(await statusOf(packed)).toBe('ready_to_ship');
 
         const checked = await post('/admin/delivery-orders/bulk', {
-          ids: [packed],
+          ids: [packed, late],
           status: 'canceled',
-          pile_checked: true,
+          pile_checked_ids: [packed],
         });
         expect(checked.data.updated).toEqual([packed]);
+        expect(checked.data.skipped).toEqual([
+          { id: late, reason: SHIP_PILE_UNCHECKED_REFUSAL },
+        ]);
+        expect(await statusOf(late)).toBe('ready_to_ship');
 
         const pile = await get('/admin/delivery-orders/ship-pile');
-        expect(pile.data.open.map((e: { order_id: string }) => e.order_id)).toEqual(
-          [packed],
+        expect(
+          pile.data.open.map((e: { order_id: string }) => e.order_id),
+        ).toEqual([packed]);
+      });
+
+      it('guards and lists a step back to processed like a cancel', async () => {
+        const id = await seedOrder('cus_pile_h', 'ready_to_ship');
+
+        const refused = await post(`/admin/delivery-orders/${id}`, {
+          status: 'processed',
+        });
+        expect(refused.status).toBe(400);
+        expect(refused.data.message).toBe(SHIP_PILE_UNCHECKED_REFUSAL);
+
+        const back = await post(`/admin/delivery-orders/${id}`, {
+          status: 'processed',
+          pile_checked: true,
+        });
+        expect(back.status).toBe(200);
+        // The later cancel from processed asks nothing, but the step back
+        // already put the order on the packer's list.
+        const cancel = await post(`/admin/delivery-orders/${id}`, {
+          status: 'canceled',
+        });
+        expect(cancel.status).toBe(200);
+
+        const pile = await get('/admin/delivery-orders/ship-pile');
+        expect(pile.data.open).toEqual([
+          expect.objectContaining({
+            order_id: id,
+            from_status: 'ready_to_ship',
+            to_status: 'processed',
+          }),
+        ]);
+
+        const cleared = await post(
+          `/admin/delivery-orders/${id}/ship-pile`,
+          {},
         );
+        expect(cleared.data.already_cleared).toBe(false);
+        expect(
+          (await get('/admin/delivery-orders/ship-pile')).data.open,
+        ).toEqual([]);
       });
 
       it('404s the mark for an unknown order', async () => {

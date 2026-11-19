@@ -1,17 +1,19 @@
 import {
   DELIVERY_STATUSES,
+  SHIP_PILE_EXITS,
   SHIP_PILE_STATUSES,
   SHIP_PILE_UNAUDITED_REFUSAL,
   SHIP_PILE_UNCHECKED_REFUSAL,
-  isShipPileCancel,
+  isShipPileExit,
   isShipPileStatus,
-  shipPileCancelRefusal,
   shipPileClearVerdict,
+  shipPileExitRefusal,
 } from '../delivery';
 
-// The ship-pile rule (incident 2026-11-03): an order in
-// ready_to_ship or pending_ship may already be packed, so cancelling it must
-// make the canceller check the pile, and the packer must hear about it.
+// The ship-pile rule (incident 2026-11-03): an order in ready_to_ship or
+// pending_ship may already be packed, so moving it out of the pile other than
+// by shipping must make the admin check the pile, and the packer must hear
+// about it.
 describe('ship pile statuses', () => {
   it('are exactly ready_to_ship and pending_ship', () => {
     expect([...SHIP_PILE_STATUSES].sort()).toEqual([
@@ -39,48 +41,67 @@ describe('ship pile statuses', () => {
     expect(isShipPileStatus(undefined)).toBe(false);
     expect(isShipPileStatus(null)).toBe(false);
   });
+
+  it('leaves the pile without shipping only by a cancel or a step back', () => {
+    expect([...SHIP_PILE_EXITS].sort()).toEqual(['canceled', 'processed']);
+  });
 });
 
-describe('isShipPileCancel', () => {
-  it('is a cancel that leaves ready_to_ship or pending_ship', () => {
-    expect(isShipPileCancel('ready_to_ship', 'canceled')).toBe(true);
-    expect(isShipPileCancel('pending_ship', 'canceled')).toBe(true);
-  });
-
-  it('is not a cancel from before the pile', () => {
-    expect(isShipPileCancel('requested', 'canceled')).toBe(false);
-    expect(isShipPileCancel('processed', 'canceled')).toBe(false);
-  });
-
-  it('is not any other move out of the pile', () => {
-    for (const to of DELIVERY_STATUSES.filter((s) => s !== 'canceled')) {
-      expect(isShipPileCancel('ready_to_ship', to)).toBe(false);
-      expect(isShipPileCancel('pending_ship', to)).toBe(false);
+describe('isShipPileExit', () => {
+  it('is a cancel, or a step back to processed, from the pile', () => {
+    for (const from of ['ready_to_ship', 'pending_ship']) {
+      expect(isShipPileExit(from, 'canceled')).toBe(true);
+      expect(isShipPileExit(from, 'processed')).toBe(true);
     }
   });
 
-  it('reads an audit row with no status as no pile cancel', () => {
-    expect(isShipPileCancel(undefined, 'canceled')).toBe(false);
-    expect(isShipPileCancel('ready_to_ship', undefined)).toBe(false);
+  it('is not a cancel from before the pile', () => {
+    expect(isShipPileExit('requested', 'canceled')).toBe(false);
+    expect(isShipPileExit('processed', 'canceled')).toBe(false);
+  });
+
+  it('is not shipping, nor a move within the pile', () => {
+    for (const to of [
+      'shipped',
+      'ready_to_ship',
+      'pending_ship',
+      'completed',
+    ]) {
+      expect(isShipPileExit('ready_to_ship', to)).toBe(false);
+      expect(isShipPileExit('pending_ship', to)).toBe(false);
+    }
+  });
+
+  it('names every status a pile order can reach', () => {
+    const reachable = DELIVERY_STATUSES.filter((to) =>
+      isShipPileExit('ready_to_ship', to),
+    );
+    expect(reachable.sort()).toEqual(['canceled', 'processed']);
+  });
+
+  it('reads an audit row with no status as no exit', () => {
+    expect(isShipPileExit(undefined, 'canceled')).toBe(false);
+    expect(isShipPileExit('ready_to_ship', undefined)).toBe(false);
   });
 });
 
-describe('shipPileCancelRefusal', () => {
+describe('shipPileExitRefusal', () => {
   const checked = { pileChecked: true, audited: true };
 
-  it('lets a checked, audited cancel from the pile through', () => {
-    expect(shipPileCancelRefusal('ready_to_ship', 'canceled', checked)).toBe(
-      null,
-    );
-    expect(shipPileCancelRefusal('pending_ship', 'canceled', checked)).toBe(
-      null,
-    );
+  it('lets a checked, audited exit from the pile through', () => {
+    for (const from of ['ready_to_ship', 'pending_ship']) {
+      for (const to of ['canceled', 'processed']) {
+        expect(shipPileExitRefusal(from, to, checked)).toBe(null);
+      }
+    }
   });
 
-  it('refuses a cancel from the pile the canceller did not check', () => {
-    for (const from of ['ready_to_ship', 'pending_ship']) {
+  it('refuses an exit from the pile the admin did not check', () => {
+    // The step back is guarded too: otherwise step back, then cancel from
+    // processed, would skip both guards.
+    for (const to of ['canceled', 'processed']) {
       expect(
-        shipPileCancelRefusal(from, 'canceled', {
+        shipPileExitRefusal('ready_to_ship', to, {
           pileChecked: false,
           audited: true,
         }),
@@ -88,13 +109,13 @@ describe('shipPileCancelRefusal', () => {
     }
   });
 
-  it('refuses a cancel from the pile that names no admin, checked or not', () => {
+  it('refuses an exit from the pile that names no admin, checked or not', () => {
     // A script that skips the audit row leaves the packer's list blind, so
     // "checked" alone is not enough (the 2026-11-03 cancel came from outside
     // the admin screens).
     for (const pileChecked of [true, false]) {
       expect(
-        shipPileCancelRefusal('ready_to_ship', 'canceled', {
+        shipPileExitRefusal('ready_to_ship', 'canceled', {
           pileChecked,
           audited: false,
         }),
@@ -105,18 +126,19 @@ describe('shipPileCancelRefusal', () => {
   it('never asks about the pile before an order reaches it', () => {
     // The customer's own cancel (requested only) carries no audit and no check.
     const bare = { pileChecked: false, audited: false };
-    expect(shipPileCancelRefusal('requested', 'canceled', bare)).toBe(null);
-    expect(shipPileCancelRefusal('processed', 'canceled', bare)).toBe(null);
-    expect(shipPileCancelRefusal('packing', 'canceled', bare)).toBe(null);
+    expect(shipPileExitRefusal('requested', 'canceled', bare)).toBe(null);
+    expect(shipPileExitRefusal('processed', 'canceled', bare)).toBe(null);
+    expect(shipPileExitRefusal('packing', 'canceled', bare)).toBe(null);
+    expect(shipPileExitRefusal('requested', 'processed', bare)).toBe(null);
   });
 
-  it('never asks about the pile for a move that is not a cancel', () => {
+  it('never asks about the pile for shipping or a move within it', () => {
     const bare = { pileChecked: false, audited: false };
-    expect(shipPileCancelRefusal('ready_to_ship', 'shipped', bare)).toBe(null);
-    expect(shipPileCancelRefusal('ready_to_ship', 'processed', bare)).toBe(
+    expect(shipPileExitRefusal('ready_to_ship', 'shipped', bare)).toBe(null);
+    expect(shipPileExitRefusal('ready_to_ship', 'pending_ship', bare)).toBe(
       null,
     );
-    expect(shipPileCancelRefusal('pending_ship', 'ready_to_ship', bare)).toBe(
+    expect(shipPileExitRefusal('pending_ship', 'ready_to_ship', bare)).toBe(
       null,
     );
   });
@@ -133,28 +155,19 @@ describe('shipPileCancelRefusal', () => {
 });
 
 describe('shipPileClearVerdict', () => {
-  const pileCancel = { status: 'canceled', pileCancel: true, cleared: false };
-
-  it('clears a canceled order that left the pile and is not cleared yet', () => {
-    expect(shipPileClearVerdict(pileCancel)).toBe('ok');
+  it('clears an order whose move out of the pile is still open', () => {
+    expect(shipPileClearVerdict({ exited: true, cleared: false })).toBe('ok');
   });
 
   it('is a no-op for one already cleared', () => {
-    expect(shipPileClearVerdict({ ...pileCancel, cleared: true })).toBe(
+    expect(shipPileClearVerdict({ exited: true, cleared: true })).toBe(
       'already_cleared',
     );
   });
 
-  it('refuses an order that was never cancelled from the pile', () => {
-    expect(shipPileClearVerdict({ ...pileCancel, pileCancel: false })).toBe(
-      'not_pile_cancel',
-    );
-  });
-
-  it('refuses an order that is not canceled any more, whatever its history', () => {
-    // canceled is terminal today; this pins the rule if that ever changes.
-    expect(shipPileClearVerdict({ ...pileCancel, status: 'shipped' })).toBe(
-      'not_pile_cancel',
+  it('refuses an order that never left the pile without shipping', () => {
+    expect(shipPileClearVerdict({ exited: false, cleared: false })).toBe(
+      'not_pile_exit',
     );
   });
 

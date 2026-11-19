@@ -197,10 +197,10 @@ export function validateDeliveryStatusTransition(
 // ready_to_ship outside the admin screens (its audit reason is not one either
 // Orders route writes); nobody told the packer, and the parcel went out with
 // the rest of its batch while the cards were back in the player's vault.
-// Two guards hang off this rule: a cancel from the pile needs the canceller to
-// say they checked it (shipPileCancelRefusal, under the order's lock), and the
-// Orders page lists every such cancel until the packer marks the parcel pulled
-// (listShipPileCancels).
+// Two guards hang off this rule: a move out of the pile other than shipping
+// needs the admin to say they checked it (shipPileExitRefusal, under the
+// order's lock), and the Orders page lists every such move until the packer
+// marks the parcel pulled (listShipPileExits).
 export const SHIP_PILE_STATUSES: readonly string[] = [
   'ready_to_ship',
   'pending_ship',
@@ -209,41 +209,48 @@ export const SHIP_PILE_STATUSES: readonly string[] = [
 export const isShipPileStatus = (status: string | null | undefined): boolean =>
   SHIP_PILE_STATUSES.includes(status ?? '');
 
-/** A cancel of an order that may already be packed: the status it left was
- *  in the ship pile. Takes audit-row values, so either side may be absent. */
-export const isShipPileCancel = (
+/** Where an order leaves the pile without shipping: cancelled, or stepped back
+ *  to processed (its cards turned out not to be there). Either way a packed
+ *  parcel must come out of the pile, and the step back must not be a way round
+ *  the cancel's check (step back, then cancel from processed). */
+export const SHIP_PILE_EXITS: readonly string[] = ['canceled', 'processed'];
+
+/** A move out of the pile that is not shipping it. Takes audit-row values, so
+ *  either side may be absent. */
+export const isShipPileExit = (
   from: string | null | undefined,
   to: string | null | undefined,
-): boolean => to === 'canceled' && isShipPileStatus(from);
+): boolean => isShipPileStatus(from) && SHIP_PILE_EXITS.includes(to ?? '');
 
 export const SHIP_PILE_UNCHECKED_REFUSAL =
-  'This order may already be packed. Pull its parcel from the ship pile first, then confirm the cancel.';
+  'This order may already be packed. Pull its parcel from the ship pile first, then confirm.';
 export const SHIP_PILE_UNAUDITED_REFUSAL =
-  'This order may already be packed, so its cancel must name the admin making it.';
+  'This order may already be packed, so moving it out of the ship pile must name the admin doing it.';
 
 // `audited`: the move carries an admin audit row. That row is what puts the
-// cancel on the packer's list, so a cancel from the pile without one (a
-// script that skipped it) is refused outright, checked or not.
-export function shipPileCancelRefusal(
+// move on the packer's list, so a move out of the pile without one (a script
+// that skipped it) is refused outright, checked or not.
+export function shipPileExitRefusal(
   from: string,
   to: string,
   opts: { pileChecked: boolean; audited: boolean },
 ): string | null {
-  if (!isShipPileCancel(from, to)) return null;
+  if (!isShipPileExit(from, to)) return null;
   if (!opts.audited) return SHIP_PILE_UNAUDITED_REFUSAL;
   if (!opts.pileChecked) return SHIP_PILE_UNCHECKED_REFUSAL;
   return null;
 }
 
-/** One cancel from the pile, as listShipPileCancels reads it. */
-export type ShipPileCancelRow = {
+/** An order's newest move out of the pile, as listShipPileExits reads it. */
+export type ShipPileExitRow = {
   order_id: string;
   customer_id: string;
   /** The pile status the order left: ready_to_ship or pending_ship. */
   from_status: string;
-  canceled_by: string;
-  reason: string;
-  canceled_at: Date;
+  /** Where it went: canceled or processed. */
+  to_status: string;
+  moved_by: string;
+  moved_at: Date;
   /** Who marked the parcel pulled from the pile; null while still open. */
   cleared_by: string | null;
   cleared_at: Date | null;
@@ -252,17 +259,16 @@ export type ShipPileCancelRow = {
 export type ShipPileClearVerdict =
   | 'ok'
   | 'already_cleared'
-  | 'not_pile_cancel'
+  | 'not_pile_exit'
   | 'not_found';
 
-/** Whether the packer can mark an order's parcel as pulled from the pile. */
+/** Whether the packer can mark an order's parcel as pulled from the pile:
+ *  it has left the pile without shipping, and that move is still open. */
 export function shipPileClearVerdict(
-  order: { status: string; pileCancel: boolean; cleared: boolean } | undefined,
+  order: { exited: boolean; cleared: boolean } | undefined,
 ): ShipPileClearVerdict {
   if (!order) return 'not_found';
-  if (order.status !== 'canceled' || !order.pileCancel) {
-    return 'not_pile_cancel';
-  }
+  if (!order.exited) return 'not_pile_exit';
   return order.cleared ? 'already_cleared' : 'ok';
 }
 

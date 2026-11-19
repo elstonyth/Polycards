@@ -3,6 +3,8 @@ import { Modules } from '@medusajs/framework/utils';
 import PacksModuleService from '../../../modules/packs/service';
 import { PACKS_MODULE } from '../../../modules/packs';
 import { serializeDeliveryOrders } from '../../../modules/packs/delivery-view';
+import { SHIP_PILE_EXITS } from '../../../modules/packs/delivery';
+import { shipPileMark } from './ship-pile/view';
 import {
   parsePaginationParams,
   parseSortParam,
@@ -74,15 +76,16 @@ export async function GET(
     : [];
   const emailById = new Map(customers.map((c) => [c.id, c.email]));
 
-  // Ship pile (incident 2026-11-03): which canceled orders on this page left
-  // ready_to_ship or pending_ship, and whether the parcel was marked pulled.
-  const canceledIds = orders
-    .filter((o) => o.status === 'canceled')
+  // Ship pile (incident 2026-11-03): which canceled or processed orders on
+  // this page left ready_to_ship or pending_ship without shipping, and
+  // whether the parcel was marked pulled since.
+  const exitedIds = orders
+    .filter((o) => SHIP_PILE_EXITS.includes(o.status))
     .map((o) => o.id);
-  const pileCancels = canceledIds.length
-    ? await packs.listShipPileCancels({ orderIds: canceledIds })
+  const pileExits = exitedIds.length
+    ? await packs.listShipPileExits({ orderIds: exitedIds })
     : [];
-  const pileById = new Map(pileCancels.map((p) => [p.order_id, p]));
+  const pileById = new Map(pileExits.map((p) => [p.order_id, shipPileMark(p)]));
 
   res.json({
     total,
@@ -94,13 +97,7 @@ export async function GET(
       // Admin-only (the storefront shares serializeDeliveryOrders): the
       // shipment tracker's last carrier check.
       tracking_snapshot: snapshotById.get(o.id) ?? null,
-      ship_pile: pileById.has(o.id)
-        ? {
-            from_status: pileById.get(o.id)!.from_status,
-            canceled_at: pileById.get(o.id)!.canceled_at,
-            cleared_at: pileById.get(o.id)!.cleared_at,
-          }
-        : null,
+      ship_pile: pileById.get(o.id) ?? null,
     })),
   });
 }

@@ -47,7 +47,7 @@ import {
   type PackGift,
   getDeliveryOrder,
   getDeliveryOrdersStock,
-  listShipPileCancels,
+  listShipPileExits,
   clearShipPile,
   getProfitReport,
   getPnlReport,
@@ -120,7 +120,6 @@ import {
   uploadImage,
   type AdminDeliveryOrder,
   type DeliveryOrderCardCover,
-  type ShipPileEntry,
   type AvatarFramesView,
   type ChallengeSettingsDTO,
   type ChallengeStageDTO,
@@ -1017,21 +1016,21 @@ export const useBulkUpdateDeliveryOrders = () => {
     mutationFn: (vars: {
       ids: string[];
       status: DeliveryStatus;
-      pileChecked?: boolean;
-    }) => bulkUpdateDeliveryOrders(vars.ids, vars.status, vars.pileChecked),
+      pileCheckedIds?: string[];
+    }) => bulkUpdateDeliveryOrders(vars.ids, vars.status, vars.pileCheckedIds),
     // Partial success is the contract, so invalidate on SETTLE (not success):
     // a throw here can still leave earlier ids in the batch already moved.
     onSettled: () => invalidateStock(),
   });
 };
 
-// Orders cancelled from the ship pile whose parcel is not marked pulled
-// (incident 2026-11-03). Polled, so a cancel made elsewhere (another admin, a
-// script) reaches a packer who keeps the Orders page open.
-export const useShipPileCancels = (): UseQueryResult<ShipPileEntry[]> =>
+// Orders that left the ship pile without shipping and whose parcel is not
+// marked pulled (incident 2026-11-03). Polled, so a move made elsewhere
+// (another admin, a script) reaches a packer who keeps the Orders page open.
+export const useShipPileExits = () =>
   useQuery({
     queryKey: qk.shipPile,
-    queryFn: listShipPileCancels,
+    queryFn: listShipPileExits,
     refetchInterval: 60_000,
   });
 

@@ -31,8 +31,8 @@ export type AdminDeliveryUpdate = {
   pile_checked?: true;
 };
 
-// `pile_checked` on either body: absent or false means "not checked"; anything
-// that is not a boolean is a client bug, not a silent no.
+// `pile_checked` on the single-order body: absent or false means "not
+// checked"; anything that is not a boolean is a client bug, not a silent no.
 const coercePileChecked = (raw: unknown): { pile_checked?: true } => {
   if (raw === undefined || raw === false) return {};
   if (raw !== true) bad('`pile_checked` must be a boolean.');
@@ -80,9 +80,11 @@ export function coerceCustomerId(raw: unknown): string | undefined {
 export type BulkStatusBody = {
   ids: string[];
   status: DeliveryStatus;
-  /** One check covers the batch: the bulk bar asks once for every selected
-   *  order in the ship pile. */
-  pile_checked?: true;
+  /** The ids whose ship-pile parcel the admin confirmed pulled: exactly the
+   *  orders the bulk bar's confirm named, so an order that entered the pile
+   *  after the page loaded is still refused (shipPileExitRefusal). Present
+   *  only when non-empty. */
+  pile_checked_ids?: string[];
 };
 
 // Body of POST /admin/delivery-orders/bulk. The 100-id cap is the contract the
@@ -107,10 +109,19 @@ export function coerceBulkStatusBody(raw: unknown): BulkStatusBody {
   ) {
     bad(`Invalid status '${String(b.status)}'.`);
   }
+  const ids = b.ids as string[];
+  const checked = b.pile_checked_ids ?? [];
+  if (
+    !Array.isArray(checked) ||
+    checked.some((v) => typeof v !== 'string' || !ids.includes(v))
+  ) {
+    bad('`pile_checked_ids` must list ids from `ids`.');
+  }
+  const confirmed = checked as string[];
   return {
-    ids: b.ids as string[],
+    ids,
     status: b.status as DeliveryStatus,
-    ...coercePileChecked(b.pile_checked),
+    ...(confirmed.length ? { pile_checked_ids: confirmed } : {}),
   };
 }
 

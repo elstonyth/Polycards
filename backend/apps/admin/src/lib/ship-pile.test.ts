@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  SHIP_PILE_EXITS,
   SHIP_PILE_STATUSES,
+  isShipPileExit,
   isShipPileStatus,
-  pileCancelCount,
+  pileCheckPlan,
   pilePrompt,
 } from './ship-pile';
 
@@ -16,6 +18,10 @@ describe('ship pile (admin mirror)', () => {
     ]);
   });
 
+  it('leaves the pile without shipping by a cancel or a step back', () => {
+    expect([...SHIP_PILE_EXITS].sort()).toEqual(['canceled', 'processed']);
+  });
+
   it.each([
     ['requested', false],
     ['processed', false],
@@ -27,52 +33,83 @@ describe('ship pile (admin mirror)', () => {
   ])('%s in the pile: %s', (status, inPile) => {
     expect(isShipPileStatus(status)).toBe(inPile);
   });
+
+  it('is an exit only from the pile, and only by a cancel or a step back', () => {
+    expect(isShipPileExit('ready_to_ship', 'canceled')).toBe(true);
+    expect(isShipPileExit('pending_ship', 'processed')).toBe(true);
+    expect(isShipPileExit('ready_to_ship', 'shipped')).toBe(false);
+    expect(isShipPileExit('ready_to_ship', 'pending_ship')).toBe(false);
+    expect(isShipPileExit('processed', 'canceled')).toBe(false);
+  });
 });
 
-describe('pileCancelCount', () => {
-  const orders = [
-    { status: 'requested' },
-    { status: 'ready_to_ship' },
-    { status: 'pending_ship' },
-    { status: 'shipped' },
+// What save() (one order) and applyBulk() (the selection) send.
+describe('pileCheckPlan', () => {
+  const selection = [
+    { id: 'do_a', status: 'requested' },
+    { id: 'do_b', status: 'ready_to_ship' },
+    { id: 'do_c', status: 'pending_ship' },
+    { id: 'do_d', status: 'shipped' },
   ];
 
-  it('counts the orders a cancel would take out of the pile', () => {
-    expect(pileCancelCount(orders, 'canceled')).toBe(2);
+  it('asks about, and checks, only the orders a cancel takes out of the pile', () => {
+    const plan = pileCheckPlan(selection, 'canceled');
+    expect(plan.ids).toEqual(['do_b', 'do_c']);
+    expect(plan.prompt?.title).toBe('2 of these orders may already be packed');
   });
 
-  it('is zero for any move that is not a cancel', () => {
-    expect(pileCancelCount(orders, 'shipped')).toBe(0);
-    expect(pileCancelCount(orders, 'pending_ship')).toBe(0);
-    expect(pileCancelCount(orders, 'processed')).toBe(0);
+  it('asks about a step back to processed too', () => {
+    const plan = pileCheckPlan(selection, 'processed');
+    expect(plan.ids).toEqual(['do_b', 'do_c']);
+    expect(plan.prompt?.confirmText).toBe('Parcels pulled, move them back');
   });
 
-  it('is zero for a cancel of orders before the pile', () => {
+  it('asks nothing and checks nothing for shipping or a move within the pile', () => {
+    for (const to of ['shipped', 'pending_ship', 'ready_to_ship'] as const) {
+      expect(pileCheckPlan(selection, to)).toEqual({ ids: [], prompt: null });
+    }
+  });
+
+  it('asks nothing for a cancel of orders before the pile', () => {
     expect(
-      pileCancelCount(
-        [{ status: 'requested' }, { status: 'processed' }],
+      pileCheckPlan(
+        [
+          { id: 'do_a', status: 'requested' },
+          { id: 'do_e', status: 'processed' },
+        ],
         'canceled',
       ),
-    ).toBe(0);
+    ).toEqual({ ids: [], prompt: null });
+  });
+
+  it('asks about one order in the Manage modal by its number', () => {
+    const plan = pileCheckPlan(
+      [{ id: 'do_01TESTSHIPPILE000000PILE01', status: 'ready_to_ship' }],
+      'canceled',
+    );
+    expect(plan.ids).toEqual(['do_01TESTSHIPPILE000000PILE01']);
+    expect(plan.prompt?.description).toMatch(/#PILE01/);
   });
 });
 
 describe('pilePrompt', () => {
-  it('asks about one order by its number', () => {
-    const p = pilePrompt(1, 'do_01TESTSHIPPILE000000PILE01');
+  it('asks the packing question for one order', () => {
+    const p = pilePrompt(['do_01TESTSHIPPILE000000PILE01'], 'canceled');
     expect(p.title).toBe('This order may already be packed');
-    expect(p.description).toMatch(/#PILE01/);
     expect(p.description).toMatch(/Has the parcel been pulled from the pile\?/);
+    expect(p.confirmText).toBe('Parcel pulled, cancel it');
   });
 
-  it('asks about several orders by count', () => {
-    const p = pilePrompt(3);
-    expect(p.title).toBe('3 of these orders may already be packed');
-    expect(p.description).toMatch(/Have their parcels been pulled/);
+  it('words a step back as a move, not a cancel', () => {
+    const p = pilePrompt(['do_1'], 'processed');
+    expect(p.confirmText).toBe('Parcel pulled, move it back');
+    expect(p.description).not.toMatch(/refunds/);
   });
 
   it('keeps the order as the safe answer', () => {
-    expect(pilePrompt(1, 'do_1').cancelText).toBe('Keep order');
-    expect(pilePrompt(2).cancelText).toBe('Keep orders');
+    expect(pilePrompt(['do_1'], 'canceled').cancelText).toBe('Keep order');
+    expect(pilePrompt(['do_1', 'do_2'], 'canceled').cancelText).toBe(
+      'Keep orders',
+    );
   });
 });

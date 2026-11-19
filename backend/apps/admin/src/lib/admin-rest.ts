@@ -789,6 +789,10 @@ export async function getOnlineNow(
 
 // Shapes are the backend's (ADR 0017).
 import type {
+  ShipPileMark,
+  ShipPileResponse,
+} from '@acme/api/admin/delivery-orders/ship-pile';
+import type {
   SettlementGranularity,
   SettlementReport,
 } from '@acme/api/admin/payments/settlement';
@@ -1163,34 +1167,17 @@ export interface AdminDeliveryOrder {
   items: AdminDeliveryItem[];
   /** The shipment tracker's last carrier check (list route only). */
   tracking_snapshot?: DeliveryTrackingSnapshot | null;
-  /** A canceled order whose cancel left the ship pile (list route only):
-   *  where it sat, when, and when its parcel was marked pulled. */
-  ship_pile?: {
-    from_status: DeliveryStatus;
-    canceled_at: string;
-    cleared_at: string | null;
-  } | null;
+  /** A canceled or processed order's newest move out of the ship pile (list
+   *  route only): where it sat, where it went, and when its parcel was marked
+   *  pulled. */
+  ship_pile?: ShipPileMark | null;
 }
 
-/** An order cancelled from the ship pile whose parcel is not marked pulled
- *  (GET /admin/delivery-orders/ship-pile). */
-export interface ShipPileEntry {
-  order_id: string;
-  customer_id: string;
-  customer_email: string | null;
-  ship_name: string | null;
-  ship_city: string | null;
-  from_status: DeliveryStatus;
-  canceled_at: string;
-  /** Staff email, 'automatic', or a deleted login's id. */
-  canceled_by: string;
-  reason: string;
-}
-
-export const listShipPileCancels = () =>
-  getJson<{ open: ShipPileEntry[] }>('/admin/delivery-orders/ship-pile').then(
-    (d) => d.open,
-  );
+// Orders that left the ship pile without shipping and whose parcel is not
+// marked pulled (GET /admin/delivery-orders/ship-pile). Shapes are the
+// backend's (ADR 0017).
+export const listShipPileExits = () =>
+  getJson<ShipPileResponse>('/admin/delivery-orders/ship-pile');
 
 // The packer marks the parcel pulled; a second press is a no-op.
 export const clearShipPile = (id: string) =>
@@ -1248,16 +1235,18 @@ export async function listDeliveryOrders(
 
 // Mark up to 100 orders with one status. Partial success is the contract:
 // `skipped` carries the refusal (or the benign `already <status>`) per id.
-// `pileChecked`: the admin confirmed the ship-pile parcels were pulled; the
-// server refuses a cancel from the pile without it.
+// `pileCheckedIds`: the orders whose ship-pile parcel the admin confirmed
+// pulled. The server refuses a move out of the pile for any other id.
 export const bulkUpdateDeliveryOrders = (
   ids: string[],
   status: DeliveryStatus,
-  pileChecked = false,
+  pileCheckedIds: string[] = [],
 ) =>
   postJson<{ updated: string[]; skipped: { id: string; reason: string }[] }>(
     '/admin/delivery-orders/bulk',
-    pileChecked ? { ids, status, pile_checked: true } : { ids, status },
+    pileCheckedIds.length
+      ? { ids, status, pile_checked_ids: pileCheckedIds }
+      : { ids, status },
   );
 
 // Check every shipped order with its carrier now and complete the delivered

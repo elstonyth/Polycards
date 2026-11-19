@@ -572,6 +572,51 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
       );
     });
 
+    it('refuses an unchecked step back from the pile to processed', async () => {
+      // Otherwise step back, then cancel from processed, would skip both guards.
+      const f = withAuditFake('ready_to_ship');
+      await expect(
+        f.svc.transitionDeliveryOrderStatus(
+          {
+            orderId: 'do_1',
+            to: 'processed',
+            trackingNumber: null,
+            pullIds: [],
+            audit,
+          },
+          f.ctx,
+        ),
+      ).rejects.toMatchObject({
+        type: MedusaError.Types.NOT_ALLOWED,
+        message: SHIP_PILE_UNCHECKED_REFUSAL,
+      });
+      expect(f.updateDeliveryOrders).not.toHaveBeenCalled();
+    });
+
+    it('lets a checked, audited step back through and audits where it came from', async () => {
+      const f = withAuditFake('ready_to_ship');
+      await expect(
+        f.svc.transitionDeliveryOrderStatus(
+          {
+            orderId: 'do_1',
+            to: 'processed',
+            trackingNumber: null,
+            pullIds: [],
+            audit,
+            pileChecked: true,
+          },
+          f.ctx,
+        ),
+      ).resolves.toMatchObject({ status: 'processed' });
+      expect(f.auditFn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          before: { status: 'ready_to_ship' },
+          after: { status: 'processed' },
+        }),
+        f.ctx,
+      );
+    });
+
     it('asks nothing of a cancel before the pile (the customer cancel path)', async () => {
       const f = fakeService({ id: 'do_1', status: 'processed' });
       await expect(
@@ -579,7 +624,7 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
       ).resolves.toMatchObject({ status: 'canceled' });
     });
 
-    it('asks nothing of a move out of the pile that is not a cancel', async () => {
+    it('asks nothing of a move within the pile', async () => {
       const f = fakeService({ id: 'do_1', status: 'ready_to_ship' });
       await expect(
         f.svc.transitionDeliveryOrderStatus(

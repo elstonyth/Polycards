@@ -5,33 +5,20 @@ jest.mock('../../../../modules/packs/delivery-view', () => ({
 
 import { GET as listOrders } from '../route';
 import { coerceBulkStatusBody, coerceDeliveryUpdateBody } from '../validate';
-import { shipPileView } from '../ship-pile/view';
+import { shipPileMark, shipPileView } from '../ship-pile/view';
 
 // The ship-pile check rides both admin bodies (incident 2026-11-03).
-describe('pile_checked on the admin bodies', () => {
-  it('passes true through on a single-order update', () => {
+describe('pile_checked on the single-order body', () => {
+  it('passes true through', () => {
     expect(
       coerceDeliveryUpdateBody({ status: 'canceled', pile_checked: true }),
     ).toEqual({ status: 'canceled', pile_checked: true });
-  });
-
-  it('passes true through on a bulk update', () => {
-    expect(
-      coerceBulkStatusBody({
-        ids: ['a'],
-        status: 'canceled',
-        pile_checked: true,
-      }),
-    ).toEqual({ ids: ['a'], status: 'canceled', pile_checked: true });
   });
 
   it('reads absent or false as not checked', () => {
     for (const pile_checked of [undefined, false]) {
       expect(
         coerceDeliveryUpdateBody({ status: 'canceled', pile_checked }),
-      ).not.toHaveProperty('pile_checked');
-      expect(
-        coerceBulkStatusBody({ ids: ['a'], status: 'canceled', pile_checked }),
       ).not.toHaveProperty('pile_checked');
     }
   });
@@ -41,9 +28,6 @@ describe('pile_checked on the admin bodies', () => {
     (pile_checked) => {
       expect(() =>
         coerceDeliveryUpdateBody({ status: 'canceled', pile_checked }),
-      ).toThrow(/pile_checked/);
-      expect(() =>
-        coerceBulkStatusBody({ ids: ['a'], status: 'canceled', pile_checked }),
       ).toThrow(/pile_checked/);
     },
   );
@@ -55,15 +39,55 @@ describe('pile_checked on the admin bodies', () => {
   });
 });
 
-describe('shipPileView', () => {
+describe('pile_checked_ids on the bulk body', () => {
+  it('passes the confirmed ids through', () => {
+    expect(
+      coerceBulkStatusBody({
+        ids: ['a', 'b'],
+        status: 'canceled',
+        pile_checked_ids: ['b'],
+      }),
+    ).toEqual({ ids: ['a', 'b'], status: 'canceled', pile_checked_ids: ['b'] });
+  });
+
+  it('reads absent or empty as none confirmed', () => {
+    for (const pile_checked_ids of [undefined, []]) {
+      expect(
+        coerceBulkStatusBody({
+          ids: ['a'],
+          status: 'canceled',
+          pile_checked_ids,
+        }),
+      ).toEqual({ ids: ['a'], status: 'canceled' });
+    }
+  });
+
+  it.each([
+    [true],
+    ['a'],
+    [[1]],
+    // An id the request does not move cannot be confirmed.
+    [['z']],
+  ])('rejects %j', (pile_checked_ids) => {
+    expect(() =>
+      coerceBulkStatusBody({
+        ids: ['a'],
+        status: 'canceled',
+        pile_checked_ids,
+      }),
+    ).toThrow(/pile_checked_ids/);
+  });
+});
+
+describe('ship-pile views', () => {
   const at = new Date('2026-11-03T12:48:00Z');
   const row = {
     order_id: 'do_01TESTSHIPPILE000000PILE01',
     customer_id: 'cus_1',
     from_status: 'ready_to_ship',
-    canceled_by: 'user_owner',
-    reason: 'mark as canceled',
-    canceled_at: at,
+    to_status: 'canceled',
+    moved_by: 'user_owner',
+    moved_at: at,
     cleared_by: null,
     cleared_at: null,
   };
@@ -71,48 +95,57 @@ describe('shipPileView', () => {
     orders: new Map([
       [row.order_id, { ship_name: 'Ali Bin Abu', ship_city: 'Ipoh' }],
     ]),
-    customerEmails: new Map([['cus_1', 'player@example.com']]),
     staffEmails: new Map([['user_owner', 'owner@example.com']]),
   };
 
-  it('names the parcel, the player and who cancelled it', () => {
+  it('names the parcel and who moved it, as wire JSON', () => {
     expect(shipPileView([row], lookups)).toEqual([
       {
         order_id: row.order_id,
-        customer_id: 'cus_1',
-        customer_email: 'player@example.com',
         ship_name: 'Ali Bin Abu',
         ship_city: 'Ipoh',
         from_status: 'ready_to_ship',
-        canceled_at: at,
-        canceled_by: 'owner@example.com',
-        reason: 'mark as canceled',
+        to_status: 'canceled',
+        moved_at: '2026-11-03T12:48:00.000Z',
+        moved_by: 'owner@example.com',
       },
     ]);
+  });
+
+  it('carries no player email, player id or staff reason', () => {
+    const [view] = shipPileView([row], lookups);
+    for (const key of ['customer_email', 'customer_id', 'reason']) {
+      expect(view).not.toHaveProperty(key);
+    }
   });
 
   it('says automatic for a system actor and keeps a deleted login’s id', () => {
     const [system, gone] = shipPileView(
       [
-        { ...row, canceled_by: 'system:stock-allocation' },
-        { ...row, canceled_by: 'user_gone' },
+        { ...row, moved_by: 'system:stock-allocation' },
+        { ...row, moved_by: 'user_gone' },
       ],
       lookups,
     );
-    expect(system.canceled_by).toBe('automatic');
-    expect(gone.canceled_by).toBe('user_gone');
+    expect(system.moved_by).toBe('automatic');
+    expect(gone.moved_by).toBe('user_gone');
   });
 
-  it('leaves a missing order or player blank instead of failing', () => {
+  it('leaves a missing order blank instead of failing', () => {
     const [view] = shipPileView([row], {
       orders: new Map(),
-      customerEmails: new Map(),
       staffEmails: new Map(),
     });
-    expect(view).toMatchObject({
-      customer_email: null,
-      ship_name: null,
-      ship_city: null,
+    expect(view).toMatchObject({ ship_name: null, ship_city: null });
+  });
+
+  it('marks a row with where it left the pile and when it was cleared', () => {
+    const cleared = new Date('2026-11-04T01:00:00Z');
+    expect(shipPileMark({ ...row, cleared_at: cleared })).toEqual({
+      from_status: 'ready_to_ship',
+      to_status: 'canceled',
+      moved_at: '2026-11-03T12:48:00.000Z',
+      cleared_at: '2026-11-04T01:00:00.000Z',
     });
   });
 });
@@ -126,21 +159,21 @@ describe('GET /admin/delivery-orders ship_pile field', () => {
       status,
       tracking_snapshot: null,
     }));
-    const listShipPileCancels = jest.fn(async () => [
+    const listShipPileExits = jest.fn(async () => [
       {
         order_id: 'do_1',
         customer_id: 'cus_1',
         from_status: 'pending_ship',
-        canceled_by: 'user_1',
-        reason: 'mark as canceled',
-        canceled_at: at,
+        to_status: 'processed',
+        moved_by: 'user_1',
+        moved_at: at,
         cleared_by: null,
         cleared_at: null,
       },
     ]);
     const packs = {
       listAndCountDeliveryOrders: async () => [orders, orders.length],
-      listShipPileCancels,
+      listShipPileExits,
     };
     const scope = {
       resolve: (key: string) =>
@@ -148,35 +181,39 @@ describe('GET /admin/delivery-orders ship_pile field', () => {
           ? { listCustomers: async () => [] }
           : packs,
     };
-    const out: { body?: { orders: { id: string; ship_pile: unknown }[] } } =
-      {};
+    const out: { body?: { orders: { id: string; ship_pile: unknown }[] } } = {};
     await listOrders(
       { scope, query: {} } as never,
       { json: (b: never) => (out.body = b) } as never,
     );
-    return { body: out.body!, listShipPileCancels };
+    return { body: out.body!, listShipPileExits };
   };
 
-  it('marks a canceled order that left the pile, and only that one', async () => {
-    const { body, listShipPileCancels } = await run([
+  it('marks a canceled or processed order that left the pile, and only that one', async () => {
+    const { body, listShipPileExits } = await run([
       'canceled',
-      'canceled',
+      'processed',
       'ready_to_ship',
     ]);
-    // Asked about the page's canceled orders alone.
-    expect(listShipPileCancels).toHaveBeenCalledWith({
+    // Asked about the page's canceled and processed orders alone.
+    expect(listShipPileExits).toHaveBeenCalledWith({
       orderIds: ['do_0', 'do_1'],
     });
     expect(body.orders.map((o) => o.ship_pile)).toEqual([
       null,
-      { from_status: 'pending_ship', canceled_at: at, cleared_at: null },
+      {
+        from_status: 'pending_ship',
+        to_status: 'processed',
+        moved_at: '2026-11-03T12:48:00.000Z',
+        cleared_at: null,
+      },
       null,
     ]);
   });
 
-  it('skips the lookup when the page has no canceled order', async () => {
-    const { body, listShipPileCancels } = await run(['requested', 'shipped']);
-    expect(listShipPileCancels).not.toHaveBeenCalled();
+  it('skips the lookup when no order on the page could have left the pile', async () => {
+    const { body, listShipPileExits } = await run(['requested', 'shipped']);
+    expect(listShipPileExits).not.toHaveBeenCalled();
     expect(body.orders.every((o) => o.ship_pile === null)).toBe(true);
   });
 });
