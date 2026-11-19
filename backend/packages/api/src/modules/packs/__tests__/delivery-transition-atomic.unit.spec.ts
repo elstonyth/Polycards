@@ -1,5 +1,9 @@
 import { MedusaError } from '@medusajs/framework/utils';
 import PacksModuleService from '../service';
+import {
+  SHIP_PILE_UNAUDITED_REFUSAL,
+  SHIP_PILE_UNCHECKED_REFUSAL,
+} from '../delivery';
 
 /**
  * transitionDeliveryOrderStatus — the atomic, per-order-serialized status
@@ -488,5 +492,106 @@ describe('PacksModuleService.transitionDeliveryOrderStatus', () => {
       f.ctx,
     );
     expect(f.transitionPullStatus).not.toHaveBeenCalled();
+  });
+
+  // Ship pile (incident 2026-11-03): a cancel of an order that may
+  // already be packed is refused unless an admin is named AND says the parcel
+  // was pulled from the pile. Judged on the UNDER-LOCK read, so a stock run
+  // that moves processed → ready_to_ship mid-cancel is caught too.
+  describe('ship pile', () => {
+    const audit = {
+      adminId: 'user_1',
+      action: 'edit' as const,
+      reason: 'mark as canceled',
+    };
+    const withAuditFake = (status: string) => {
+      const f = fakeService({ id: 'do_1', status });
+      const auditFn = jest.fn(async () => undefined);
+      Object.assign(f.svc, { audit: auditFn });
+      return { ...f, auditFn };
+    };
+
+    it.each(['ready_to_ship', 'pending_ship'])(
+      'refuses an unchecked cancel from %s, writing NOTHING',
+      async (status) => {
+        const f = withAuditFake(status);
+        await expect(
+          f.svc.transitionDeliveryOrderStatus({ ...cancelInput, audit }, f.ctx),
+        ).rejects.toMatchObject({
+          type: MedusaError.Types.NOT_ALLOWED,
+          message: SHIP_PILE_UNCHECKED_REFUSAL,
+        });
+        expect(f.updateDeliveryOrders).not.toHaveBeenCalled();
+        expect(f.transitionPullStatus).not.toHaveBeenCalled();
+        expect(f.mutateCreditAtomic).not.toHaveBeenCalled();
+        expect(f.auditFn).not.toHaveBeenCalled();
+      },
+    );
+
+    it('refuses a checked cancel from the pile that names no admin', async () => {
+      const f = withAuditFake('ready_to_ship');
+      await expect(
+        f.svc.transitionDeliveryOrderStatus(
+          { ...cancelInput, pileChecked: true },
+          f.ctx,
+        ),
+      ).rejects.toMatchObject({
+        type: MedusaError.Types.NOT_ALLOWED,
+        message: SHIP_PILE_UNAUDITED_REFUSAL,
+      });
+      expect(f.updateDeliveryOrders).not.toHaveBeenCalled();
+    });
+
+    it('lets a checked, audited cancel from the pile through with its full reversal', async () => {
+      const f = withAuditFake('ready_to_ship');
+      await expect(
+        f.svc.transitionDeliveryOrderStatus(
+          { ...cancelInput, audit, pileChecked: true },
+          f.ctx,
+        ),
+      ).resolves.toMatchObject({
+        status: 'canceled',
+        previous: { status: 'ready_to_ship' },
+      });
+      // Money and stock reversal unchanged: pulls back to the vault and the
+      // fee refunded, exactly as for a cancel before the pile.
+      expect(f.transitionPullStatus).toHaveBeenCalledWith(
+        { ids: ['pull_1', 'pull_2'], from: 'delivering', to: 'vaulted' },
+        f.ctx,
+      );
+      expect(f.mutateCreditAtomic).toHaveBeenCalledTimes(1);
+      // The audit row the packer's list is built from: before is the pile.
+      expect(f.auditFn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          entity_type: 'delivery_order',
+          entity_id: 'do_1',
+          before: { status: 'ready_to_ship' },
+          after: { status: 'canceled' },
+        }),
+        f.ctx,
+      );
+    });
+
+    it('asks nothing of a cancel before the pile (the customer cancel path)', async () => {
+      const f = fakeService({ id: 'do_1', status: 'processed' });
+      await expect(
+        f.svc.transitionDeliveryOrderStatus(cancelInput, f.ctx),
+      ).resolves.toMatchObject({ status: 'canceled' });
+    });
+
+    it('asks nothing of a move out of the pile that is not a cancel', async () => {
+      const f = fakeService({ id: 'do_1', status: 'ready_to_ship' });
+      await expect(
+        f.svc.transitionDeliveryOrderStatus(
+          {
+            orderId: 'do_1',
+            to: 'pending_ship',
+            trackingNumber: null,
+            pullIds: [],
+          },
+          f.ctx,
+        ),
+      ).resolves.toMatchObject({ status: 'pending_ship' });
+    });
   });
 });

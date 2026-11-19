@@ -26,6 +26,17 @@ export type AdminDeliveryUpdate = {
   status?: DeliveryStatus;
   tracking_number?: string | null;
   proof_images?: string[];
+  /** The admin says the parcel was pulled from the ship pile (see
+   *  shipPileCancelRefusal). Present only when true. */
+  pile_checked?: true;
+};
+
+// `pile_checked` on either body: absent or false means "not checked"; anything
+// that is not a boolean is a client bug, not a silent no.
+const coercePileChecked = (raw: unknown): { pile_checked?: true } => {
+  if (raw === undefined || raw === false) return {};
+  if (raw !== true) bad('`pile_checked` must be a boolean.');
+  return { pile_checked: true };
 };
 
 // Validate the status query filter (?status=). Returns undefined when absent.
@@ -66,7 +77,13 @@ export function coerceCustomerId(raw: unknown): string | undefined {
   return trimmed;
 }
 
-export type BulkStatusBody = { ids: string[]; status: DeliveryStatus };
+export type BulkStatusBody = {
+  ids: string[];
+  status: DeliveryStatus;
+  /** One check covers the batch: the bulk bar asks once for every selected
+   *  order in the ship pile. */
+  pile_checked?: true;
+};
 
 // Body of POST /admin/delivery-orders/bulk. The 100-id cap is the contract the
 // route's sequential loop is sized for (one advisory-locked transaction per
@@ -90,7 +107,11 @@ export function coerceBulkStatusBody(raw: unknown): BulkStatusBody {
   ) {
     bad(`Invalid status '${String(b.status)}'.`);
   }
-  return { ids: b.ids as string[], status: b.status as DeliveryStatus };
+  return {
+    ids: b.ids as string[],
+    status: b.status as DeliveryStatus,
+    ...coercePileChecked(b.pile_checked),
+  };
 }
 
 export function coerceDeliveryUpdateBody(raw: unknown): AdminDeliveryUpdate {
@@ -127,6 +148,7 @@ export function coerceDeliveryUpdateBody(raw: unknown): AdminDeliveryUpdate {
     }
     out.proof_images = (b.proof_images as string[]).map((u) => u.trim());
   }
+  Object.assign(out, coercePileChecked(b.pile_checked));
   if (
     out.status === undefined &&
     out.tracking_number === undefined &&

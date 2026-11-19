@@ -78,6 +78,8 @@ export async function GET(
   }>(
     "SELECT entity_id, admin_id, before->>'status' AS from_status, after->>'status' AS to_status, created_at AS at " +
       "FROM admin_action_audit WHERE deleted_at IS NULL AND entity_type = 'delivery_order' " +
+      // A ship-pile "parcel pulled" row (clearShipPile) moves no status.
+      "AND after->>'status' IS NOT NULL " +
       `AND entity_id IN (${ids.map(() => '?').join(', ')}) ORDER BY created_at`,
     ids,
   );

@@ -74,6 +74,16 @@ export async function GET(
     : [];
   const emailById = new Map(customers.map((c) => [c.id, c.email]));
 
+  // Ship pile (incident 2026-11-03): which canceled orders on this page left
+  // ready_to_ship or pending_ship, and whether the parcel was marked pulled.
+  const canceledIds = orders
+    .filter((o) => o.status === 'canceled')
+    .map((o) => o.id);
+  const pileCancels = canceledIds.length
+    ? await packs.listShipPileCancels({ orderIds: canceledIds })
+    : [];
+  const pileById = new Map(pileCancels.map((p) => [p.order_id, p]));
+
   res.json({
     total,
     offset,
@@ -84,6 +94,13 @@ export async function GET(
       // Admin-only (the storefront shares serializeDeliveryOrders): the
       // shipment tracker's last carrier check.
       tracking_snapshot: snapshotById.get(o.id) ?? null,
+      ship_pile: pileById.has(o.id)
+        ? {
+            from_status: pileById.get(o.id)!.from_status,
+            canceled_at: pileById.get(o.id)!.canceled_at,
+            cleared_at: pileById.get(o.id)!.cleared_at,
+          }
+        : null,
     })),
   });
 }

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent } from 'react';
 import { useHref, useNavigate, useSearchParams } from 'react-router-dom';
 import {
+  Alert,
   Checkbox,
   Container,
   Heading,
@@ -14,6 +15,7 @@ import {
   FocusModal,
   StatusBadge,
   toast,
+  usePrompt,
 } from '@medusajs/ui';
 import { TruckFast, XMark } from '@medusajs/icons';
 import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
@@ -21,10 +23,12 @@ import { usePermissions } from '@mercurjs/admin';
 import {
   useBulkUpdateDeliveryOrders,
   useCheckDeliveryTracking,
+  useClearShipPile,
   useDeliveryOrders,
   useDeliveryOrdersStock,
   useGatewayDeposits,
   usePulls,
+  useShipPileCancels,
   useUpdateDeliveryOrder,
   useUploadImage,
 } from '../../lib/queries';
@@ -50,6 +54,11 @@ import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { TrackingLine } from '../../components/DeliveryTracking';
 import { depositStatusBadge } from '../../components/PaymentStatusBadge';
 import { coverItems } from './stock-cover';
+import {
+  isShipPileStatus,
+  pileCancelCount,
+  pilePrompt,
+} from '../../lib/ship-pile';
 
 export const config: RouteConfig = {
   label: 'pcNav.orders',
@@ -361,6 +370,95 @@ const Topups = () => {
   );
 };
 
+// Orders cancelled while they sat in the ship pile whose parcel nobody has
+// marked pulled (incident 2026-11-03: cancelled from Ready to ship,
+// never pulled, shipped with its batch). Shown above every Shipping tab: a
+// cancelled order drops off Ready to ship, Pending ship and the packing slips,
+// so the packer would otherwise never see it. A read-only role sees the list;
+// only a role that moves orders gets the button.
+const ShipPileAlert = ({ canManage }: { canManage: boolean }) => {
+  const { data, isError } = useShipPileCancels();
+  const clear = useClearShipPile();
+  // A failed check must not read as "nothing cancelled in the pile".
+  if (isError && !data) {
+    return (
+      <div className="px-6 py-4">
+        <Alert variant="warning">
+          Could not check for orders cancelled in the ship pile. Reload the page
+          before packing.
+        </Alert>
+      </div>
+    );
+  }
+  if (!data || data.length === 0) return null;
+
+  const markPulled = async (id: string) => {
+    try {
+      await clear.mutateAsync(id);
+      toast.success(`#${id.slice(-6)} marked as pulled from the pile`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  return (
+    <div
+      className="px-6 py-4"
+      role="region"
+      aria-label="Cancelled in the ship pile"
+    >
+      <Alert variant="error">
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1">
+            <Text size="small" weight="plus">
+              {data.length === 1
+                ? '1 order was cancelled while it was in the ship pile'
+                : `${data.length} orders were cancelled while they were in the ship pile`}
+            </Text>
+            <Text size="small" className="text-ui-fg-subtle">
+              Pull each parcel from the pile so it does not go out, then mark it
+              pulled. Its cards are already back in the player’s vault and the
+              fee is refunded.
+            </Text>
+          </div>
+          <ul className="flex flex-col gap-2">
+            {data.map((e) => (
+              <li
+                key={e.order_id}
+                className="bg-ui-bg-base shadow-borders-base flex flex-wrap items-center justify-between gap-3 rounded-md px-3 py-2"
+              >
+                <div className="flex min-w-0 flex-col">
+                  <span className="text-sm">
+                    <span className="font-mono">#{e.order_id.slice(-6)}</span>{' '}
+                    {e.ship_name ?? '—'}
+                    {e.ship_city ? `, ${e.ship_city}` : ''}
+                  </span>
+                  <span className="text-ui-fg-subtle text-xs">
+                    Was {deliveryStatusLabel(e.from_status)} · cancelled{' '}
+                    {orderDateTime(e.canceled_at)} by {e.canceled_by}
+                  </span>
+                </div>
+                {canManage && (
+                  <Button
+                    size="small"
+                    variant="secondary"
+                    onClick={() => markPulled(e.order_id)}
+                    isLoading={
+                      clear.isPending && clear.variables === e.order_id
+                    }
+                  >
+                    Parcel pulled
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </Alert>
+    </div>
+  );
+};
+
 type OrderKind = 'shipping' | 'purchases' | 'topups';
 
 // EXACTLY the backend's SORTABLE allow-list (api/admin/delivery-orders/
@@ -413,6 +511,7 @@ const DeliveriesPage = () => {
   const orders = data?.orders ?? null;
   const update = useUpdateDeliveryOrder();
   const bulk = useBulkUpdateDeliveryOrders();
+  const prompt = usePrompt();
   const track = useCheckDeliveryTracking();
   const uploadImg = useUploadImage();
   const [detail, setDetail] = useState<AdminDeliveryOrder | null>(null);
@@ -520,10 +619,24 @@ const DeliveriesPage = () => {
       clearSelection();
       return;
     }
+    // A cancel of orders in the ship pile asks first (incident 2026-11-03).
+    // The server re-checks under each order's lock, so an order the stock run
+    // moved into the pile meanwhile lands in `skipped` with the reason.
+    const targets = (orders ?? []).filter((o) => ids.includes(o.id));
+    const inPile = pileCancelCount(targets, bulkStatus);
+    if (inPile > 0) {
+      const only = targets.filter((o) => isShipPileStatus(o.status));
+      const ok = await prompt({
+        variant: 'danger',
+        ...pilePrompt(inPile, inPile === 1 ? only[0]?.id : undefined),
+      });
+      if (!ok) return;
+    }
     try {
       const { updated, skipped } = await bulk.mutateAsync({
         ids,
         status: bulkStatus,
+        pileChecked: inPile > 0,
       });
       const benign = `already ${bulkStatus}`;
       const refused = skipped.filter((s) => s.reason !== benign);
@@ -585,12 +698,24 @@ const DeliveriesPage = () => {
 
   const save = async () => {
     if (!detail) return;
+    const moveTo = nextStatus !== detail.status ? nextStatus : undefined;
+    // A cancel from the ship pile asks first (incident 2026-11-03); the server
+    // refuses one without pile_checked, judged on the status under its lock.
+    const fromPile = moveTo ? pileCancelCount([detail], moveTo) > 0 : false;
+    if (fromPile) {
+      const ok = await prompt({
+        variant: 'danger',
+        ...pilePrompt(1, detail.id),
+      });
+      if (!ok) return;
+    }
     try {
       await update.mutateAsync({
         id: detail.id,
-        status: nextStatus !== detail.status ? nextStatus : undefined,
+        status: moveTo,
         tracking_number: tracking.trim() || null,
         proof_images: proofImages,
+        ...(fromPile ? { pile_checked: true as const } : {}),
       });
       toast.success('Delivery updated');
       setDetail(null);
@@ -675,6 +800,8 @@ const DeliveriesPage = () => {
           </Tabs>
         )}
       </div>
+
+      {kind === 'shipping' && <ShipPileAlert canManage={canManage} />}
 
       {kind === 'purchases' && <PackPurchases />}
       {kind === 'topups' && canSeeTopups && <Topups />}
@@ -816,6 +943,20 @@ const DeliveriesPage = () => {
                       <StatusBadge color={DELIVERY_TONE[o.status] ?? 'grey'}>
                         {deliveryStatusLabel(o.status)}
                       </StatusBadge>
+                      {o.ship_pile && (
+                        <div
+                          className={
+                            o.ship_pile.cleared_at
+                              ? 'text-ui-fg-subtle mt-1 text-xs'
+                              : 'text-ui-fg-error mt-1 text-xs'
+                          }
+                        >
+                          From {deliveryStatusLabel(o.ship_pile.from_status)}
+                          {o.ship_pile.cleared_at
+                            ? ' · parcel pulled'
+                            : ' · parcel not pulled yet'}
+                        </div>
+                      )}
                       <TrackingLine order={o} />
                     </Table.Cell>
                     <Table.Cell className="text-right">
