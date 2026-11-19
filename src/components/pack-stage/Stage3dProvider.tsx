@@ -34,16 +34,18 @@ import {
   animate,
   cancelFrame,
   frame,
-  motionValue,
-  type frameData,
-  type MotionValue,
-} from 'motion/react';
+  observable as motionValue,
+  type AnimationControls,
+  type FrameData,
+  type Observable,
+} from './stage-motion';
 
 import type {
   CreateStageRuntime,
   Stage3dStage,
   StageLayout,
   StageMode,
+  StageNextRow,
   StageRuntime,
   StageRuntimeFailReason,
   StageRuntimeModule,
@@ -104,8 +106,8 @@ const SWAP_SINK_EASE: Bezier = [0.4, 0, 1, 1];
 const SPRING_EASE: Bezier = [...STAGE_SPRING_BEZIER];
 
 type Snapshot = { mode: StageMode; ready: boolean };
-type FrameInfo = typeof frameData;
-type Controls = ReturnType<typeof animate>;
+type FrameInfo = FrameData;
+type Controls = AnimationControls;
 
 const SERVER_SNAPSHOT: Snapshot = Object.freeze({
   mode: 'pending',
@@ -181,8 +183,13 @@ export function measureStageLayout(
     const ot = offsetTo(other, root);
     if (ot) step = Math.abs(ot.x - at.x) / Math.abs(k - c);
   }
-  // Tiles stacked in one place (positioned by transform only): no DOM step.
-  if (!(step > 0)) step = art.offsetWidth * 1.1;
+  // One pack in the row (or tiles stacked by transform only): the tile's own
+  // width is the CSS step, so a rubber-band drag stays in line.
+  if (!(step > 0)) {
+    const tile = art.closest<HTMLElement>('[data-stage-tile]');
+    step =
+      tile && tile.offsetWidth > 0 ? tile.offsetWidth : art.offsetWidth * 1.1;
+  }
   return { cx: host.clientWidth / 2, cy, step, artH, artW: art.offsetWidth };
 }
 
@@ -246,7 +253,15 @@ class StageEngine {
   private prevTs: number | null = null;
   private lastInput = 0;
   private rested = false;
-  private live = new Set<string>();
+  /**
+   * Packs drawn by the canvas, each with the art element whose picture was
+   * hidden for it. Held by element, not looked up again by index: after a
+   * chip change the same tiles carry new indices, and a lookup by the old
+   * index would clear the wrong picture and leave a stale one hidden.
+   */
+  private live = new Map<string, HTMLElement>();
+  /** A prefetch for a coming row is loading: keep frames coming (Poly too). */
+  private prefetching = false;
   private watchdog = createFrameWatchdog();
   private watchdogOn = true;
 
@@ -333,9 +348,11 @@ class StageEngine {
     if (cur && cur !== s && sameSource(cur, s)) {
       this.source = s;
       this.pendingDetach = null;
+      this.dropPrefetch(); // the row came back unchanged: nothing to adopt
     } else if (cur !== s) {
       this.pendingDetach = null;
       this.detachSource();
+      this.prefetching = false; // setPacks below adopts (or drops) it
       this.source = s;
       this.sourceIndex = new Map(s.packs.map((p, i) => [p.id, i]));
       this.liveCapable = s.packs.some((p) => p.art3d !== null);
@@ -386,11 +403,17 @@ class StageEngine {
     ).then(() => undefined);
   };
 
-  swapCategory = async (apply: () => void): Promise<void> => {
+  swapCategory = async (
+    apply: () => void,
+    next: StageNextRow | null = null,
+  ): Promise<void> => {
     const seq = ++this.swapSeq;
     this.swapStop?.();
+    // The coming row loads now, while the old one sinks.
+    this.prefetchRow(next);
     if (prefersReduced()) {
       apply();
+      this.dropPrefetch(true);
       this.values.swap.set(0);
       return;
     }
@@ -405,6 +428,11 @@ class StageEngine {
     if (seq !== this.swapSeq) return; // superseded: the newer call applies its own
     void sunk;
     apply();
+    // `apply` attached the new row, which adopted the prefetch; whatever it
+    // did not adopt (or a row that came back unchanged) is let go now.
+    this.dropPrefetch(true);
+    // Uploads around the switch stall frames without a pack going live.
+    this.watchdog.hold(performance.now());
     await this.run(
       this.values.swap,
       0,
@@ -417,7 +445,7 @@ class StageEngine {
 
   /** Animate a value; resolves true when complete, false when stopped. */
   private run(
-    mv: MotionValue<number>,
+    mv: Observable<number>,
     to: number,
     opts: {
       duration: number;
@@ -676,7 +704,37 @@ class StageEngine {
     }
     this.resetLive();
     this.watchdog.hold(performance.now());
-    this.safe(() => rt.setPacks(list.length > 0 ? list : null));
+    // The attached track is the new list's start: carried and prefetched
+    // packs are kept by key, and residency centres on the right pack.
+    const centre = this.state.track;
+    this.safe(() => rt.setPacks(list.length > 0 ? list : null, centre));
+  }
+
+  private dropPrefetch(always = false) {
+    if (!this.prefetching && !always) return;
+    this.prefetching = false;
+    const rt = this.runtime;
+    if (rt) this.safe(() => rt.prefetch(null, 0));
+  }
+
+  /** The coming row's 3D packs, to load at the tap (during the sink). */
+  private prefetchRow(next: StageNextRow | null) {
+    const rt = this.runtime;
+    if (!rt || !this.prepDone || this.released) {
+      this.prefetching = false;
+      return;
+    }
+    const list: StageRuntimePack[] = [];
+    next?.packs.forEach((p, index) => {
+      if (p.art3d)
+        list.push({ id: p.id, art: p.art3d, soldOut: p.soldOut, index });
+    });
+    this.watchdog.hold(performance.now());
+    this.safe(() =>
+      rt.prefetch(list.length > 0 ? list : null, next?.centre ?? 0),
+    );
+    this.prefetching = list.length > 0;
+    this.poke();
   }
 
   private measure() {
@@ -709,29 +767,45 @@ class StageEngine {
 
   // --- data-live -------------------------------------------------------------
 
-  private setLive(id: string, on: boolean) {
+  /** The art element of a pack in the attached row, looked up by id. */
+  private artOf(id: string): HTMLElement | null {
     const i = this.sourceIndex.get(id);
-    if (i === undefined || !this.source) return;
+    if (i === undefined || !this.source) return null;
     const el = this.source.artElement(i);
-    if (el) el.dataset.live = on ? '1' : '0';
+    // Only the element that really belongs to this pack.
+    return el?.closest(`[data-pack-id="${CSS.escape(id)}"]`) ? el : null;
   }
 
+  /**
+   * Picture off in the same frame the model is first drawn, and back on in
+   * the frame it stops: the CSS swap is a hard cut, never a fade, so a tile
+   * never shows both.
+   */
   private applyLive(ids: readonly string[], now: number) {
     const next = new Set(ids);
-    for (const id of this.live) if (!next.has(id)) this.setLive(id, false);
-    for (const id of next) {
-      if (!this.live.has(id)) {
-        this.setLive(id, true);
-        this.watchdog.hold(now); // a texture just arrived: skip upload stalls
-      }
+    for (const [id, el] of this.live) {
+      if (next.has(id) && el.isConnected) continue;
+      el.dataset.live = '0';
+      this.live.delete(id);
     }
-    this.live = next;
+    for (const id of next) {
+      if (this.live.has(id)) continue;
+      const el = this.artOf(id);
+      if (!el) continue;
+      el.dataset.live = '1';
+      this.live.set(id, el);
+      this.watchdog.hold(now); // a texture just arrived: skip upload stalls
+    }
   }
 
   private resetLive() {
-    for (const id of this.live) this.setLive(id, false);
-    this.live = new Set();
+    for (const el of this.live.values()) el.dataset.live = '0';
+    this.live = new Map();
+    this.drawn = [];
   }
+
+  /** What the canvas drew in its last frame (QA: `__packStage.live()`). */
+  private drawn: readonly string[] = [];
 
   private detachSource() {
     this.resetLive();
@@ -755,7 +829,7 @@ class StageEngine {
     return (
       this.runtime !== null &&
       this.prepDone &&
-      this.liveCapable &&
+      (this.liveCapable || this.prefetching) &&
       !this.released &&
       this.inView &&
       typeof document !== 'undefined' &&
@@ -801,7 +875,14 @@ class StageEngine {
       this.fail('error');
       return;
     }
+    this.drawn = out.live;
     this.applyLive(out.live, now);
+    // A row with no 3D tile (Poly) ran only to upload a prefetch: stop with it.
+    if (!this.liveCapable && !out.wantsFrame) {
+      this.prefetching = false;
+      this.sleep();
+      return;
+    }
     const active = now - this.lastInput < ACTIVE_WINDOW_MS;
     if (!out.wantsFrame && !active && this.rested) this.sleep();
   };
@@ -966,7 +1047,19 @@ class StageEngine {
       ready: () => this.snap.ready,
       tier: () => this.tier,
       layout: () => this.layout,
-      live: () => [...this.live],
+      live: () => [...this.drawn],
+      fullCanvas: (on: boolean) => {
+        (
+          this.runtime as unknown as {
+            debugFullCanvas?: (v: boolean) => void;
+          } | null
+        )?.debugFullCanvas?.(on);
+        this.poke();
+      },
+      runtime: () =>
+        (
+          this.runtime as unknown as { debug?: () => unknown } | null
+        )?.debug?.() ?? null,
       running: () => this.running,
       state: this.state,
       stats: this.stats,

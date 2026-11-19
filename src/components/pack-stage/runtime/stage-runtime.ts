@@ -49,6 +49,7 @@ import {
   dprCap,
   drawingBufferBytes,
   placeModel,
+  stageBand,
   type StageScene,
 } from './stage-scene';
 
@@ -63,12 +64,7 @@ const LITE_MAX_ANISOTROPY = 4;
 
 type Res = 'half' | 'full';
 type VariantState =
-  | 'loading'
-  | 'compiling'
-  | 'built'
-  | 'uploaded'
-  | 'failed'
-  | 'disposed';
+  'loading' | 'compiling' | 'built' | 'uploaded' | 'failed' | 'disposed';
 
 type Variant = {
   res: Res;
@@ -105,6 +101,10 @@ export type StageRuntimeDebug = {
   }[];
   loads: number;
   disposals: number;
+  /** Prefetched slots for the coming list (their half variant's state). */
+  staged: string[];
+  /** Current slots a pending prefetch keeps for the coming list. */
+  kept: number;
   uploads: number;
   draws: number;
   pixelRatio: number;
@@ -122,6 +122,8 @@ export type StageRuntimeBench = StageRuntime & {
   prepare(track?: number): Promise<void>;
   /** Bench and QA only. */
   debug(): StageRuntimeDebug;
+  /** QA only: draw on the whole host (true) or the band (false). */
+  debugFullCanvas(on: boolean): void;
 };
 
 function slotKey(p: StageRuntimePack): string {
@@ -155,6 +157,16 @@ export function createStageRuntime(
   let slots: Slot[] = [];
   let byIndex = new Map<number, Slot>();
   let packsKey = '';
+  /**
+   * `prefetch`: slots for the coming list (key -> slot at its COMING index),
+   * loading and uploading while the old packs sink; `setPacks` adopts them.
+   */
+  let staged = new Map<string, Slot>();
+  let stagedCentre = 0;
+  /** Keys of current slots the coming list reuses: never dropped meanwhile. */
+  let keep = new Set<string>();
+  /** A switch is under way (prefetch to setPacks): no full-front promotion. */
+  let switching = false;
 
   let direction: DirectionState | null = null;
   let promotion: PromotionState = { ...NO_PROMOTION };
@@ -236,6 +248,21 @@ export function createStageRuntime(
     if (res === 'full') return textureBytes(slot.width, slot.height);
     const [w, h] = halfSize(slot.width, slot.height);
     return textureBytes(w, h);
+  };
+
+  /** Bytes a slot holds or is loading (estimates until a variant is built). */
+  const slotBytes = (slot: Slot): number => {
+    let b = 0;
+    for (const v of [slot.half, slot.full]) {
+      if (!v || v.state === 'disposed' || v.state === 'failed') continue;
+      b += v.bytes > 0 ? v.bytes : estimateBytes(slot, v.res);
+    }
+    return b;
+  };
+  const stagedBytes = () => {
+    let b = 0;
+    for (const s of staged.values()) b += slotBytes(s);
+    return b;
   };
 
   const disposeVariant = (v: Variant | null) => {
@@ -353,7 +380,8 @@ export function createStageRuntime(
       direction: direction?.dir ?? 0,
       config,
       promote: promotion.index,
-      budgetBytes: budget(),
+      // A prefetch for the coming list holds its share of the budget.
+      budgetBytes: Math.max(0, budget() - stagedBytes()),
       bytes: (i, res) => {
         const s = byIndex.get(i);
         return s ? estimateBytes(s, res) : 0;
@@ -370,6 +398,8 @@ export function createStageRuntime(
       const w = plan.want.get(s.index);
       s.wantFull = w?.full === true;
       if (!w) {
+        // The coming list reuses it: keep its texture through the switch.
+        if (keep.has(s.key)) continue;
         disposeSlot(s);
         continue;
       }
@@ -391,17 +421,20 @@ export function createStageRuntime(
   const nextUpload = (track: number): Variant | null => {
     let best: Variant | null = null;
     let bestScore = Infinity;
-    for (const s of slots) {
+    const consider = (s: Slot, centre: number) => {
       for (const v of [s.half, s.full]) {
         if (!v || v.state !== 'built') continue;
         const score =
-          Math.abs(s.index - track) * 2 + (v.res === 'full' ? 1 : 0);
+          Math.abs(s.index - centre) * 2 + (v.res === 'full' ? 1 : 0);
         if (score < bestScore) {
           bestScore = score;
           best = v;
         }
       }
-    }
+    };
+    for (const s of slots) consider(s, track);
+    // The coming list's packs, by distance from ITS centre.
+    for (const s of staged.values()) consider(s, stagedCentre);
     return best;
   };
 
@@ -428,29 +461,163 @@ export function createStageRuntime(
     hostW = Math.max(0, w);
     hostH = Math.max(0, h);
     pixelRatio = Math.max(0.5, Math.min(dpr > 0 ? dpr : 1, cap));
+    applyBand();
+  };
+
+  /**
+   * The canvas covers only the band of the host where a pack can be seen (the
+   * carousel row, with room for the float-in and the sink below it), not the
+   * whole stage section: the drawing buffer is most of the GPU memory, above
+   * all at DPR 2. The camera still frames the WHOLE host (setViewOffset
+   * renders the band's slice of that view), so every pose, the CSS
+   * perspective origin and the pixel-to-world mapping are unchanged.
+   */
+  let band = { y: 0, h: 0 };
+  /** QA only (`__packStage.fullCanvas`): the whole host, as before the band. */
+  let fullCanvas = false;
+  const bandFor = () =>
+    fullCanvas ? { y: 0, h: Math.round(hostH) } : stageBand(hostH, layout);
+  const applyBand = () => {
+    const st = stage;
+    if (!st || dead()) return;
     if (hostW > 0 && hostH > 0) {
+      band = bandFor();
       st.renderer.setPixelRatio(pixelRatio);
-      st.renderer.setSize(hostW, hostH, false);
+      st.renderer.setSize(hostW, band.h, false);
+      canvas.style.top = `${band.y}px`;
+      canvas.style.bottom = 'auto';
+      canvas.style.height = `${band.h}px`;
       st.camera.aspect = hostW / hostH;
+      st.camera.setViewOffset(hostW, hostH, 0, band.y, hostW, band.h);
       st.camera.updateProjectionMatrix();
     }
     updateBufferBytes();
     needsDraw = true;
   };
 
-  const setPacks = (list: StageRuntimePack[] | null) => {
+  const newSlot = (p: StageRuntimePack): Slot => ({
+    key: slotKey(p),
+    id: p.id,
+    index: p.index,
+    soldOut: p.soldOut,
+    width: p.art.width,
+    height: p.art.height,
+    half: null,
+    full: null,
+    halfFailed: false,
+    fullFailed: false,
+    lastNeeded: Number.NEGATIVE_INFINITY,
+    wantFull: false,
+  });
+
+  const holds = (s: Slot) => s.half !== null || s.full !== null;
+
+  /** Drops whatever a prefetch staged and nothing adopted. */
+  const dropStaged = () => {
+    for (const s of staged.values()) disposeSlot(s);
+    staged = new Map();
+    keep = new Set();
+    switching = false;
+  };
+
+  const prefetch = (list: StageRuntimePack[] | null, centre: number) => {
+    if (dead() || !stage) return;
+    const want = (list ?? [])
+      .filter((p) => Math.abs(p.index - centre) < config.reach + 1)
+      .sort(
+        (a, b) =>
+          Math.abs(a.index - centre) - Math.abs(b.index - centre) ||
+          a.index - b.index,
+      );
+    const current = new Map(slots.map((s) => [s.key, s]));
+    const nextKeep = new Set<string>();
+    const nextStaged = new Map<string, Slot>();
+    const wantKeys = new Set(want.map(slotKey));
+    // A newer tap supersedes an older one: drop what it no longer wants
+    // first, so the budget below is what is really left.
+    for (const [k, s] of staged) if (!wantKeys.has(k)) disposeSlot(s);
+    staged = new Map([...staged].filter(([k]) => wantKeys.has(k)));
+    switching = want.length > 0;
+    if (switching) {
+      // The sinking centre gives back its full front (retina desktop): the
+      // coming packs need the room more, and nobody sees the sharper texture
+      // on a pack that is leaving. Promotion resumes once the new row lands.
+      for (const s of slots) {
+        if (!s.full) continue;
+        disposeVariant(s.full);
+        s.full = null;
+        s.wantFull = false;
+      }
+      promotion = { ...NO_PROMOTION };
+    }
+    let room = Math.max(0, budget() - uploadedOrLoading());
+    if (!booting) {
+      for (const p of want) {
+        const k = slotKey(p);
+        const cur = current.get(k);
+        if (cur && holds(cur)) {
+          nextKeep.add(k); // resident already: carried by setPacks
+          continue;
+        }
+        const had = staged.get(k);
+        if (had) {
+          had.index = p.index;
+          had.soldOut = p.soldOut;
+          nextStaged.set(k, had);
+          continue;
+        }
+        const s = newSlot(p);
+        const cost = estimateBytes(s, 'half');
+        if (cost > room) break; // nearest first: the rest waits for setPacks
+        s.half = startVariant(s, 'half');
+        if (!s.half) continue;
+        room -= cost;
+        nextStaged.set(k, s);
+      }
+    }
+    for (const [k, s] of staged) if (!nextStaged.has(k)) disposeSlot(s);
+    staged = nextStaged;
+    stagedCentre = centre;
+    keep = nextKeep;
+  };
+
+  /** Every byte held or on its way, current list and staged. */
+  const uploadedOrLoading = () => {
+    let b = 0;
+    for (const s of slots) b += slotBytes(s);
+    return b + stagedBytes();
+  };
+
+  const setPacks = (list: StageRuntimePack[] | null, centre?: number) => {
     if (dead()) return;
     const next = list ?? [];
     const key = next
       .map((p) => `${slotKey(p)}@${p.index}${p.soldOut ? 's' : ''}`)
       .join(',');
-    if (key === packsKey) return;
+    if (key === packsKey) {
+      dropStaged();
+      return;
+    }
     packsKey = key;
     const old = new Map(slots.map((s) => [s.key, s]));
+    const oldPromoted =
+      promotion.index !== null
+        ? (byIndex.get(promotion.index)?.key ?? null)
+        : null;
     const fresh: Slot[] = [];
     for (const p of next) {
       const k = slotKey(p);
-      const prev = old.get(k);
+      let prev = old.get(k) ?? null;
+      const st = staged.get(k) ?? null;
+      if (st) {
+        staged.delete(k);
+        // Keep whichever holds a texture (a resident pack wins).
+        if (prev && holds(prev)) disposeSlot(st);
+        else {
+          if (prev) disposeSlot(prev);
+          prev = st;
+        }
+      }
       if (prev) {
         old.delete(k);
         prev.index = p.index;
@@ -458,28 +625,27 @@ export function createStageRuntime(
         fresh.push(prev);
         continue;
       }
-      fresh.push({
-        key: k,
-        id: p.id,
-        index: p.index,
-        soldOut: p.soldOut,
-        width: p.art.width,
-        height: p.art.height,
-        half: null,
-        full: null,
-        halfFailed: false,
-        fullFailed: false,
-        lastNeeded: Number.NEGATIVE_INFINITY,
-        wantFull: false,
-      });
+      fresh.push(newSlot(p));
     }
-    const carried = fresh.some((s) => s.half || s.full);
+    const carried = fresh.some(holds);
     for (const s of old.values()) disposeSlot(s);
+    dropStaged();
     slots = fresh;
     byIndex = new Map(fresh.map((s) => [s.index, s]));
-    promotion = { ...NO_PROMOTION };
+    // A carried promoted pack stays promoted (no full-front reload).
+    const promotedNow = oldPromoted
+      ? (fresh.find((s) => s.key === oldPromoted)?.index ?? null)
+      : null;
+    promotion =
+      promotedNow === null
+        ? { ...NO_PROMOTION }
+        : { index: promotedNow, since: null, lastTrack: null };
     needsDraw = true;
-    if (!carried && next.length > 0 && old.size > 0) {
+    if (typeof centre === 'number') {
+      // The new list's own index space.
+      lastTrack = centre;
+      direction = initialDirection(centre);
+    } else if (!carried && next.length > 0 && old.size > 0) {
       // A different list (category switch): its track restarts, so do not
       // centre the first loads on the old list's position.
       lastTrack = null;
@@ -504,6 +670,8 @@ export function createStageRuntime(
   const setLayout = (l: StageLayout) => {
     if (dead()) return;
     layout = { cx: l.cx, cy: l.cy, step: l.step, artH: l.artH, artW: l.artW };
+    const next = bandFor();
+    if (next.y !== band.y || next.h !== band.h) applyBand();
     needsDraw = true;
   };
 
@@ -596,7 +764,10 @@ export function createStageRuntime(
         ? nextDirection(direction, track)
         : initialDirection(track);
       const promoteOn =
-        desktop && tier === 'full' && pixelRatio >= PROMOTE_MIN_DPR;
+        desktop &&
+        tier === 'full' &&
+        pixelRatio >= PROMOTE_MIN_DPR &&
+        !switching;
       promotion = nextPromotion(promotion, track, now, promoteOn);
       if (!booting) applyPlan(track, now);
       const next = booting ? null : nextUpload(track);
@@ -663,6 +834,7 @@ export function createStageRuntime(
 
       const pending =
         inflight > 0 ||
+        [...staged.values()].some((sl) => sl.half?.state === 'built') ||
         slots.some(
           (sl) =>
             sl.half?.state === 'built' ||
@@ -705,6 +877,8 @@ export function createStageRuntime(
         };
       }),
       ...counters,
+      staged: [...staged.values()].map((s) => s.half?.state ?? 'none'),
+      kept: keep.size,
       pixelRatio,
       drawingBuffer: gl
         ? [gl.drawingBufferWidth, gl.drawingBufferHeight]
@@ -747,6 +921,7 @@ export function createStageRuntime(
     const st = stage;
     const shared = st ? sharedTextures(st) : [];
     for (const s of slots) disposeSlot(s);
+    dropStaged();
     slots = [];
     byIndex = new Map();
     if (st) {
@@ -778,11 +953,16 @@ export function createStageRuntime(
   return {
     resize,
     setPacks,
+    prefetch,
     setLayout,
     prepare,
     render,
     stats,
     dispose,
     debug,
+    debugFullCanvas: (on: boolean) => {
+      fullCanvas = on;
+      applyBand();
+    },
   };
 }

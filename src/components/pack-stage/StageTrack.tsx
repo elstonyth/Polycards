@@ -5,7 +5,9 @@ import {
   useEffect,
   useId,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
+  useState,
   type KeyboardEvent,
   type MouseEvent,
   type PointerEvent,
@@ -13,41 +15,18 @@ import {
   type Ref,
   type RefObject,
 } from 'react';
-import {
-  animate,
-  useMotionValue,
-  type AnimationPlaybackControls,
-} from 'motion/react';
+import { animate, observable, type AnimationControls } from './stage-motion';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { StagePack } from './contract';
 import { useStage3d } from './Stage3dProvider';
 import { STAGE_REACH, restState } from './stage-pose';
+import { stageStartIndex } from './stage-filter';
 import StageTile, { tileVars } from './StageTile';
 import styles from './pack-stage.module.css';
 
-/**
- * Owner decision (2026-11-19): the carousel starts on its THIRD pack, so both
- * sides of the stage are filled on first view (clamped to the list).
- */
-export const STAGE_START_INDEX = 2;
-
-/** Where a category's carousel starts: STAGE_START_INDEX (clamped), moved to
- *  the nearest pack in stock if that one is sold out (the earlier one on a
- *  tie). A sold-out pack keeps its place but is never the starting centre;
- *  with nothing in stock, the clamped index itself. */
-export function stageStartIndex(
-  packs: readonly Pick<StagePack, 'soldOut'>[],
-  wanted: number = STAGE_START_INDEX,
-): number {
-  if (packs.length === 0) return 0;
-  const at = Math.max(0, Math.min(packs.length - 1, wanted));
-  for (let d = 0; d < packs.length; d++) {
-    if (at - d >= 0 && !packs[at - d]?.soldOut) return at - d;
-    if (at + d < packs.length && !packs[at + d]?.soldOut) return at + d;
-  }
-  return at;
-}
+// The start rule lives with the row filter (pure, shared with the chips).
+export { STAGE_START_INDEX, stageStartIndex } from './stage-filter';
 
 /**
  * Where a released swipe lands: the nearest pack to where the release speed
@@ -130,9 +109,16 @@ export default function StageTrack({
   onSelect,
   onSettle,
   selected,
+  startAt,
+  rowKey,
 }: {
   categoryId: string;
+  /** The row on show (the category's packs, narrowed by the chips). */
   packs: readonly StagePack[];
+  /** Where the row opens (default: the start rule). Read when the row changes. */
+  startAt?: number;
+  /** Changes whenever the row does (category, chip, language): reopens it at `startAt`. */
+  rowKey?: string;
   /** The visible category: only it attaches to the 3D layer and measures. */
   active: boolean;
   noun: 'pack' | 'capsule';
@@ -149,13 +135,17 @@ export default function StageTrack({
   /** The centred (or heading-to) pack, for the ends of the previous/next discs. */
   selected: number;
 }) {
-  const start = stageStartIndex(packs);
-  const track = useMotionValue(start);
+  const start =
+    startAt === undefined
+      ? stageStartIndex(packs)
+      : Math.max(0, Math.min(packs.length - 1, startAt));
+  // The continuous centred index: one observable for the life of the track.
+  const [track] = useState(() => observable(start));
   const stage3d = useStage3d();
   const trackId = useId();
   const viewportRef = useRef<HTMLDivElement>(null);
   const rowRef = useRef<HTMLUListElement>(null);
-  const animRef = useRef<AnimationPlaybackControls | null>(null);
+  const animRef = useRef<AnimationControls | null>(null);
   const targetRef = useRef(start);
   const cyArtRef = useRef(0);
   const panRef = useRef<{ from: number; step: number } | null>(null);
@@ -193,8 +183,11 @@ export default function StageTrack({
     }
   }, [track, packs, values]);
 
-  // Only the visible category follows the shared values.
-  useEffect(() => {
+  // Only the visible category follows the shared values. Layout effects, here
+  // and below: a changed row (React re-renders the tiles' rest pose into their
+  // style) is re-posed, re-centred and attached before the browser paints and
+  // before the rise's first frame.
+  useLayoutEffect(() => {
     if (!active) return;
     const offs = [
       track.on('change', paint),
@@ -233,17 +226,17 @@ export default function StageTrack({
 
   useImperativeHandle(handle, () => ({ go }), [go]);
 
-  // A category becoming visible starts again on its first pack in stock.
-  useEffect(() => {
+  // A category becoming visible, or a changed row, opens at its start.
+  useLayoutEffect(() => {
     if (!active) return;
     animRef.current?.stop();
     targetRef.current = start;
     track.set(start);
     paint();
-  }, [active, start, track, paint]);
+  }, [active, start, rowKey, track, paint]);
 
   // The 3D layer draws this category while it is the visible one.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!active) return;
     return attach({
       categoryId,

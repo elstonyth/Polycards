@@ -34,7 +34,12 @@ import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const SHOTS = join(ROOT, 'docs/research/home-3d/pack-stage/shots-3d');
+const SHOTS =
+  process.env.SHOTS_DIR ??
+  join(ROOT, 'docs/research/home-3d/pack-stage/shots-3d');
+const FILTER_SHOTS =
+  process.env.FILTER_SHOTS_DIR ??
+  join(ROOT, 'docs/research/home-3d/pack-stage/shots-filter');
 const args = process.argv.slice(2);
 const SELF_TEST = args.includes('--self-test');
 const BASE = (
@@ -43,7 +48,24 @@ const BASE = (
   'http://localhost:4300'
 ).replace(/\/$/, '');
 const URL = `${BASE}/home-preview`;
-const HEADED = process.env.HEADED === '1';
+/**
+ * `HEADED=1`: a real (GPU) window, parked off screen so nobody sees the key
+ * colours of the layer masks flash; `HEADED=visible` puts it on screen.
+ */
+const HEADED = process.env.HEADED === '1' || process.env.HEADED === 'visible';
+/** `BROWSER=webkit`: run the suite in WebKit (headless). */
+const WEBKIT = process.env.BROWSER === 'webkit';
+const HEADED_ARGS =
+  process.env.HEADED === 'visible'
+    ? []
+    : [
+        '--window-position=-32000,-32000',
+        '--window-size=1600,1000',
+        // An off-screen window must keep painting at the display rate.
+        '--disable-features=CalculateNativeWinOcclusion',
+        '--disable-backgrounding-occluded-windows',
+        '--disable-renderer-backgrounding',
+      ];
 const ONLY = new Set((process.env.ONLY ?? '').split(',').filter(Boolean));
 const WANT_SHOTS = process.env.SHOTS !== '0';
 const WANT_VIDEO = process.env.VIDEO !== '0';
@@ -60,7 +82,11 @@ const SOFTWARE_GPU =
 const PROFILES = {
   desktop: {
     kind: 'desktop',
-    context: { viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 },
+    // DESKTOP_DPR=2: a retina desktop (full-front promotion, the tightest cap).
+    context: {
+      viewport: { width: 1440, height: 900 },
+      deviceScaleFactor: Number(process.env.DESKTOP_DPR) || 1,
+    },
   },
   phone: {
     kind: 'phone',
@@ -354,7 +380,13 @@ async function newPage(profile, extra = {}, b = browser) {
   page.errors = [];
   page.chunkRequests = [];
   page.on('pageerror', (e) => page.errors.push(String(e)));
-  page.on('console', (m) => m.type() === 'error' && page.errors.push(m.text()));
+  page.on('console', (m) => {
+    if (m.type() !== 'error') return;
+    // WebKit reports the site's report-only CSP header (no report-to) as a
+    // console error; it is a header notice, not a page error.
+    if (/delivered in report-only mode/.test(m.text())) return;
+    page.errors.push(m.text());
+  });
   page.on(
     'request',
     (r) => CHUNK.test(r.url()) && page.chunkRequests.push(r.url()),
@@ -363,8 +395,15 @@ async function newPage(profile, extra = {}, b = browser) {
 }
 
 const stageUrl = (params) => `${URL}?${new URLSearchParams(params).toString()}`;
-const forced = (more = {}) =>
-  HEADED ? { debug: '1', ...more } : { stage: '3d', debug: '1', ...more };
+const forced = (more = {}) => ({
+  ...(HEADED ? { debug: '1' } : { stage: '3d', debug: '1' }),
+  ...more,
+});
+/** Owner shots of the sorting control: `closed-phone` etc. */
+const lookShot = (base, label) =>
+  label.endsWith('-webkit')
+    ? `webkit-${base}-${label.replace('-webkit', '')}`
+    : `${base}-${label}`;
 
 /** Declines the cookie banner (the privacy-preserving choice); it shows a moment after load. */
 async function dismissChrome(page, waitMs = 3000) {
@@ -462,6 +501,7 @@ async function hostClip(page) {
       artCy: l ? r.top + l.cy : null,
       step: l?.step ?? null,
       artH: l?.artH ?? null,
+      artW: l?.artW ?? null,
     };
   });
 }
@@ -534,21 +574,73 @@ async function layerMask(page, layer, clip, dpr) {
   return { mask, boxes: boxes(mask, dpr) };
 }
 
-/** Canvas vs tiles for the centred pack and a neighbour. */
-async function align(page, profile, extraDy = 0) {
+/**
+ * The centred pack's extent (CSS px) in each layer, read only from the columns
+ * of the centre tile's art box (its width around the centre x, plus a margin);
+ * returns the differences canvas minus tiles, or null if either is empty.
+ */
+function centreExtent(A, B, centreX, artW, dpr) {
+  const half = ((artW ?? 230) / 2 + 6) * dpr;
+  const cx = centreX * dpr;
+  const x0 = Math.max(0, Math.floor(cx - half));
+  const x1 = Math.min(A.W - 1, Math.ceil(cx + half));
+  const extent = (M) => {
+    let top = Infinity;
+    let bottom = -1;
+    let left = Infinity;
+    let right = -1;
+    for (let y = 0; y < M.H; y++)
+      for (let x = x0; x <= x1; x++)
+        if (M.on(x, y)) {
+          if (y < top) top = y;
+          if (y > bottom) bottom = y;
+          if (x < left) left = x;
+          if (x > right) right = x;
+        }
+    return bottom < 0 ? null : { top, bottom, left, right };
+  };
+  const a = extent(A);
+  const b = extent(B);
+  if (!a || !b) return null;
+  const d = (k) => r1((a[k] - b[k]) / dpr);
+  return {
+    dTop: d('top'),
+    dBottom: d('bottom'),
+    dLeft: d('left'),
+    dRight: d('right'),
+  };
+}
+
+/** Canvas vs tiles for the centred pack and a neighbour. */ async function align(
+  page,
+  profile,
+  extraDy = 0,
+) {
   const dpr = profile.context.deviceScaleFactor ?? 1;
   const h = await hostClip(page);
   const c = await layerMask(page, 'canvas', h.clip, dpr);
   const t = await layerMask(page, 'tiles', h.clip, dpr);
   const cmp = comparePacks(c.boxes, t.boxes, h.centreX, extraDy);
   const io = iou(c.mask, t.mask);
+  // The centred pack on its own: its silhouette inside the centre tile's
+  // column range, in both layers. Unlike the column-run boxes it cannot be
+  // thrown by a neighbour touching it, or by a few translucent foil columns
+  // splitting one pack into two runs (seen once in 12 headed runs, IoU 0.993).
+  const centre = centreExtent(c.mask, t.mask, h.centreX, h.artW, dpr);
+  const centreOk =
+    centre !== null &&
+    Math.abs(centre.dTop) <= TOL + extraDy &&
+    Math.abs(centre.dBottom) <= TOL + extraDy &&
+    Math.abs(centre.dLeft) <= TOL &&
+    Math.abs(centre.dRight) <= TOL;
   return {
     ...cmp,
     // Box counts can differ when two packs nearly touch (one layer merges
-    // them into one run); the whole-silhouette IoU then has to vouch.
-    ok: cmp.ok || (cmp.pairsOk && cmp.pairs.length > 0 && io >= 0.97),
+    // them into one run); the whole silhouette (IoU) and the centred pack's
+    // own extent then vouch.
+    ok: cmp.ok || (io >= 0.97 && centreOk),
     iou: io,
-    detail: `${cmp.empty ? 'both layers empty (faded out together)' : ''}${cmp.pairs.map((p) => (p.canvas === null ? 'no canvas pack' : `dCx ${p.dCx} dCy ${p.dCy} dH ${p.dH}`)).join('; ')}; IoU ${iou(c.mask, t.mask)}; packs drawn ${c.boxes.length}, tiles ${t.boxes.length}`,
+    detail: `${cmp.empty ? 'both layers empty (faded out together)' : ''}${cmp.pairs.map((p) => (p.canvas === null ? 'no canvas pack' : `dCx ${p.dCx} dCy ${p.dCy} dH ${p.dH}`)).join('; ')}; IoU ${io}; packs drawn ${c.boxes.length}, tiles ${t.boxes.length}${cmp.ok ? '' : `; centred pack alone: ${centre ? `top ${centre.dTop} bottom ${centre.dBottom} left ${centre.dLeft} right ${centre.dRight}` : 'not found'}`}`,
   };
 }
 
@@ -687,7 +779,7 @@ async function checkChunkAndLive(label, profile) {
   pass(
     `audio-muted-${label}`,
     guard,
-    `browser launched with --mute-audio (Chromium); media guard keeps a new Audio() muted at volume 0 after unmuting: ${guard}`,
+    `${WEBKIT ? 'WebKit takes no --mute-audio: the init script mutes media and holds AudioContext suspended' : 'browser launched with --mute-audio (Chromium)'}; media guard keeps a new Audio() muted at volume 0 after unmuting: ${guard}`,
   );
   try {
     await waitLive(page, profile.kind === 'desktop' ? 3 : 2);
@@ -732,6 +824,9 @@ async function checkAlign(label, profile) {
   await page.goto(stageUrl(forced({ loader: 'never' })), { waitUntil: 'load' });
   await dismissChrome(page);
   await waitLive(page, 2);
+  // FULL_CANVAS=1: draw on the whole host instead of the band (diagnosis).
+  if (process.env.FULL_CANVAS === '1')
+    await page.evaluate(() => window.__packStage.fullCanvas(true));
   await page.mouse.move(2, 2); // the pointer off the stage: no lean
   await waitRest(page);
   const rest = await align(page, profile);
@@ -758,6 +853,11 @@ async function checkAlign(label, profile) {
 async function checkMotion(label, profile) {
   const { ctx, page } = await newPage(profile);
   await page.addInitScript(qaClockScript);
+  // The float-in only plays when the page hydrates in time (a late page shows
+  // at once, by design: StageLoader's late cut). The server renders from the
+  // live catalogue with a 30 s memo, so a cold memo can make one load late;
+  // warm it first so the check measures the poses, not the backend.
+  await fetch(stageUrl(forced({ loader: 'always' }))).catch(() => {});
   await page.goto(stageUrl(forced({ loader: 'always' })), {
     waitUntil: 'commit',
   });
@@ -777,10 +877,18 @@ async function checkMotion(label, profile) {
     .catch(() => false);
   if (!started) {
     const seen = await stageInfo(page).catch(() => null);
+    const nav = await page
+      .evaluate(() => {
+        const n = performance.getEntriesByType('navigation')[0];
+        return n
+          ? `server answered at ${Math.round(n.responseStart)} ms, DOM ready at ${Math.round(n.domContentLoadedEventEnd)} ms`
+          : 'no navigation timing';
+      })
+      .catch(() => 'no navigation timing');
     pass(
       `float-in-${label}`,
       false,
-      `the float-in never started within 20 s (mode ${seen?.mode}, intro ${seen?.state.intro}, live ${seen?.live.length})`,
+      `the float-in never started within 20 s (mode ${seen?.mode}, intro ${seen?.state.intro}, live ${seen?.live.length}; ${nav})`,
     );
     await ctx.close();
     return;
@@ -789,6 +897,10 @@ async function checkMotion(label, profile) {
   const points = [];
   for (let k = 0; k < 3; k++) {
     const info = await stageInfo(page);
+    if (!info)
+      throw new Error(
+        `window.__packStage is gone during the float-in: url ${page.url()}; errors ${page.errors.slice(0, 3).join(' | ') || 'none'}`,
+      );
     if (k === 1) {
       await dismissChrome(page, 1500);
       await shot(page, `float-in-mid-${label}`);
@@ -799,6 +911,7 @@ async function checkMotion(label, profile) {
       intro: r1(info.state.intro * 100) / 100,
       live: info.live.length,
       a,
+      at: `mode ${info.mode} tier ${info.tier}`,
     });
     await page.evaluate(() => window.__qaClock.advance(220));
     await sleep(250);
@@ -810,7 +923,7 @@ async function checkMotion(label, profile) {
     points
       .map(
         (p) =>
-          `intro ${p.intro}: ${p.a ? p.a.detail : `no pack live (3D not ready when the loader left: flat fallback)`}`,
+          `intro ${p.intro} (${p.at}): ${p.a ? p.a.detail : `no pack live (3D not ready when the loader left: flat fallback)`}`,
       )
       .join(' || '),
   );
@@ -828,16 +941,26 @@ async function checkMotion(label, profile) {
     await page.evaluate((v) => window.__qaClock.advance(v), ms);
     await sleep(250);
     const info = await stageInfo(page);
+    if (!info)
+      throw new Error(
+        `window.__packStage is gone during the sink: url ${page.url()}; errors ${page.errors.slice(0, 3).join(' | ') || 'none'}`,
+      );
     const a =
       info.live.length > 0 ? await align(page, profile, bobPx(info)) : null;
-    sink.push({ swap: r1(info.state.swap * 100) / 100, a });
+    sink.push({
+      swap: r1(info.state.swap * 100) / 100,
+      a,
+      at: `mode ${info.mode} tier ${info.tier}`,
+    });
   }
   await page.evaluate(() => window.__qaClock.resume());
   pass(
     `swap-sink-${label}`,
     sink.every((p) => p.a?.ok) && sink.some((p) => p.swap > 0.05),
     sink
-      .map((p) => `swap ${p.swap}: ${p.a ? p.a.detail : 'no pack live'}`)
+      .map(
+        (p) => `swap ${p.swap} (${p.at}): ${p.a ? p.a.detail : 'no pack live'}`,
+      )
       .join(' || '),
   );
   await ctx.close();
@@ -1092,6 +1215,13 @@ async function checkSoldOut(label, profile) {
 }
 
 async function checkFrameTimes(label, profile) {
+  if (WEBKIT) {
+    skip(
+      `frame-times-${label}`,
+      'not measured: Playwright WebKit reports a masked `Apple GPU` but renders without the real graphics card here',
+    );
+    return;
+  }
   if (softwareGpu) {
     skip(`frame-times-${label}`, 'not measured (software renderer)');
     return;
@@ -1225,6 +1355,1283 @@ async function jsSizes() {
 }
 
 // ---------------------------------------------------------------------------
+// Pack type chips and the hand-off (shots-filter/)
+
+/**
+ * Per-frame hand-off sampler, run inside the page every animation frame. Per
+ * visible tile it compares what the canvas says it drew (`live()`) with what
+ * the tile shows:
+ * - doubled: the canvas drew the pack AND its picture is showing (opacity > 0)
+ *   while the tile itself is visible;
+ * - hole: the tile says data-live=1 but the canvas did not draw that pack;
+ * - flash: a tile is visible while the switch is fully sunk (swap ~ 1);
+ * - flat: a 3D-capable tile is visible but not drawn (late, or not ready).
+ */
+function handSamplerScript() {
+  const q = (window.__qaHand = { frames: [], stop: false, mark: null });
+  const f = () => {
+    if (q.stop) return;
+    const s = window.__packStage;
+    if (s) {
+      const live = new Set(s.live());
+      const swap = s.state.swap;
+      const fr = {
+        t: performance.now(),
+        swap: Math.round(swap * 1000) / 1000,
+        doubled: [],
+        holes: [],
+        flash: [],
+        flat: [],
+        ids: [],
+      };
+      for (const li of document.querySelectorAll(
+        '[data-stage-panel]:not([hidden]) [data-stage-tile]',
+      )) {
+        const id = li.getAttribute('data-pack-id');
+        const art = li.querySelector('[data-stage-art]');
+        const img = art?.querySelector('img');
+        const pose = li.querySelector('[data-stage-pose]');
+        const po = pose ? Number(getComputedStyle(pose).opacity) : 0;
+        const io = img ? Number(getComputedStyle(img).opacity) : 0;
+        const drawn = live.has(id);
+        if (po > 0.02) fr.ids.push(id);
+        if (drawn && io > 0.001 && po > 0.001) fr.doubled.push(id);
+        if (art?.getAttribute('data-live') === '1' && !drawn && po > 0.02)
+          fr.holes.push(id);
+        if (swap > 0.999 && po > 0.02) fr.flash.push(id);
+        if (!drawn && po > 0.02 && img?.hasAttribute('crossorigin'))
+          fr.flat.push(id);
+      }
+      q.frames.push(fr);
+    }
+    requestAnimationFrame(f);
+  };
+  requestAnimationFrame(f);
+}
+
+/** Starts the sampler (fresh), runs `work`, waits `settleMs`, returns the frames. */
+async function sampleHandoff(page, work, settleMs = 1600) {
+  await page.evaluate(handSamplerScript);
+  await work();
+  await sleep(settleMs);
+  return page.evaluate(() => {
+    window.__qaHand.stop = true;
+    return window.__qaHand.frames;
+  });
+}
+
+/** Summary of a sampled change: doubled / hole / flash frames and the flat tail of the rise. */
+function handSummary(frames) {
+  const bad = (k) => frames.filter((f) => f[k].length > 0);
+  const doubled = bad('doubled');
+  const holes = bad('holes');
+  const flash = bad('flash');
+  // The rise: from the last fully sunk frame on. "Flat" frames in it are
+  // 3D tiles showing their picture (not live yet).
+  let sunkAt = -1;
+  frames.forEach((f, i) => {
+    if (f.swap > 0.999) sunkAt = i;
+  });
+  const rise = sunkAt >= 0 ? frames.slice(sunkAt + 1) : [];
+  const flatRise = rise.filter((f) => f.flat.length > 0);
+  const lastFlat = flatRise.at(-1);
+  const riseMs = lastFlat && rise[0] ? Math.round(lastFlat.t - rise[0].t) : 0;
+  const ids = (list, k) => [...new Set(list.flatMap((f) => f[k]))].join(',');
+  // No evidence, no pass: the change must have been seen fully sunk and rising.
+  const seen = sunkAt >= 0 && rise.length >= 3;
+  return {
+    ok:
+      seen && doubled.length === 0 && holes.length === 0 && flash.length === 0,
+    frames: frames.length,
+    doubled: doubled.length,
+    holes: holes.length,
+    flash: flash.length,
+    flatRise: flatRise.length,
+    riseMs,
+    detail: `${frames.length} frames (fully sunk seen: ${sunkAt >= 0}; rise frames ${rise.length}); doubled ${doubled.length}${doubled.length ? ` (${ids(doubled, 'doubled')})` : ''}; holes ${holes.length}${holes.length ? ` (${ids(holes, 'holes')})` : ''}; visible while sunk ${flash.length}; rise frames with a flat 3D tile ${flatRise.length}${flatRise.length ? ` (${ids(flatRise, 'flat')}, last ${riseMs} ms into the rise)` : ''}`,
+  };
+}
+
+/** The collapsed sorting trigger (names the current choice). */
+const trigger = (page) =>
+  page.locator('[data-stage-chips]:not([data-off]) button[aria-expanded]');
+
+/** Opens the sorting panel if it is closed (and waits for it to show). */
+async function openPanel(page) {
+  const t = trigger(page);
+  if ((await t.getAttribute('aria-expanded')) !== 'true') await t.click();
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector(
+          '[data-stage-chips]:not([data-off]) button[aria-expanded]',
+        )
+        ?.getAttribute('aria-expanded') === 'true',
+    null,
+    { timeout: 3000 },
+  );
+  await sleep(280); // its 180-220 ms entrance
+}
+
+/** A choice in the panel: .click() opens the panel first, as a visitor would. */
+const panelButton = (page, group, name) => {
+  const loc = page
+    .getByRole('group', { name: group })
+    .getByRole('button', { name })
+    .first();
+  return {
+    loc,
+    click: async () => {
+      await openPanel(page);
+      await loc.click();
+    },
+  };
+};
+const chip = (page, name) => panelButton(page, 'Pack type', name);
+const langBtn = (page, name) => panelButton(page, 'Language', name);
+
+/** The panel's contents load in their own chunk (on intent or when idle): load them. */
+async function ensurePanelLoaded(page) {
+  await trigger(page)
+    .focus()
+    .catch(() => {});
+  await page
+    .waitForFunction(
+      () =>
+        document.querySelectorAll(
+          '[data-stage-chips] [role="group"][aria-label="Pack type"] button',
+        ).length > 0,
+      null,
+      { timeout: 8000 },
+    )
+    .catch(() => {});
+  await page.evaluate(() => document.activeElement?.blur?.());
+}
+
+/** The visible row: ids, centred index, counter text, arrows disabled. */
+const rowState = (page) =>
+  page.evaluate(() => {
+    const panel = document.querySelector('[data-stage-panel]:not([hidden])');
+    const ids = [...(panel?.querySelectorAll('[data-stage-tile]') ?? [])].map(
+      (li) => li.getAttribute('data-pack-id'),
+    );
+    const navs = [...(panel?.querySelectorAll('[data-stage-nav]') ?? [])];
+    const counter = document
+      .querySelector('[data-stage-info] p[aria-hidden]')
+      ?.textContent?.replace(/\s+/g, '');
+    return {
+      ids,
+      at: Math.round(window.__packStage?.state.track ?? -1),
+      counter,
+      prevDisabled: navs[0]?.getAttribute('aria-disabled') === 'true',
+      nextDisabled: navs[1]?.getAttribute('aria-disabled') === 'true',
+      // The control's options (in its panel, or the phone sheet of look b),
+      // counted once each; a display:none copy is not on screen.
+      ...(() => {
+        const on = !document.querySelector('[data-stage-chips]:not([data-off])')
+          ? []
+          : [
+              ...document.querySelectorAll(
+                '[role="group"][aria-label="Pack type"] button',
+              ),
+            ].filter((b) => b.getClientRects().length > 0);
+        const uniq = (list) => [...new Set(list)];
+        return {
+          chips: uniq(
+            on
+              .filter((b) => !b.closest('[aria-label="Language"]'))
+              .map((b) => b.textContent.trim()),
+          ),
+          langs: uniq(
+            on
+              .filter((b) => b.closest('[aria-label="Language"]'))
+              .map((b) => b.getAttribute('aria-label') ?? b.textContent.trim()),
+          ),
+        };
+      })(),
+      trigger:
+        document
+          .querySelector(
+            '[data-stage-chips]:not([data-off]) button[aria-expanded]',
+          )
+          ?.textContent?.trim() ?? null,
+    };
+  });
+
+/** Bottom of the Open button and the counter against the tab bar's top (CSS px). */
+const openFit = (page) =>
+  page.evaluate(() => {
+    const info = document.querySelector('[data-stage-info]');
+    const open = [...(info?.querySelectorAll('a') ?? [])].find((a) =>
+      /^\s*Open/.test(a.textContent ?? ''),
+    );
+    const counter = info?.querySelector('p[aria-hidden]');
+    // The bottom tab bar: a fixed element at the bottom edge (phones only).
+    const bar = [...document.querySelectorAll('nav, div, footer')].find(
+      (el) => {
+        const cs = getComputedStyle(el);
+        if (cs.position !== 'fixed') return false;
+        const r = el.getBoundingClientRect();
+        return (
+          r.bottom >= innerHeight - 1 &&
+          r.width >= innerWidth * 0.9 &&
+          r.height > 30 &&
+          r.height < 160
+        );
+      },
+    );
+    const o = open?.getBoundingClientRect();
+    const c = counter?.getBoundingClientRect();
+    const top = bar ? bar.getBoundingClientRect().top : innerHeight;
+    return {
+      openTop: o ? Math.round(o.top) : null,
+      openBottom: o ? Math.round(o.bottom) : null,
+      counterBottom: c ? Math.round(c.bottom) : null,
+      barTop: Math.round(top),
+      viewport: innerHeight,
+      fits: !!o && !!c && o.top >= 0 && o.bottom <= top && c.bottom <= top,
+    };
+  });
+
+async function filterShot(page, name) {
+  if (!WANT_SHOTS) return;
+  await setStyle(
+    page,
+    'qa-hide-debug',
+    '[data-stage-root] > p.fixed{display:none!important}',
+  );
+  await page.screenshot({ path: join(FILTER_SHOTS, `${name}.png`) });
+  await setStyle(page, 'qa-hide-debug', null);
+}
+
+/** Boxes that must not move when the sorting panel opens or closes. */
+const layoutBoxes = (page) =>
+  page.evaluate(() => {
+    const box = (el) => {
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return [r.left, r.top, r.width, r.height].map(
+        (v) => Math.round(v * 10) / 10,
+      );
+    };
+    const info = document.querySelector('[data-stage-info]');
+    const open = [...(info?.querySelectorAll('a') ?? [])].find((a) =>
+      /^\s*Open/.test(a.textContent ?? ''),
+    );
+    return {
+      row: box(
+        document.querySelector(
+          '[data-stage-panel]:not([hidden]) [data-stage-row]',
+        ),
+      ),
+      art: box(
+        document.querySelector(
+          '[data-stage-panel]:not([hidden]) [data-stage-art]',
+        ),
+      ),
+      price: box(info?.querySelector('.font-heading')),
+      open: box(open),
+      trigger: box(
+        document.querySelector('[data-stage-chips] button[aria-expanded]'),
+      ),
+    };
+  });
+
+const triggerFocused = (page) =>
+  page.evaluate(
+    () =>
+      document.activeElement?.matches?.(
+        '[data-stage-chips] button[aria-expanded]',
+      ) ?? false,
+  );
+const expanded = async (page) =>
+  (await trigger(page).getAttribute('aria-expanded')) === 'true';
+
+/** The trigger and its panel; chips on Pokemon and none on Poly; counter and arrows per chip; Open fits. */
+async function checkChips(label, profile) {
+  const { ctx, page } = await newPage(profile);
+  await page.goto(stageUrl(forced({ loader: 'never' })), { waitUntil: 'load' });
+  await dismissChrome(page);
+  await waitLive(page, 2).catch(() => {});
+  await ensurePanelLoaded(page);
+  const all = await rowState(page);
+  const fitAll = await openFit(page);
+  pass(
+    `chips-pokemon-${label}`,
+    all.chips.length >= 3 &&
+      /^All/.test(all.chips[0] ?? '') &&
+      all.langs.length === 0 &&
+      all.trigger === 'Pack type: All packs',
+    `trigger "${all.trigger}"; chips in its panel ${JSON.stringify(all.chips)}; language control ${all.langs.length ? JSON.stringify(all.langs) : 'absent'}; row ${all.ids.length} packs centred ${all.ids[all.at]} counter ${all.counter}`,
+  );
+  pass(
+    `open-fits-all-${label}`,
+    fitAll.fits,
+    `Open ${fitAll.openTop}-${fitAll.openBottom}, counter bottom ${fitAll.counterBottom}, tab bar top ${fitAll.barTop} (viewport ${fitAll.viewport})`,
+  );
+  await page.mouse.move(2, 2);
+  await waitRest(page).catch(() => {});
+  await filterShot(page, lookShot('closed', label));
+
+  // The trigger's touch target: 44 px tall around its centre (points 21 px
+  // above and below land on it), whatever its visible size.
+  const hit = await page.evaluate(() => {
+    const t = document.querySelector(
+      '[data-stage-chips]:not([data-off]) button[aria-expanded]',
+    );
+    const r = t.getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    const on = (y) => {
+      const el = document.elementFromPoint(cx, y);
+      return !!el && (el === t || t.contains(el));
+    };
+    return { h: Math.round(r.height), up: on(cy - 21), down: on(cy + 21) };
+  });
+  pass(
+    `trigger-target-${label}`,
+    hit.up && hit.down,
+    `visible ${hit.h} px tall; a tap 21 px above the centre lands on it: ${hit.up}, 21 px below: ${hit.down}`,
+  );
+
+  // Open: nothing below moves; Escape closes and focus returns to the trigger.
+  const before = await layoutBoxes(page);
+  await openPanel(page);
+  const opened = await layoutBoxes(page);
+  const isOpen = await expanded(page);
+  const focusIn = await page.evaluate(
+    () => document.activeElement?.getAttribute('aria-pressed') === 'true',
+  );
+  await filterShot(page, lookShot('open', label));
+  await page.keyboard.press('Escape');
+  await sleep(250);
+  const escClosed = !(await expanded(page));
+  const escFocus = await triggerFocused(page);
+  const closed = await layoutBoxes(page);
+  const still =
+    JSON.stringify(before) === JSON.stringify(opened) &&
+    JSON.stringify(before) === JSON.stringify(closed);
+  pass(
+    `panel-open-escape-${label}`,
+    isOpen && focusIn && escClosed && escFocus && still,
+    `opened (aria-expanded ${isOpen}, focus on the current choice ${focusIn}); Escape closed it ${escClosed}, focus back on the trigger ${escFocus}; row, art, price, Open and trigger boxes unchanged through open and close: ${still}${still ? '' : ` before ${JSON.stringify(before)} open ${JSON.stringify(opened)} closed ${JSON.stringify(closed)}`}`,
+  );
+
+  // A tap outside (on the centred pack) only closes: no centring, no navigation.
+  await openPanel(page);
+  const urlBefore = page.url();
+  const trackBefore = (await stageInfo(page))?.state.track;
+  const art = await page
+    .locator('[data-stage-panel]:not([hidden]) [data-stage-art]')
+    .nth(all.at)
+    .boundingBox();
+  await page.mouse.click(art.x + art.width / 2, art.y + art.height * 0.75);
+  await sleep(600);
+  const outClosed = !(await expanded(page));
+  const trackAfter = (await stageInfo(page))?.state.track;
+  pass(
+    `panel-outside-tap-${label}`,
+    outClosed && page.url() === urlBefore && trackAfter === trackBefore,
+    `tap on the centred pack with the panel open: closed ${outClosed}; stayed on ${new globalThis.URL(page.url()).pathname} (${page.url() === urlBefore}); track ${trackBefore} -> ${trackAfter}`,
+  );
+
+  // Keyboard: Enter opens, arrows move, Enter chooses, focus returns.
+  await trigger(page).focus();
+  await page.keyboard.press('Enter');
+  await sleep(250);
+  await page.keyboard.press('ArrowRight');
+  const kFocus = await page.evaluate(() =>
+    document.activeElement?.textContent?.trim(),
+  );
+  await page.keyboard.press('Enter');
+  await sleep(1300);
+  const kRow = await rowState(page);
+  const kBack = await triggerFocused(page);
+  pass(
+    `panel-keyboard-${label}`,
+    /^Classic/.test(kFocus ?? '') &&
+      kRow.ids.length === 5 &&
+      kBack &&
+      !(await expanded(page)),
+    `Enter opened, ArrowRight moved to "${kFocus}", Enter chose it: row ${kRow.ids.length} packs (${kRow.counter}), panel closed, focus on the trigger ${kBack}; trigger now "${kRow.trigger}"`,
+  );
+  await chip(page, /^All/).click();
+  await sleep(1300);
+
+  const per = [];
+  for (const name of [/^Classic/, /^Original/, /^Special/, /^All/]) {
+    await chip(page, name).click();
+    await sleep(1300);
+    const s = await rowState(page);
+    per.push({
+      name: String(name),
+      ...s,
+      centred: s.ids[s.at],
+      closed: !(await expanded(page)),
+    });
+    if (name.source === '^Classic') {
+      await page.mouse.move(2, 2);
+      await waitRest(page).catch(() => {});
+      await filterShot(page, lookShot('chosen', label));
+    }
+  }
+  const sp = per[2];
+  const special =
+    sp.ids.length === 1 &&
+    sp.at === 0 &&
+    sp.counter === '1/1' &&
+    sp.prevDisabled &&
+    sp.nextDisabled;
+  const counters = per.every(
+    (p) =>
+      p.closed &&
+      p.counter === `${p.at + 1}/${p.ids.length}` &&
+      p.prevDisabled === (p.at === 0) &&
+      p.nextDisabled === (p.at === p.ids.length - 1),
+  );
+  const labels =
+    per[0].trigger === 'Pack type: Classic · Graded' &&
+    per[1].trigger === 'Pack type: Original · Raw Cards' &&
+    per[2].trigger === 'Pack type: Special · Graded' &&
+    per[3].trigger === 'Pack type: All packs';
+  pass(
+    `chips-counter-arrows-${label}`,
+    counters && special && labels,
+    per
+      .map(
+        (p) =>
+          `${p.name}: panel closed ${p.closed}, trigger "${p.trigger}", ${p.ids.length} packs, centred ${p.centred} (${p.counter}), prev ${p.prevDisabled ? 'off' : 'on'} next ${p.nextDisabled ? 'off' : 'on'}`,
+      )
+      .join(' | '),
+  );
+  // The one-pack row: a swipe either way leaves it centred.
+  await chip(page, /^Special/).click();
+  await sleep(1300);
+  await swipe(page, profile, -0.8);
+  await sleep(900);
+  await swipe(page, profile, 0.8);
+  await sleep(900);
+  const after = await rowState(page);
+  const track = (await stageInfo(page))?.state.track;
+  const fitSp = await openFit(page);
+  pass(
+    `one-pack-row-${label}`,
+    after.ids.length === 1 && Math.abs(track) < 0.01 && after.counter === '1/1',
+    `after two swipes: track ${track?.toFixed(3)}, counter ${after.counter}; Open ${fitSp.openTop}-${fitSp.openBottom} (tab bar ${fitSp.barTop})`,
+  );
+  await page.mouse.move(2, 2);
+  await waitRest(page).catch(() => {});
+  await filterShot(page, lookShot('special', label));
+  await chip(page, /^All/).click();
+  await sleep(1300);
+  await page.getByRole('button', { name: /^Poly$/ }).click();
+  await sleep(1300);
+  const poly = await rowState(page);
+  const faded = await page.evaluate(() => {
+    const row = document.querySelector('[data-stage-chips]');
+    return row
+      ? {
+          opacity: getComputedStyle(row).opacity,
+          inert: row.inert === true,
+          hidden: row.getAttribute('aria-hidden'),
+        }
+      : null;
+  });
+  pass(
+    `chips-none-on-poly-${label}`,
+    poly.chips.length === 0 &&
+      poly.trigger === null &&
+      (faded === null || (faded.opacity === '0' && faded.inert)),
+    `Poly: no trigger on show (${poly.trigger}), ${poly.ids.length} capsules; ${faded ? `the row's room is kept: opacity ${faded.opacity}, inert ${faded.inert}, aria-hidden ${faded.hidden}` : 'no row element'}`,
+  );
+  await ctx.close();
+}
+
+/**
+ * The panel's own chunk: when it fails the page must carry on (the tab stays,
+ * nothing errors, the next intent retries); when it is slow, a tap shows
+ * nothing half-open (the tab stays visible and the pill stays round until the
+ * panel can unroll).
+ */
+async function checkPanelChunk(label, profile) {
+  const PANEL = /stage-sort-panel/;
+  // Failing.
+  {
+    const { ctx, page } = await newPage(profile);
+    let aborted = 0;
+    await page.route(PANEL, (r) => {
+      aborted++;
+      r.abort().catch(() => {});
+    });
+    await page.goto(stageUrl(forced({ loader: 'never' })), {
+      waitUntil: 'load',
+    });
+    await dismissChrome(page);
+    await sleep(3500); // the idle fetch has run (and failed)
+    await trigger(page).click();
+    await sleep(800);
+    const s = await page.evaluate(() => ({
+      expanded: document
+        .querySelector('[data-stage-chips] button[aria-expanded]')
+        ?.getAttribute('aria-expanded'),
+      tiles: document.querySelectorAll(
+        '[data-stage-panel]:not([hidden]) [data-stage-tile]',
+      ).length,
+      heading: document.body.innerText.includes('Open packs. Pull real cards.'),
+    }));
+    const pageErrors = page.errors.filter(
+      (e) => !/Failed to load resource|ChunkLoadError|Loading chunk/i.test(e),
+    );
+    await page.getByRole('button', { name: 'Next pack' }).click();
+    await sleep(900);
+    const after = await rowState(page);
+    pass(
+      `panel-chunk-fails-${label}`,
+      aborted > 0 &&
+        s.expanded === 'false' &&
+        s.tiles === 11 &&
+        s.heading &&
+        pageErrors.length === 0 &&
+        after.counter === '4/11',
+      `panel chunk aborted ${aborted}x: page still the stage (${s.tiles} tiles, heading ${s.heading}), tab tap leaves it closed (aria-expanded ${s.expanded}), carousel still works (${after.counter}); uncaught page errors ${pageErrors.length}${pageErrors.length ? `: ${pageErrors[0]}` : ''}`,
+    );
+    await ctx.close();
+  }
+  // Slow.
+  {
+    const { ctx, page } = await newPage(profile);
+    await page.route(PANEL, (r) =>
+      setTimeout(() => r.continue().catch(() => {}), 2000),
+    );
+    await page.goto(stageUrl(forced({ loader: 'never' })), {
+      waitUntil: 'domcontentloaded',
+    });
+    await page.waitForSelector('[data-stage-chips] button[aria-expanded]');
+    await trigger(page).click();
+    await sleep(300);
+    const waiting = await page.evaluate(() => {
+      const t = document.querySelector(
+        '[data-stage-chips] button[aria-expanded]',
+      );
+      const pill = document.querySelector('[aria-label="Pack categories"]');
+      return {
+        expanded: t?.getAttribute('aria-expanded'),
+        tabOpacity: t ? getComputedStyle(t).opacity : null,
+        pillCorner: pill ? getComputedStyle(pill).borderBottomLeftRadius : null,
+      };
+    });
+    await page
+      .waitForFunction(
+        () =>
+          document
+            .querySelector('[data-stage-chips] button[aria-expanded]')
+            ?.getAttribute('aria-expanded') === 'true',
+        null,
+        { timeout: 8000 },
+      )
+      .catch(() => {});
+    const opened = await page.evaluate(() =>
+      document
+        .querySelector('[data-stage-chips] button[aria-expanded]')
+        ?.getAttribute('aria-expanded'),
+    );
+    pass(
+      `panel-chunk-slow-${label}`,
+      waiting.expanded === 'false' &&
+        waiting.tabOpacity === '1' &&
+        waiting.pillCorner !== '0px' &&
+        opened === 'true',
+      `panel chunk held 2 s, tab tapped at once: while waiting aria-expanded ${waiting.expanded}, tab opacity ${waiting.tabOpacity}, pill corner ${waiting.pillCorner} (round); once it arrived the panel opened (aria-expanded ${opened})`,
+    );
+    await ctx.close();
+  }
+}
+
+/**
+ * Just Pulled follows the category only: a type chip fetches nothing new for
+ * the feed; Poly refetches it with `category=poly`, Pokémon without one.
+ */
+async function checkFeedFollows(label, profile) {
+  const { ctx, page } = await newPage(profile);
+  const feed = [];
+  page.on('request', (r) => {
+    if (/\/api\/recent-pulls/.test(r.url())) feed.push(r.url());
+  });
+  await page.goto(stageUrl(forced({ loader: 'never' })), { waitUntil: 'load' });
+  await dismissChrome(page);
+  await sleep(1500);
+  feed.length = 0;
+  await chip(page, /^Classic/).click();
+  await sleep(2500);
+  const afterChip = [...feed];
+  feed.length = 0;
+  await page.getByRole('button', { name: /^Poly$/ }).click();
+  await page
+    .waitForRequest((r) => /\/api\/recent-pulls/.test(r.url()), {
+      timeout: 6000,
+    })
+    .catch(() => {});
+  await sleep(300);
+  const afterPoly = [...feed];
+  feed.length = 0;
+  await page.getByRole('button', { name: /^Pok/ }).click();
+  await page
+    .waitForRequest((r) => /\/api\/recent-pulls/.test(r.url()), {
+      timeout: 6000,
+    })
+    .catch(() => {});
+  await sleep(300);
+  const afterPokemon = [...feed];
+  const q = (u) => new globalThis.URL(u).search || '(no query)';
+  pass(
+    `feed-follows-category-${label}`,
+    afterChip.length === 0 &&
+      afterPoly.some((u) => /category=poly/.test(u)) &&
+      afterPokemon.length > 0 &&
+      afterPokemon.every((u) => !/category=/.test(u)),
+    `after a chip: ${afterChip.length} feed requests; after Poly: ${afterPoly.map(q).join(', ') || 'none'}; after Pokemon: ${afterPokemon.map(q).join(', ') || 'none'}`,
+  );
+  await ctx.close();
+}
+
+/** No tile shows its picture and its model together across the changes. */
+async function checkHandoff(label, profile) {
+  const { ctx, page } = await newPage(profile);
+  await page.goto(stageUrl(forced({ loader: 'never' })), { waitUntil: 'load' });
+  await dismissChrome(page);
+  await waitLive(page, 2);
+  await waitRest(page).catch(() => {});
+  const cases = [];
+  const hasChips = (await rowState(page)).chips.length > 0;
+  if (hasChips) {
+    for (const name of [/^Classic/, /^All/]) {
+      const frames = await sampleHandoff(page, () => chip(page, name).click());
+      cases.push({
+        name: `chip ${name.source.slice(1)}`,
+        ...handSummary(frames),
+      });
+    }
+  }
+  await page.getByRole('button', { name: /^Poly$/ }).click();
+  await sleep(1500);
+  const frames = await sampleHandoff(page, () =>
+    page.getByRole('button', { name: /^Pok/ }).click(),
+  );
+  cases.push({ name: 'Poly -> Pokemon', ...handSummary(frames) });
+  for (const c of cases)
+    pass(
+      `handoff-${c.name.replace(/\W+/g, '-').toLowerCase()}-${label}`,
+      c.ok,
+      c.detail,
+    );
+  if (!hasChips) skip(`handoff-chips-${label}`, 'no chip row on this build');
+  await ctx.close();
+}
+
+/**
+ * Arrival orders: the 3D chunk, the first textures and the first taps can
+ * land in any order. Each case delays the chunk and/or the pack textures by
+ * network interception and taps a chip or a category at a fixed moment, with
+ * the per-frame sampler on throughout. Pass: no doubled, hole or sunk-visible
+ * frame at any point, and once everything has arrived every visible 3D tile
+ * is drawn by the canvas (none stuck flat, none stuck hidden).
+ */
+async function checkOrders(label, profile) {
+  const cases = [
+    { name: 'chip-before-chunk', chunk: 1800, tex: 0, at: 400, tap: 'chip' },
+    { name: 'chip-during-prepare', chunk: 0, tex: 1500, at: 900, tap: 'chip' },
+    {
+      name: 'poly-and-back-before-chunk',
+      chunk: 1500,
+      tex: 600,
+      at: 300,
+      tap: 'poly-back',
+    },
+    { name: 'chip-during-float-in', chunk: 0, tex: 0, at: -1, tap: 'chip' },
+  ];
+  for (const c of cases) {
+    const { ctx, page } = await newPage(profile);
+    const delay = (ms) => (route) =>
+      setTimeout(() => route.continue().catch(() => {}), ms);
+    if (c.chunk) await page.route(CHUNK, delay(c.chunk));
+    if (c.tex) await page.route(/\/pack-3d\//, delay(c.tex));
+    await page.addInitScript(handSamplerScript);
+    const t0 = Date.now();
+    await page.goto(
+      stageUrl(forced({ loader: c.at < 0 ? 'always' : 'never' })),
+      { waitUntil: 'commit' },
+    );
+    if (c.at < 0) {
+      // During the float-in: the first frame the intro is under way.
+      await page
+        .waitForFunction(
+          () =>
+            (window.__packStage?.state.intro ?? 1) < 0.6 &&
+            (window.__packStage?.state.intro ?? 0) > 0.05,
+          null,
+          { timeout: 20000, polling: 'raf' },
+        )
+        .catch(() => {});
+    } else {
+      await page.waitForSelector('[data-stage-chips] button[aria-expanded]', {
+        timeout: 15000,
+      });
+      const wait = c.at - (Date.now() - t0);
+      if (wait > 0) await sleep(wait);
+    }
+    const before = await stageInfo(page).catch(() => null);
+    if (c.tap === 'chip') {
+      await chip(page, /^Classic/).click();
+    } else {
+      await page.getByRole('button', { name: /^Poly$/ }).click();
+      await sleep(120);
+      await page.getByRole('button', { name: /^Pok/ }).click();
+    }
+    // Everything arrives, the change settles, the loop rests.
+    await waitLive(page, profile.kind === 'desktop' ? 3 : 2, 30000).catch(
+      () => {},
+    );
+    await sleep(1500);
+    const frames = await page.evaluate(() => {
+      window.__qaHand.stop = true;
+      return window.__qaHand.frames;
+    });
+    const end = await page.evaluate(() => {
+      const s = window.__packStage;
+      const live = new Set(s?.live() ?? []);
+      const tiles = [
+        ...document.querySelectorAll(
+          '[data-stage-panel]:not([hidden]) [data-stage-tile]',
+        ),
+      ].filter((li) => {
+        const pose = li.querySelector('[data-stage-pose]');
+        return pose && Number(getComputedStyle(pose).opacity) > 0.5;
+      });
+      const threeD = tiles.filter((li) =>
+        li.querySelector('img')?.hasAttribute('crossorigin'),
+      );
+      return {
+        mode: s?.mode(),
+        ids: tiles.map((li) => li.getAttribute('data-pack-id')),
+        flat: threeD
+          .filter((li) => !live.has(li.getAttribute('data-pack-id')))
+          .map((li) => li.getAttribute('data-pack-id')),
+        hidden: tiles
+          .filter(
+            (li) =>
+              li
+                .querySelector('[data-stage-art]')
+                ?.getAttribute('data-live') === '1' &&
+              !live.has(li.getAttribute('data-pack-id')),
+          )
+          .map((li) => li.getAttribute('data-pack-id')),
+      };
+    });
+    const bad = (k) => frames.filter((f) => f[k].length > 0).length;
+    const ok =
+      end.mode === '3d' &&
+      bad('doubled') === 0 &&
+      bad('holes') === 0 &&
+      bad('flash') === 0 &&
+      end.flat.length === 0 &&
+      end.hidden.length === 0 &&
+      page.errors.length === 0;
+    pass(
+      `order-${c.name}-${label}`,
+      ok,
+      `chunk +${c.chunk} ms, textures +${c.tex} ms, tap ${c.tap} ${c.at < 0 ? 'during the float-in' : `at ${c.at} ms`} (mode then ${before?.mode}, ready ${before?.ready}); ${frames.length} frames: doubled ${bad('doubled')}, holes ${bad('holes')}, visible while sunk ${bad('flash')}; settled: mode ${end.mode}, visible ${end.ids.join(',')}, 3D tiles left flat ${end.flat.join(',') || 'none'}, hidden with no model ${end.hidden.join(',') || 'none'}; errors ${page.errors.length}`,
+    );
+    await ctx.close();
+  }
+}
+
+/** Negative control: with a picture fade forced back on, the sampler must catch doubling. */
+async function checkHandoffControl(label, profile) {
+  const { ctx, page } = await newPage(profile);
+  await page.goto(stageUrl(forced({ loader: 'never' })), { waitUntil: 'load' });
+  await dismissChrome(page);
+  await waitLive(page, 2);
+  await setStyle(
+    page,
+    'qa-control',
+    '[data-stage-art] img{transition:opacity 200ms linear!important}',
+  );
+  await page.getByRole('button', { name: /^Poly$/ }).click();
+  await sleep(1500);
+  const frames = await sampleHandoff(page, () =>
+    page.getByRole('button', { name: /^Pok/ }).click(),
+  );
+  const s = handSummary(frames);
+  pass(
+    `handoff-control-${label}`,
+    s.doubled > 0,
+    `with a 200 ms picture fade injected the sampler reports doubled frames (it must): ${s.detail}`,
+  );
+  await ctx.close();
+}
+
+/** GPU estimate across 20 chip changes (and a double tap), back to the start state. */
+async function checkChipMemory(label, profile) {
+  const { ctx, page } = await newPage(profile);
+  await page.goto(stageUrl(forced({ loader: 'never' })), { waitUntil: 'load' });
+  await dismissChrome(page);
+  await waitLive(page, 2);
+  await page.mouse.move(2, 2);
+  await waitRest(page).catch(() => {});
+  await sleep(800);
+  const startRow = await rowState(page);
+  const startId = startRow.ids[startRow.at];
+  // Warm-up walk out and back, so the resting figure already holds what the
+  // residency keeps around the centre after any walk (its hysteresis); the
+  // end state is reached by the same kind of walk.
+  const bootStats = (await stageInfo(page)).stats;
+  await centreOn(page, startRow.ids[Math.min(startRow.ids.length - 1, 8)]);
+  await centreOn(page, startId);
+  await page.mouse.move(2, 2);
+  await waitRest(page).catch(() => {});
+  await sleep(1500);
+  const base = (await stageInfo(page)).stats;
+  const cap = CAPS[profile.kind];
+  let max = base.gpuBytesEstimate;
+  let maxTex = base.textures;
+  const sampleMax = async (ms) => {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      const s = (await stageInfo(page)).stats;
+      max = Math.max(max, s.gpuBytesEstimate);
+      maxTex = Math.max(maxTex, s.textures);
+      await sleep(60);
+    }
+  };
+  const order = [/^Classic/, /^All/, /^Original/, /^All/, /^Special/, /^All/];
+  for (let k = 0; k < 20; k++) {
+    if (k === 9) {
+      // A double tap: the second supersedes the first mid-sink.
+      await chip(page, /^Classic/).click();
+      await sleep(90);
+    }
+    await chip(page, order[k % order.length]).click();
+    await sampleMax(1100);
+  }
+  await chip(page, /^All/).click();
+  await sampleMax(1200);
+  await centreOn(page, startId);
+  await page.mouse.move(2, 2);
+  await waitRest(page).catch(() => {});
+  await sleep(1500);
+  const end = (await stageInfo(page)).stats;
+  const endRow = await rowState(page);
+  const back = Math.abs(end.gpuBytesEstimate - base.gpuBytesEstimate) <= 0.5e6;
+  pass(
+    `chips-memory-x20-${label}`,
+    max <= cap && back && endRow.ids[endRow.at] === startId,
+    `first load ${(bootStats.gpuBytesEstimate / 1e6).toFixed(1)} MB (${bootStats.textures} textures, ${bootStats.geometries} geometries); rest after a walk out and back ${(base.gpuBytesEstimate / 1e6).toFixed(1)} MB (${base.textures} textures, ${base.geometries} geometries); max during 20 changes + a double tap ${(max / 1e6).toFixed(1)} MB (${maxTex} textures, cap ${cap / 1e6}); back on All centred on ${endRow.ids[endRow.at]}: ${(end.gpuBytesEstimate / 1e6).toFixed(1)} MB (${end.textures} textures, ${end.geometries} geometries)`,
+  );
+  await ctx.close();
+}
+
+/** Language control with ?jp= on two original packs (the preview option, not live data). */
+async function checkLanguage(label, profile) {
+  const { ctx, page } = await newPage(profile);
+  await page.goto(stageUrl(forced({ loader: 'never', jp: 'delta-reign,ah' })), {
+    waitUntil: 'load',
+  });
+  await dismissChrome(page);
+  await waitLive(page, 2).catch(() => {});
+  await ensurePanelLoaded(page);
+  const all = await rowState(page);
+  await chip(page, /^Original/).click();
+  await sleep(1300);
+  const orig = await rowState(page);
+  const fit = await openFit(page);
+  await waitRest(page).catch(() => {});
+  // The panel open with its language row (the ?jp= preview option).
+  await openPanel(page);
+  await filterShot(page, lookShot('language', label));
+  await page.keyboard.press('Escape');
+  await sleep(250);
+  await langBtn(page, /^Japanese$/).click();
+  await sleep(1300);
+  const jp = await rowState(page);
+  await langBtn(page, /^English$/).click();
+  await sleep(1300);
+  const en = await rowState(page);
+  await langBtn(page, /^English$/).click();
+  await sleep(1300);
+  const cleared = await rowState(page);
+  await langBtn(page, /^Japanese$/).click();
+  await sleep(1300);
+  await chip(page, /^Classic/).click();
+  await sleep(1300);
+  const classic = await rowState(page);
+  await chip(page, /^All/).click();
+  await sleep(1300);
+  const back = await rowState(page);
+  pass(
+    `language-${label}`,
+    all.langs.length === 2 &&
+      orig.langs.length === 2 &&
+      jp.ids.length === 2 &&
+      en.ids.length === 3 &&
+      cleared.ids.length === orig.ids.length &&
+      classic.langs.length === 0 &&
+      back.langs.length === 2 &&
+      back.ids.length === all.ids.length &&
+      fit.fits,
+    `?jp=delta-reign,ah: All langs ${JSON.stringify(all.langs)}; Original ${orig.ids.length} packs; Japanese -> ${jp.ids.join(',')} (${jp.counter}); English -> ${en.ids.join(',')}; cleared -> ${cleared.ids.length}; Classic (no languages) control ${classic.langs.length ? 'shown' : 'absent'}; back to All ${back.ids.length} packs, language ${back.langs.length ? 'control shown, none pressed' : 'absent'}; Open ${fit.openTop}-${fit.openBottom} tab bar ${fit.barTop}`,
+  );
+  await ctx.close();
+}
+
+/**
+ * Frame sheets: the composited page captured by CDP screencast (every frame
+ * the browser produces, in real time) across a change, then about 10 frames a
+ * second laid out in a grid with their time from the tap.
+ */
+async function frameSheet(page, name, work, { ms = 1100, clip } = {}) {
+  const cdp = await page.context().newCDPSession(page);
+  const frames = [];
+  cdp.on('Page.screencastFrame', (f) => {
+    frames.push({ t: f.metadata.timestamp * 1000, data: f.data });
+    cdp
+      .send('Page.screencastFrameAck', { sessionId: f.sessionId })
+      .catch(() => {});
+  });
+  await cdp.send('Page.startScreencast', {
+    format: 'jpeg',
+    quality: 85,
+    everyNthFrame: 1,
+  });
+  await sleep(400);
+  const t0 = Date.now();
+  await work();
+  await sleep(ms);
+  await cdp.send('Page.stopScreencast');
+  await cdp.detach().catch(() => {});
+  // Wall clock of the tap in the screencast's timebase (both are epoch ms).
+  const picked = [];
+  const span = Date.now() - t0;
+  for (let at = -100; at <= span; at += 100) {
+    const want = t0 + at;
+    let best = null;
+    for (const f of frames)
+      if (
+        f.t <= want + 50 &&
+        (!best || Math.abs(f.t - want) < Math.abs(best.t - want))
+      )
+        best = f;
+    if (best && picked.at(-1)?.f !== best) picked.push({ at, f: best });
+  }
+  if (picked.length === 0) return { frames: frames.length, picked: 0 };
+  const first = await sharp(Buffer.from(picked[0].f.data, 'base64')).metadata();
+  // clip is in CSS px; frames come at whatever size the screencast picks.
+  const k = clip ? first.width / clip.viewW : 1;
+  const c = clip
+    ? {
+        left: 0,
+        top: Math.round(clip.top * k),
+        width: first.width,
+        height: Math.min(
+          first.height - Math.round(clip.top * k),
+          Math.round(clip.height * k),
+        ),
+      }
+    : { left: 0, top: 0, width: first.width, height: first.height };
+  const cellW = Math.round(Math.min(c.width > c.height ? 520 : 300, c.width));
+  const scale = cellW / c.width;
+  const cellH = Math.round(c.height * scale);
+  const cols = Math.min(c.width > c.height ? 4 : 8, picked.length);
+  const rows = Math.ceil(picked.length / cols);
+  const pad = 8;
+  const labelH = 22;
+  const W = cols * (cellW + pad) + pad;
+  const H = rows * (cellH + labelH + pad) + pad;
+  const composites = [];
+  for (let i = 0; i < picked.length; i++) {
+    const x = pad + (i % cols) * (cellW + pad);
+    const y = pad + Math.floor(i / cols) * (cellH + labelH + pad);
+    const img = await sharp(Buffer.from(picked[i].f.data, 'base64'))
+      .extract(c)
+      .resize(cellW, cellH)
+      .png()
+      .toBuffer();
+    composites.push({ input: img, left: x, top: y + labelH });
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${cellW}" height="${labelH}"><text x="2" y="16" font-family="Arial" font-size="14" fill="#ddd">${picked[i].at >= 0 ? '+' : ''}${picked[i].at} ms</text></svg>`;
+    composites.push({ input: Buffer.from(svg), left: x, top: y });
+  }
+  await sharp({
+    create: { width: W, height: H, channels: 3, background: '#111' },
+  })
+    .composite(composites)
+    .png()
+    .toFile(join(FILTER_SHOTS, `${name}.png`));
+  return { frames: frames.length, picked: picked.length };
+}
+
+const sheetName = (base, label) =>
+  label === 'desktop' ? base : `${base}-${label}`;
+
+async function checkSheets(label, profile) {
+  if (!WANT_SHOTS) return;
+  if (WEBKIT) {
+    skip(
+      `sheets-${label}`,
+      'not applicable: the frame sheets use the Chromium-only CDP screencast',
+    );
+    return;
+  }
+  const { ctx, page } = await newPage(profile);
+  await page.goto(stageUrl(forced({ loader: 'never' })), { waitUntil: 'load' });
+  await dismissChrome(page);
+  await waitLive(page, 2);
+  await page.mouse.move(2, 2);
+  await waitRest(page).catch(() => {});
+  await setStyle(
+    page,
+    'qa-hide-debug',
+    '[data-stage-root] > p.fixed{display:none!important}',
+  );
+  const h = await hostClip(page);
+  // The stage band only (heading to the info block), in CSS px.
+  const clip = {
+    viewW: profile.context.viewport.width,
+    top: h.clip.y,
+    height: Math.min(h.clip.height, profile.context.viewport.height - h.clip.y),
+  };
+  const a = await frameSheet(
+    page,
+    sheetName('sheet-all-classic-all', label),
+    async () => {
+      await chip(page, /^Classic/).click();
+      await sleep(1100);
+      await chip(page, /^All/).click();
+    },
+    { ms: 1100, clip },
+  );
+  await page.getByRole('button', { name: /^Poly$/ }).click();
+  await sleep(1500);
+  const b = await frameSheet(
+    page,
+    sheetName('sheet-poly-return', label),
+    () => page.getByRole('button', { name: /^Pok/ }).click(),
+    { ms: 1000, clip },
+  );
+  report(
+    `sheets-${label}`,
+    'PASS',
+    `All -> Classic -> All: ${a.picked} frames of ${a.frames} captured; Poly -> Pokemon: ${b.picked} of ${b.frames} (shots-filter/sheet-*-${label}.png)`,
+  );
+  await ctx.close();
+}
+
+/**
+ * A returning visit (no loader): the flat pictures paint first and each one
+ * hands over to its 3D pack with a hard cut. Frame sheet from navigation on,
+ * plus the per-frame sampler: no frame may show a picture and its model.
+ */
+async function checkReturnVisit(label, profile) {
+  if (WEBKIT) {
+    skip(
+      `return-visit-${label}`,
+      'not applicable: uses the Chromium-only CDP screencast',
+    );
+    return;
+  }
+  const { ctx, page } = await newPage(profile);
+  await page.addInitScript(handSamplerScript);
+  const url = stageUrl(forced({ loader: 'never' }));
+  await fetch(url).catch(() => {}); // a warm server, as a real return visit
+  const cdp = await page.context().newCDPSession(page);
+  const frames = [];
+  cdp.on('Page.screencastFrame', (f) => {
+    frames.push({ t: f.metadata.timestamp * 1000, data: f.data });
+    cdp
+      .send('Page.screencastFrameAck', { sessionId: f.sessionId })
+      .catch(() => {});
+  });
+  await cdp.send('Page.startScreencast', {
+    format: 'jpeg',
+    quality: 85,
+    everyNthFrame: 1,
+  });
+  const t0 = Date.now();
+  await page.goto(url, { waitUntil: 'commit' });
+  await waitLive(page, profile.kind === 'desktop' ? 3 : 2, 30000).catch(
+    () => {},
+  );
+  await sleep(1500);
+  await cdp.send('Page.stopScreencast');
+  await cdp.detach().catch(() => {});
+  const sampled = await page.evaluate(() => {
+    window.__qaHand.stop = true;
+    return window.__qaHand.frames;
+  });
+  const liveAt = await page.evaluate(() => {
+    const n = performance.getEntriesByType('navigation')[0];
+    return Math.round(performance.now() - (n?.startTime ?? 0));
+  });
+  // ~10 frames a second over the hand-over, as a sheet.
+  if (WANT_SHOTS && frames.length > 0) {
+    const first = await sharp(Buffer.from(frames[0].data, 'base64')).metadata();
+    const cellW = profile.kind === 'phone' ? 260 : 480;
+    const cellH = Math.round((first.height / first.width) * cellW);
+    const picked = [];
+    const span = Date.now() - t0;
+    for (let at = 0; at <= span; at += 100) {
+      let best = null;
+      for (const f of frames)
+        if (
+          f.t <= t0 + at + 50 &&
+          (!best || Math.abs(f.t - (t0 + at)) < Math.abs(best.t - (t0 + at)))
+        )
+          best = f;
+      if (best && picked.at(-1)?.f !== best) picked.push({ at, f: best });
+    }
+    const cols = profile.kind === 'phone' ? 8 : 5;
+    const rows = Math.ceil(picked.length / cols);
+    const pad = 8;
+    const labelH = 22;
+    const comps = [];
+    for (let i = 0; i < picked.length; i++) {
+      const x = pad + (i % cols) * (cellW + pad);
+      const y = pad + Math.floor(i / cols) * (cellH + labelH + pad);
+      comps.push({
+        input: Buffer.from(
+          `<svg xmlns="http://www.w3.org/2000/svg" width="${cellW}" height="${labelH}"><text x="2" y="16" font-family="Arial" font-size="14" fill="#ddd">+${picked[i].at} ms</text></svg>`,
+        ),
+        left: x,
+        top: y,
+      });
+      comps.push({
+        input: await sharp(Buffer.from(picked[i].f.data, 'base64'))
+          .resize(cellW, cellH)
+          .png()
+          .toBuffer(),
+        left: x,
+        top: y + labelH,
+      });
+    }
+    await sharp({
+      create: {
+        width: cols * (cellW + pad) + pad,
+        height: rows * (cellH + labelH + pad) + pad,
+        channels: 3,
+        background: '#111',
+      },
+    })
+      .composite(comps)
+      .png()
+      .toFile(
+        join(
+          FILTER_SHOTS,
+          profile.kind === 'phone'
+            ? 'sheet-return-visit-phone.png'
+            : 'sheet-return-visit.png',
+        ),
+      );
+  }
+  const doubled = sampled.filter((f) => f.doubled.length > 0).length;
+  const holes = sampled.filter((f) => f.holes.length > 0).length;
+  pass(
+    `return-visit-${label}`,
+    doubled === 0 && holes === 0 && sampled.length > 0,
+    `${sampled.length} frames sampled from the first paint: picture and model together ${doubled}, hidden picture with no model ${holes}; ${frames.length} screencast frames (sheet-return-visit${profile.kind === 'phone' ? '-phone' : ''}.png); page age at the end ${liveAt} ms`,
+  );
+  await ctx.close();
+}
+
+/** Owner recordings (run HEADED=1 for a real GPU): webm -> mp4 with no sound track. */
+async function recordFilter(label, profile, { jp = false } = {}) {
+  if (!WANT_VIDEO) return;
+  const dir = join(FILTER_SHOTS, `.video-${label}`);
+  mkdirSync(dir, { recursive: true });
+  const { ctx, page } = await newPage(profile, {
+    recordVideo: { dir, size: profile.context.viewport },
+  });
+  await page.addInitScript(() => {
+    document.addEventListener('DOMContentLoaded', () => {
+      const s = document.createElement('style');
+      s.textContent = '[data-stage-root] > p.fixed{display:none!important}';
+      document.head.appendChild(s);
+    });
+  });
+  const params = forced({
+    loader: 'never',
+    ...(jp ? { jp: 'delta-reign,ah' } : {}),
+  });
+  await page.goto(stageUrl(params), { waitUntil: 'load' });
+  await dismissChrome(page);
+  await waitLive(page, 2).catch(() => {});
+  await page.mouse.move(2, 2);
+  await sleep(1200);
+  const tap = async (loc, wait = 1500) => {
+    await loc.click();
+    await page.mouse.move(2, 2);
+    await sleep(wait);
+  };
+  if (jp) {
+    await tap(chip(page, /^Original/));
+    await tap(langBtn(page, /^Japanese$/));
+    await swipe(page, profile, -0.75);
+    await sleep(1100);
+    await tap(langBtn(page, /^Japanese$/));
+    await tap(langBtn(page, /^English$/));
+    await tap(langBtn(page, /^English$/));
+  } else {
+    await tap(chip(page, /^Classic/));
+    await swipe(page, profile, -0.75);
+    await sleep(1200);
+    await tap(chip(page, /^Original/));
+    await tap(chip(page, /^Special/));
+    await tap(chip(page, /^All/));
+    await swipe(page, profile, 0.75);
+    await sleep(1200);
+    await tap(page.getByRole('button', { name: /^Poly$/ }), 1800);
+    await tap(page.getByRole('button', { name: /^Pok/ }), 2200);
+  }
+  const video = page.video();
+  await ctx.close();
+  if (!video) {
+    skip(`filter-video-${label}`, 'Playwright video not available');
+    return;
+  }
+  const name = jp ? `language-${profile.kind}` : `sort-${profile.kind}`;
+  const webm = join(dir, 'raw.webm');
+  renameSync(await video.path(), webm);
+  const out = join(FILTER_SHOTS, `${name}.mp4`);
+  const { spawnSync } = await import('node:child_process');
+  const r = spawnSync(
+    'ffmpeg',
+    [
+      '-y',
+      '-loglevel',
+      'error',
+      '-i',
+      webm,
+      '-an',
+      '-c:v',
+      'libx264',
+      '-pix_fmt',
+      'yuv420p',
+      '-movflags',
+      '+faststart',
+      out,
+    ],
+    { encoding: 'utf8' },
+  );
+  if (r.status !== 0) {
+    report(`filter-video-${label}`, 'FAIL', `ffmpeg: ${r.stderr || r.error}`);
+    return;
+  }
+  rmSync(dir, { recursive: true, force: true });
+  report(
+    `filter-video-${name}`,
+    'PASS',
+    `${out} (${(statSync(out).size / 1e6).toFixed(1)} MB, no audio track)`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 
 async function main() {
   if (SELF_TEST) {
@@ -1232,6 +2639,7 @@ async function main() {
     return;
   }
   mkdirSync(SHOTS, { recursive: true });
+  mkdirSync(FILTER_SHOTS, { recursive: true });
   const up = await fetch(URL, { method: 'GET' })
     .then((r) => r.status)
     .catch(() => 0);
@@ -1243,19 +2651,24 @@ async function main() {
     );
     return;
   }
-  browser = await launchChromium(
-    HEADED
-      ? { channel: 'chrome', headless: false }
-      : {
-          channel: 'chrome',
-          args: [
-            '--enable-unsafe-swiftshader',
-            '--use-angle=swiftshader',
-            '--ignore-gpu-blocklist',
-          ],
-        },
-  );
-  const label = (k) => (HEADED ? `${k}-headed` : k);
+  // `BROWSER=webkit`: the whole suite in Playwright's WebKit (the Safari
+  // engine, not Safari on an iPhone), headless; it takes no --mute-audio, so
+  // the init script (muteMediaScript) mutes every context.
+  browser = WEBKIT
+    ? await webkit.launch({ headless: true })
+    : await launchChromium(
+        HEADED
+          ? { channel: 'chrome', headless: false, args: HEADED_ARGS }
+          : {
+              channel: 'chrome',
+              args: [
+                '--enable-unsafe-swiftshader',
+                '--use-angle=swiftshader',
+                '--ignore-gpu-blocklist',
+              ],
+            },
+      );
+  const label = (k) => (HEADED ? `${k}-headed` : WEBKIT ? `${k}-webkit` : k);
   try {
     for (const [key, profile] of Object.entries(PROFILES)) {
       const l = label(key);
@@ -1282,14 +2695,43 @@ async function main() {
         await run('motion', `motion-${l}`, () => checkMotion(l, profile));
         await run('align', `align-${l}`, () => checkAlign(l, profile));
         await run('tabs', `tabs-${l}`, () => checkTabs(l, profile));
+        await run('handoff', `handoff-${l}`, () => checkHandoff(l, profile));
+        await run('orders', `orders-${l}`, () => checkOrders(l, profile));
+        await run('return-visit', `return-visit-${l}`, () =>
+          checkReturnVisit(l, profile),
+        );
       }
       await run('allpacks', `all-packs-live-${l}`, () =>
         checkAllPacks(l, profile),
       );
       await run('soldout', `soldout-${l}`, () => checkSoldOut(l, profile));
+      if (!HEADED) {
+        await run('chips', `chips-${l}`, () => checkChips(l, profile));
+        await run('feed', `feed-${l}`, () => checkFeedFollows(l, profile));
+        await run('panel-chunk', `panel-chunk-${l}`, () =>
+          checkPanelChunk(l, profile),
+        );
+        await run('handoff', `handoff-${l}`, () => checkHandoff(l, profile));
+        await run('orders', `orders-${l}`, () => checkOrders(l, profile));
+        await run('handoff-control', `handoff-control-${l}`, () =>
+          checkHandoffControl(l, profile),
+        );
+        await run('chip-memory', `chips-memory-${l}`, () =>
+          checkChipMemory(l, profile),
+        );
+        await run('language', `language-${l}`, () => checkLanguage(l, profile));
+        await run('sheets', `sheets-${l}`, () => checkSheets(l, profile));
+      }
+      await run('filter-video', `filter-video-${l}`, () =>
+        recordFilter(l, profile),
+      );
+      if (profile.kind === 'phone')
+        await run('filter-video', `language-video-${l}`, () =>
+          recordFilter(l, profile, { jp: true }),
+        );
       await run('video', `video-${l}`, () => recordVisit(l, profile));
     }
-    if (!HEADED) {
+    if (!HEADED && !WEBKIT) {
       await run('never', 'no-webgl-desktop', async () => {
         const nogl = await launchChromium({
           channel: 'chrome',

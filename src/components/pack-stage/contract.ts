@@ -10,7 +10,7 @@
  * webpack chunk `pack-stage-3d`) and is reached solely through the dynamic
  * import in `Stage3dProvider.tsx`.
  */
-import type { MotionValue } from 'motion/react';
+import type { Observable } from './stage-motion';
 
 export type StageMode = 'pending' | 'flat' | '3d' | 'lite';
 export type StageArt = {
@@ -33,7 +33,44 @@ export type StagePack = {
   boost: boolean;
   ticket: boolean;
 };
-export type StageCategory = { id: string; packs: StagePack[] };
+/**
+ * ADDITION (pack type chips): one language a selection can narrow to, with
+ * the ids it keeps (packs in that language plus packs with none), in the
+ * stage's order. Computed on the server (`shelfPacks`).
+ */
+export type StageLanguageCut = {
+  key: string;
+  /** Full name ("English"), also the accessible name. */
+  label: string;
+  /** Short visible label for narrow screens ("EN"). */
+  short: string;
+  ids: string[];
+};
+/**
+ * ADDITION (pack type chips): one chip of a category. The first is always
+ * "All" (every pack); then one per pack type in `shelvePacks` order, present
+ * only when the category has two or more type shelves. `caption` is the
+ * shelf's composition heading (`CATALOG_GROUP_HEADING`) only when every pack
+ * on it shares one `catalogGroupOf` that is graded or raw, else null.
+ * `languages` is empty unless the shelf carries two or more languages.
+ */
+export type StageShelf = {
+  key: string;
+  label: string;
+  caption: string | null;
+  count: number;
+  /** The shelf's pack ids in the stage's order. */
+  ids: string[];
+  languages: StageLanguageCut[];
+};
+export type StageCategory = {
+  id: string;
+  packs: StagePack[];
+  /** ADDITION: "All" first, then the type shelves (see StageShelf). */
+  shelves: StageShelf[];
+};
+/** ADDITION: what a coming row will show, handed over at the tap. */
+export type StageNextRow = { packs: readonly StagePack[]; centre: number };
 export type StageState = {
   intro: number;
   track: number;
@@ -82,7 +119,7 @@ export interface StageSlotSource {
   categoryId: string;
   packs: readonly StagePack[];
   artElement(i: number): HTMLElement | null;
-  track: MotionValue<number>;
+  track: Observable<number>;
 }
 
 export interface Stage3dApi {
@@ -104,10 +141,10 @@ export interface Stage3dStage extends Stage3dApi {
    * source's own value.
    */
   values: {
-    intro: MotionValue<number>;
-    swap: MotionValue<number>;
-    pointerX: MotionValue<number>;
-    pointerY: MotionValue<number>;
+    intro: Observable<number>;
+    swap: Observable<number>;
+    pointerX: Observable<number>;
+    pointerY: Observable<number>;
   };
   /** Resolves once settled: 3D prepared (`'3d'`/`'lite'`) or `'flat'`. Never rejects. */
   whenSettled(): Promise<StageMode>;
@@ -116,10 +153,13 @@ export interface Stage3dStage extends Stage3dApi {
   /** Run the float-in (`intro` 0 -> 1). Call from `BrandLoader` `onLeave`. Instant under reduced motion. */
   playIntro(): Promise<void>;
   /**
-   * Category switch: sinks the current packs (250 ms), calls `apply()` (show
-   * the new panel; its `attach` follows), then raises the new ones (450 ms).
+   * Category switch (and pack type / language change): sinks the current
+   * packs (250 ms), calls `apply()` (show the new row; its `attach` must have
+   * run when `apply` returns, so commit it synchronously), then raises the new
+   * ones (450 ms). `next` (ADDITION) names the coming row at the tap, so its
+   * packs load during the sink.
    */
-  swapCategory(apply: () => void): Promise<void>;
+  swapCategory(apply: () => void, next?: StageNextRow | null): Promise<void>;
   /** Runtime numbers for `?debug=1`; null without a runtime. */
   stats(): StageRuntimeStats | null;
 }
@@ -166,7 +206,18 @@ export type StageRuntimeStats = {
 
 export type StageRuntime = {
   resize(w: number, h: number, dpr: number): void;
-  setPacks(p: StageRuntimePack[] | null): void;
+  /**
+   * ADDITION: `centre` is the new list's starting track (its index space).
+   * Packs already resident, or staged by `prefetch`, are carried by key.
+   */
+  setPacks(p: StageRuntimePack[] | null, centre?: number): void;
+  /**
+   * ADDITION: at a tap, before the coming list is set: load and upload the
+   * packs it will draw first (centre +- reach), inside the byte budget, and
+   * keep the ones already resident. The next `setPacks` adopts them; a newer
+   * `prefetch` (or null) drops what it no longer wants.
+   */
+  prefetch(p: StageRuntimePack[] | null, centre: number): void;
   setLayout(l: StageLayout): void;
   /** ADDITION: optional start centre (the attached track); default: first pack in stock. */
   prepare(track?: number): Promise<void>;

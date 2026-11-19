@@ -3,10 +3,12 @@
 import {
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
 } from 'react';
+import { flushSync } from 'react-dom';
 import Link from 'next/link';
 import { ArrowUpRight, Truck } from 'lucide-react';
 import PackCategoryTabs from '@/components/PackCategoryTabs';
@@ -21,7 +23,20 @@ import { Stage3dCanvas, useStage3d } from './Stage3dProvider';
 import StageInfo from './StageInfo';
 import StageLoader, { useStageLoaderUp } from './StageLoader';
 import { LOADER_LATE_AT_MS } from './stage-loader-script';
-import StageTrack, { stageStartIndex } from './StageTrack';
+import StageChips from './StageChips';
+import {
+  ALL_FILTER,
+  filterLabel,
+  languagesOf,
+  rowKeyOf,
+  rowPacks,
+  rowStart,
+  sameFilter,
+  stageChips,
+  stageStartIndex,
+  type StageFilter,
+} from './stage-filter';
+import StageTrack from './StageTrack';
 import styles from './pack-stage.module.css';
 
 /** What the live region says once the track rests on a pack. */
@@ -43,7 +58,7 @@ const nounOf = (packs: readonly StagePack[]): 'pack' | 'capsule' =>
 const NO_SCRIPT_CSS = `
 @layer base{[data-stage-panel][hidden]{display:block!important}}
 [data-stage-panel-name]{position:static!important;width:auto!important;height:auto!important;margin:2rem 0 .75rem!important;clip:auto!important;clip-path:none!important;overflow:visible!important;white-space:normal!important}
-[data-stage-nav],[data-stage-info],[data-stage-count]{display:none!important}
+[data-stage-nav],[data-stage-info],[data-stage-count],[data-stage-chips]{display:none!important}
 [data-stage-viewport]{height:auto!important;perspective:none!important;touch-action:auto!important;user-select:auto!important;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:1rem}
 [data-stage-row]{position:static!important;transform:none!important;width:max-content;gap:1rem;padding:0 1rem}
 [data-stage-tile]{width:auto!important;scroll-snap-align:center}
@@ -85,28 +100,78 @@ export default function PackStage({
   // The centred pack per category (the info block follows the active one).
   const [selected, setSelected] = useState<Record<string, number>>({});
   const [announcement, setAnnouncement] = useState('');
-  const selectedIn = (c: StageCategory) =>
-    selected[c.id] ?? stageStartIndex(c.packs);
 
-  // A tab pick goes through the provider, which times the switch for the CSS
-  // tiles and the canvas alike: 250 ms sink, then `apply` (the shared pick, so
-  // Just Pulled follows), then a 450 ms rise. A newer pick supersedes an older
-  // one, whose `apply` never runs. The tab lights at once.
+  // The row each category shows: its chip and language (both default to every
+  // pack: the approved row). Never stored, never in the URL.
+  const [filters, setFilters] = useState<Record<string, StageFilter>>({});
+  const [rowStarts, setRowStarts] = useState<Record<string, number>>({});
+  const filterOf = (id: string): StageFilter => filters[id] ?? ALL_FILTER;
+  const rows = useMemo(
+    () =>
+      new Map(
+        categories.map((c) => [c.id, rowPacks(c, filters[c.id] ?? ALL_FILTER)]),
+      ),
+    [categories, filters],
+  );
+  const rowOf = (c: StageCategory) => rows.get(c.id) ?? c.packs;
+  const selectedIn = (c: StageCategory) =>
+    selected[c.id] ?? rowStarts[c.id] ?? stageStartIndex(rowOf(c));
+
+  // A tab, chip or language pick goes through the provider, which times the
+  // change for the CSS tiles and the canvas alike: 250 ms sink, then `apply`,
+  // then a 450 ms rise. The coming row is named at the tap, so its 3D packs
+  // load during the sink. `apply` commits synchronously (flushSync): the new
+  // row is posed, centred and attached before the rise's first frame. A newer
+  // pick supersedes an older one, whose `apply` never runs. The tab or chip
+  // lights at once.
   const { swapCategory, holdIntro, playIntro } = stage3d;
   const [pending, setPending] = useState<string | null>(null);
+  const [pendingRow, setPendingRow] = useState<{
+    cat: string;
+    f: StageFilter;
+  } | null>(null);
+  const changeRow = (catId: string, f: StageFilter) => {
+    const c = categories.find((x) => x.id === catId);
+    if (!c) return;
+    const switching = catId !== active;
+    const nextRow = rowPacks(c, f);
+    // The same category: open on the pack that was centred if it stays.
+    const centred = switching ? null : (rowOf(c)[selectedIn(c)]?.id ?? null);
+    const start = rowStart(nextRow, centred);
+    setPending(switching ? catId : null);
+    setPendingRow({ cat: catId, f });
+    void swapCategory(
+      () => {
+        flushSync(() => {
+          // A category switch resets every row to "All".
+          setFilters((prev) =>
+            switching ? { [catId]: f } : { ...prev, [catId]: f },
+          );
+          setRowStarts((prev) => ({ ...prev, [catId]: start }));
+          setSelected((prev) => ({ ...prev, [catId]: start }));
+          // The shared pick, so Just Pulled follows (the category only).
+          if (switching) pick(catId);
+          setPending((p) => (p === catId ? null : p));
+          setPendingRow((p) =>
+            p && p.cat === catId && sameFilter(p.f, f) ? null : p,
+          );
+        });
+        const p = nextRow[start];
+        if (p) setAnnouncement(stageAnnouncement(p, start, nextRow.length));
+      },
+      { packs: nextRow, centre: start },
+    );
+  };
+  const target = pending ?? active;
+  const shownFilter =
+    pendingRow?.cat === target ? pendingRow.f : filterOf(target);
   const pickTab = (id: string) => {
-    if (id === (pending ?? active)) return;
-    setPending(id);
-    void swapCategory(() => {
-      const c = categories.find((x) => x.id === id);
-      const start = c ? stageStartIndex(c.packs) : 0;
-      // A switched category starts again on its first pack in stock.
-      setSelected((prev) => ({ ...prev, [id]: start }));
-      pick(id);
-      setPending((p) => (p === id ? null : p));
-      const p = c?.packs[start];
-      if (c && p) setAnnouncement(stageAnnouncement(p, start, c.packs.length));
-    });
+    if (id === target) return;
+    changeRow(id, ALL_FILTER);
+  };
+  const pickRowFilter = (next: StageFilter) => {
+    if (sameFilter(next, shownFilter)) return;
+    changeRow(target, next);
   };
   const visible = active;
 
@@ -137,18 +202,34 @@ export default function PackStage({
   const category =
     categories.find((c) => c.id === active) ?? categories[0] ?? null;
   const tab = tabs.find((t) => t.id === category?.id);
+  const row = category ? rowOf(category) : [];
   const at = category ? selectedIn(category) : 0;
-  const pack = category?.packs[at] ?? null;
+  const pack = row[at] ?? null;
 
   const select = useCallback((id: string, index: number) => {
     setSelected((prev) =>
       prev[id] === index ? prev : { ...prev, [id]: index },
     );
   }, []);
-  const settle = useCallback((c: StageCategory, index: number) => {
-    const p = c.packs[index];
-    if (p) setAnnouncement(stageAnnouncement(p, index, c.packs.length));
+  const settle = useCallback((packs: readonly StagePack[], index: number) => {
+    const p = packs[index];
+    if (p) setAnnouncement(stageAnnouncement(p, index, packs.length));
   }, []);
+
+  // The chip row: the target category's chips (lit at the tap). A category
+  // with none (Poly) keeps the last chips faded in place, so the row's room,
+  // and with it the whole stage, never moves on a category switch.
+  const targetCat = categories.find((c) => c.id === target) ?? category;
+  const hasRowControls = (c: StageCategory) =>
+    stageChips(c).length > 0 || languagesOf(c, ALL_FILTER).length > 0;
+  const anyChips = categories.some(hasRowControls);
+  const chipsOn = !!targetCat && hasRowControls(targetCat);
+  const chipCat = chipsOn
+    ? targetCat
+    : category && hasRowControls(category)
+      ? category
+      : (categories.find(hasRowControls) ?? null);
+  const chipFilter = chipsOn ? shownFilter : ALL_FILTER;
 
   const empty = categories.length === 0;
   const noun = category ? nounOf(category.packs) : 'pack';
@@ -182,17 +263,37 @@ export default function PackStage({
           <h1 className="text-center font-heading text-[clamp(1.5rem,6.4vw,1.875rem)] leading-[1.05] tracking-[-0.03em] text-white lg:text-[clamp(2rem,2.6vw,2.75rem)]">
             Open packs. Pull real cards.
           </h1>
-          {tabs.length > 1 && (
-            <div className="w-full max-w-xl">
-              <PackCategoryTabs
-                categories={tabs}
-                active={pending ?? active}
-                onChange={pickTab}
-              />
+          {(tabs.length > 1 || (anyChips && !empty)) && (
+            // The pill and, hanging from it, the sorting control's own 24 px
+            // row (in the gap the pill always had above the packs, so the
+            // stage sits where it did before). Above the tiles: the control's
+            // panel draws over the stage and never moves it.
+            <div
+              className={cn(styles.pillWrap, 'relative z-30 w-full max-w-xl')}
+            >
+              {tabs.length > 1 && (
+                <PackCategoryTabs
+                  categories={tabs}
+                  active={target}
+                  onChange={pickTab}
+                />
+              )}
+              {anyChips && !empty && (
+                <div className="flex h-6 justify-center">
+                  {chipCat && (
+                    <StageChips
+                      category={chipCat}
+                      filter={chipFilter}
+                      label={filterLabel(chipCat, chipFilter)}
+                      off={!chipsOn}
+                      onPick={pickRowFilter}
+                    />
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
-
         {empty ? (
           <p className="px-fluid mx-auto mt-8 max-w-xl">
             <span className="block rounded-2xl border border-white/10 bg-neutral-900 px-4 py-10 text-center text-[13px] text-neutral-400">
@@ -201,10 +302,13 @@ export default function PackStage({
           </p>
         ) : (
           <>
-            <div className="relative mt-6 lg:mt-8">
+            <div
+              className={cn('relative', anyChips ? 'lg:mt-1' : 'mt-6 lg:mt-8')}
+            >
               {categories.map((c, ci) => {
                 const tabName = tabs.find((t) => t.id === c.id)?.tab ?? c.id;
                 const isVisible = c.id === visible;
+                const packs = rowOf(c);
                 return (
                   <div key={c.id} data-stage-panel={c.id} hidden={!isVisible}>
                     <h2
@@ -215,7 +319,9 @@ export default function PackStage({
                     </h2>
                     <StageTrack
                       categoryId={c.id}
-                      packs={c.packs}
+                      packs={packs}
+                      startAt={rowStarts[c.id]}
+                      rowKey={rowKeyOf(c.id, filterOf(c.id))}
                       active={isVisible}
                       noun={nounOf(c.packs)}
                       reduced={reduced}
@@ -223,7 +329,7 @@ export default function PackStage({
                       host={hostRef}
                       selected={selectedIn(c)}
                       onSelect={(i) => select(c.id, i)}
-                      onSettle={(i) => settle(c, i)}
+                      onSettle={(i) => settle(packs, i)}
                     />
                   </div>
                 );
@@ -241,7 +347,7 @@ export default function PackStage({
                 <StageInfo
                   pack={pack}
                   index={at}
-                  count={category.packs.length}
+                  count={row.length}
                   categoryName={tab?.tab ?? category.id}
                 />
                 <HeroFreePack promo={freePackPromo} />
@@ -278,7 +384,7 @@ export default function PackStage({
         {debug && (
           <p className="fixed bottom-24 left-3 z-[60] rounded-lg bg-black/80 px-3 py-2 font-mono text-[11px] text-neutral-300 ring-1 ring-white/10 lg:bottom-3">
             mode {stage3d.mode} · ready {String(stage3d.ready)} · {active} ·{' '}
-            {at + 1}/{category?.packs.length ?? 0}
+            {at + 1}/{row.length}
           </p>
         )}
       </section>

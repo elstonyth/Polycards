@@ -217,6 +217,15 @@ describe('toStageCategories', () => {
     expect(out[1]?.packs[0]?.ticket).toBe(true);
   });
 
+  it('carries the chips as plain data: "All" only for a single-shelf category', () => {
+    const out = toStageCategories(
+      [category('poly', [pack({ id: 'cap', prizeType: 'tickets' })])],
+      new Map(),
+      () => null,
+    );
+    expect(out[0]?.shelves.map((s) => s.key)).toEqual(['all']);
+  });
+
   it('is empty when the catalogue is (a backend outage)', () => {
     expect(
       toStageCategories([category('pokemon', [])], new Map(), () => null),

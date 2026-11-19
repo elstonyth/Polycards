@@ -9,15 +9,29 @@
 import { pack3dAssets } from '@/components/pack-3d/catalog';
 import { rm, rm0 } from '@/lib/format';
 import {
+  CATALOG_GROUP_HEADING,
   FLAT_BUYBACK_PERCENT,
+  PACK_LANGUAGE_LABEL,
+  PACK_LANGUAGE_ORDER,
+  PACK_TYPE_LABEL,
+  catalogGroupOf,
   isTicketPack,
   packHref,
+  shelfPacks,
   shelvePacks,
   type Pack,
   type PackCard,
   type PackCategory,
+  type PackShelf,
 } from '@/lib/packs-data';
-import type { StageArt, StageCategory, StagePack } from './contract';
+import type {
+  StageArt,
+  StageCategory,
+  StageLanguageCut,
+  StagePack,
+  StageShelf,
+} from './contract';
+import { ALL_SHELF } from './stage-filter';
 
 /**
  * Owner decision 2 (plan section 11, revised 2026-11-19): which order the
@@ -82,9 +96,78 @@ export function toStagePack(
 }
 
 /**
+ * A shelf's composition caption: the shared `CATALOG_GROUP_HEADING` text, and
+ * only when it is TRUE of every pack on the shelf. That is when every pack has
+ * the same `catalogGroupOf` and it is 'graded' (PSA 10 gate) or 'raw'. A mixed
+ * shelf, a 'more' shelf and any shelf holding a ticket pack (no cards to
+ * describe, as `packFacts`) get none.
+ */
+export function shelfCaption(packs: readonly Pack[]): string | null {
+  const first = packs[0];
+  if (!first || packs.some(isTicketPack)) return null;
+  const group = catalogGroupOf(first);
+  if (group === 'more') return null;
+  if (packs.some((p) => catalogGroupOf(p) !== group)) return null;
+  return CATALOG_GROUP_HEADING[group];
+}
+
+/**
+ * The languages a selection can narrow to: none unless its packs carry two or
+ * more (`PACK_LANGUAGE_ORDER`). Each keeps the packs in that language plus the
+ * packs with none (`shelfPacks`), in the order given.
+ */
+export function languageCuts(packs: Pack[]): StageLanguageCut[] {
+  const languages = PACK_LANGUAGE_ORDER.filter((l) =>
+    packs.some((p) => p.language === l),
+  );
+  if (languages.length < 2) return [];
+  const shelf: PackShelf = { type: null, packs, languages };
+  return languages.map((l) => ({
+    key: l,
+    label: PACK_LANGUAGE_LABEL[l],
+    short: l.toUpperCase(),
+    ids: shelfPacks(shelf, l).map((p) => p.id),
+  }));
+}
+
+/**
+ * A category's chips as plain data for the client: "All" (every pack), then
+ * one per pack type in `shelvePacks` order (untagged packs under "Other"),
+ * only when there are two or more type shelves. Every list keeps the stage's
+ * walking order (`ordered`).
+ */
+export function toStageShelves(ordered: Pack[]): StageShelf[] {
+  const all: StageShelf = {
+    key: ALL_SHELF,
+    label: 'All',
+    caption: null,
+    count: ordered.length,
+    ids: ordered.map((p) => p.id),
+    languages: languageCuts(ordered),
+  };
+  const shelves = shelvePacks(ordered);
+  if (shelves.length < 2) return [all];
+  return [
+    all,
+    ...shelves.map((s) => {
+      // The stage's order, not the shelf's own (both cheapest first today).
+      const mine = ordered.filter((p) => (p.packType ?? null) === s.type);
+      return {
+        key: s.type ?? 'other',
+        label: s.type ? PACK_TYPE_LABEL[s.type] : 'Other',
+        caption: shelfCaption(mine),
+        count: mine.length,
+        ids: mine.map((p) => p.id),
+        languages: languageCuts(mine),
+      };
+    }),
+  ];
+}
+
+/**
  * Every category that has packs, in catalogue order, each in the stage's
- * walking order. Empty categories are left out: their tab is the disabled
- * "Coming soon" one and they have no panel.
+ * walking order, with its chips. Empty categories are left out: their tab is
+ * the disabled "Coming soon" one and they have no panel.
  */
 export function toStageCategories(
   categories: PackCategory[],
@@ -93,10 +176,14 @@ export function toStageCategories(
 ): StageCategory[] {
   return categories
     .filter((c) => c.packs.length > 0)
-    .map((c) => ({
-      id: c.id,
-      packs: orderStagePacks(c.packs).map((p) =>
-        toStagePack(p, chaseByPack.get(p.id) ?? null, art3dOf),
-      ),
-    }));
+    .map((c) => {
+      const ordered = orderStagePacks(c.packs);
+      return {
+        id: c.id,
+        packs: ordered.map((p) =>
+          toStagePack(p, chaseByPack.get(p.id) ?? null, art3dOf),
+        ),
+        shelves: toStageShelves(ordered),
+      };
+    });
 }

@@ -42,7 +42,8 @@ const FEED_TTL_MS = 5_000;
  *
  * Query (preview only, read here and passed down as props):
  * `?stage=flat|3d|lite` forces the 3D mode; `?debug=1` shows the stage state;
- * `?soldout=<id>,<id>` shows those packs sold out (QA). `?loader=always|never`
+ * `?soldout=<id>,<id>` shows those packs sold out (QA); `?jp=<id>,<id>` marks
+ * those packs Japanese (the language control's preview). `?loader=always|never`
  * (forces the first-visit loader) is read by the layout's pre-paint script.
  */
 export default async function HomePreviewPage({
@@ -67,6 +68,10 @@ export default async function HomePreviewPage({
   // QA only: `?soldout=gold-pack,cr` shows those packs sold out, since the live
   // catalogue may have none.
   const forcedSoldOut = new Set(one('soldout').split(',').filter(Boolean));
+  // QA only: `?jp=delta-reign,ah` marks those packs Japanese for this request,
+  // so the stage's language control can be seen before a real Japanese pack
+  // exists. Preview only; never on the real homepage.
+  const forcedJp = new Set(one('jp').split(',').filter(Boolean));
 
   // shortcut: duplicated from src/app/page.tsx (catalogue, feed, board,
   // free-pack offer, top-chase lookups). Remove at integration.
@@ -77,13 +82,15 @@ export default async function HomePreviewPage({
     cached('home:free-pack-promo', FEED_TTL_MS, getFreePackPromo),
   ]);
   const categories =
-    forcedSoldOut.size === 0
+    forcedSoldOut.size === 0 && forcedJp.size === 0
       ? catalogue
       : catalogue.map((c) => ({
           ...c,
-          packs: c.packs.map((p) =>
-            forcedSoldOut.has(p.id) ? { ...p, inStock: false } : p,
-          ),
+          packs: c.packs.map((p) => ({
+            ...p,
+            ...(forcedSoldOut.has(p.id) ? { inStock: false } : {}),
+            ...(forcedJp.has(p.id) ? { language: 'jp' as const } : {}),
+          })),
         }));
   const packs = categories.flatMap((c) => c.packs);
   const highlights = await Promise.all(

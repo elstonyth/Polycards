@@ -169,15 +169,149 @@
   filter: brightness(var(--dim));
   -webkit-user-drag: none;
   user-select: none;
-  transition: opacity 200ms linear;
 }
 
-/* The slot contract: the provider sets data-live="1" once the 3D pack is drawn
-   at this tile's pose, and the picture fades out over it. */
+/* The slot contract: the provider sets data-live="1" in the frame the 3D pack
+   is first drawn at this tile's pose, and the picture goes in that same frame.
+   A hard cut, never a fade: during a fade the tile showed its picture AND its
+   model, doubled and brighter than its neighbours. */
 .art[data-live='1'] img {
   opacity: 0;
 }
 
+/* ---- Pack sorting: a tab on the pill that grows a second level ---------- */
+
+/* The tab's row (24 px). It fades while its category has no choices (Poly);
+   its height stays, so the stage never moves when the category changes. */
+.chipRow {
+  position: relative;
+  display: flex;
+  height: 1.5rem;
+  width: 100%;
+  align-items: flex-start;
+  justify-content: center;
+  transition: opacity 200ms linear;
+}
+
+.chipRow[data-off] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* The tab hangs from the pill's lower edge and names the current choice. */
+.growTab {
+  position: relative;
+  display: flex;
+  height: 1.5rem;
+  margin-top: -1px;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0 0.875rem;
+  white-space: nowrap;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-top: 0;
+  border-radius: 0 0 1rem 1rem;
+  background: #171717;
+  color: #a3a3a3;
+  font-size: 11px;
+  font-weight: 600;
+  outline: none;
+  transition:
+    color 150ms linear,
+    opacity 120ms linear;
+}
+
+@media (min-width: 1024px) {
+  .growTab {
+    font-size: 12px;
+  }
+}
+
+.growTab:hover,
+.growTab[data-chosen] {
+  color: #fff;
+}
+
+.growTab:focus-visible {
+  box-shadow: 0 0 0 2px rgb(255 255 255 / 0.4);
+}
+
+/* 24 px tall: the touch target reaches 12 px past each edge (44+ px,
+   measured from the padding box inside the 1 px border). */
+.growTab::after {
+  content: '';
+  position: absolute;
+  inset: -12px -4px;
+}
+
+.growTab svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  flex-shrink: 0;
+  opacity: 0.7;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Opened, the tab steps aside at once: the panel unrolling over it never
+   shows the two labels through each other. */
+.growTab[aria-expanded='true'] {
+  opacity: 0;
+  transition: none;
+}
+
+/* The pill's second level floats over the stage: it never takes room, so
+   nothing moves when it opens or closes. It unrolls from under the pill
+   (clip-path) while the pill's lower corners square off, so the two read as
+   one shape. CSS only; a closed panel is hidden (visibility) once faded. */
+.growPanel {
+  position: absolute;
+  z-index: 30;
+  top: -1px;
+  left: 0;
+  right: 0;
+  padding: 0 0.25rem 0.25rem;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-top: 0;
+  border-radius: 0 0 1.75rem 1.75rem;
+  background: #171717;
+  opacity: 0;
+  visibility: hidden;
+  clip-path: inset(0 0 100% 0);
+  transition:
+    opacity 160ms ease-out,
+    clip-path 200ms cubic-bezier(0.32, 0.72, 0, 1),
+    visibility 0s linear 200ms;
+}
+
+.growPanel[data-open] {
+  opacity: 1;
+  visibility: visible;
+  clip-path: inset(0 0 0 0);
+  transition:
+    opacity 180ms ease-out,
+    clip-path 240ms cubic-bezier(0.32, 0.72, 0, 1),
+    visibility 0s;
+}
+.stage :global([aria-label='Pack categories']) {
+  /* Over half the pill's height: drawn exactly as rounded-full, but a radius
+     that can animate down to the squared corners. */
+  border-radius: 2.25rem;
+  transition:
+    border-radius 200ms cubic-bezier(0.32, 0.72, 0, 1),
+    border-color 200ms linear;
+}
+
+/* Open (the tab says so): the pill's lower corners square off. */
+.pillWrap:has([data-stage-chips] > [aria-expanded='true'])
+  :global([aria-label='Pack categories']) {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-bottom-color: transparent;
+}
 /* Capsules (Poly): the flat panel sways gently around its upright axis. */
 .sway {
   position: absolute;
@@ -331,7 +465,11 @@
   .sway {
     animation: none;
   }
-  .pic {
+  .chipRow,
+  .growPanel,
+  .growPanel[data-open],
+  .growTab,
+  .stage :global([aria-label='Pack categories']) {
     transition: none;
   }
 }

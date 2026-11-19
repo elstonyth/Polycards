@@ -11,6 +11,8 @@ import * as THREE from 'three';
 import { buildStudioEnvironment } from '@/components/pack-3d/pack-studio';
 import type { Pose, StageLayout } from '../contract';
 
+export { BAND_ABOVE_ART, BAND_BELOW_ART, stageBand } from './stage-band';
+
 export const CAMERA_FOV_DEG = 28;
 /** Camera distance D in world units (a pack is 1 unit tall). */
 export const CAMERA_DISTANCE = 10;
