@@ -27,6 +27,12 @@ describe('refusePrivateFields', () => {
     '*seller',
     'id,sellers.email',
     'SELLER.members.*',
+    // Inventory and stock relations are refused too (2026-11-20).
+    'id,*variants.inventory_items.inventory.location_levels',
+    '+variants.inventory_quantity',
+    'variants.inventory_items.*',
+    '*sales_channels.stock_locations',
+    'Variants.Inventory.Location_Levels.stocked_quantity',
     // A repeated `fields` parses to an array or an object, never a string.
     ['id', '+groups.metadata'],
     { a: 'groups.metadata' },
