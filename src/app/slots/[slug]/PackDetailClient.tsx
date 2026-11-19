@@ -11,6 +11,7 @@ import { trackPixel } from '@/lib/pixel';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { openAuth } from '@/components/AuthButton';
 import Reveal from '@/components/Reveal';
+import CategoryIcon from '@/components/CategoryIcon';
 import type { PackDetail, RecentFeed } from '@/lib/data/packs';
 import {
   type Pack,
@@ -468,13 +469,10 @@ export default function PackDetailClient({
                   <dt className={FIELD_LABEL}>{fact.label}</dt>
                   <dd className="flex items-center gap-1.5 text-sm font-semibold text-white">
                     {fact.label === 'Category' && (
-                      <Image
+                      <CategoryIcon
                         src={pack.icon}
-                        alt=""
-                        aria-hidden
-                        width={20}
-                        height={20}
-                        className="h-5 w-5 object-contain"
+                        size={20}
+                        className="h-5 w-5"
                       />
                     )}
                     {fact.value}
