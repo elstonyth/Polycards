@@ -80,6 +80,8 @@ describe('getPackDetail — ticket pack', () => {
     expect(await getPackHighlights('lucky-pack')).toEqual({
       chase: null,
       slabs: [],
+      // The capsule's own staff-entered odds still ride along for its back.
+      pullOdds: { tiers: { Immortal: 0.1, Common: 99.9 } },
     });
   });
 });

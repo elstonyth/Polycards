@@ -169,8 +169,31 @@ describe('polled public JSON — same-origin fetches only', () => {
     expect(matches('/api/announcements')).toBe(true);
     expect(matches('/api/lucky-draw-status')).toBe(true);
     expect(matches('/api/pack-page/bronze-pack')).toBe(true);
+    expect(matches('/api/pack-tiers/bronze-pack')).toBe(true);
     expect(matches('/api/me')).toBe(false);
     expect(matches('/api/presence')).toBe(false);
+  });
+
+  it("guards the homepage flow's tier view the same way", () => {
+    expect(get('/api/pack-tiers/gold-pack')?.status).toBe(403);
+    expect(
+      get('/api/pack-tiers/gold-pack', {
+        'sec-fetch-site': 'none',
+        'sec-fetch-dest': 'document',
+      })?.status,
+    ).toBe(403);
+    expect(
+      get('/api/pack-tiers/gold-pack', {
+        'sec-fetch-site': 'cross-site',
+        referer: 'https://polycards.gg/',
+      })?.status,
+    ).toBe(403);
+    expect(
+      get('/api/pack-tiers/gold-pack', { 'sec-fetch-site': 'same-origin' }),
+    ).toBeUndefined();
+    expect(
+      get('/api/pack-tiers/gold-pack', { referer: 'https://polycards.gg/' }),
+    ).toBeUndefined();
   });
 
   it('guards the card, free-pack and announcement polls the same way', () => {
