@@ -107,7 +107,7 @@ describe('tierValueRanges', () => {
 });
 
 describe('poolExpectedValue', () => {
-  it('folds tier averages against the published percentages', () => {
+  it('folds tier averages against the Pull Odds percentages', () => {
     // Rare avg 100, Common avg 50 → 0.2×100 + 0.8×50 = 60.
     const pool = [
       { rarity: 'Rare', priceMyr: 150 },
@@ -119,7 +119,7 @@ describe('poolExpectedValue', () => {
 
   it('skips unpriced cards in the tier average, like poolValueRange', () => {
     // tiers must sum to ~100 post-guard (plan 119); Rare:100 is the only
-    // published tier so the average itself still proves the skip: if the
+    // Pull Odds tier so the average itself still proves the skip: if the
     // unpriced card were counted, avg would be 50, not 100.
     const pool = [
       { rarity: 'Rare', priceMyr: 100 },
@@ -128,7 +128,7 @@ describe('poolExpectedValue', () => {
     expect(poolExpectedValue(pool, { Rare: 100 })).toBe(100);
   });
 
-  it('returns null when no published tier has a priced card', () => {
+  it('returns null when no Pull Odds tier has a priced card', () => {
     const pool = [{ rarity: 'Common', priceMyr: 10 }];
     expect(poolExpectedValue(pool, { Immortal: 100 })).toBeNull();
     expect(poolExpectedValue(pool, {})).toBeNull();
@@ -149,8 +149,8 @@ describe('poolExpectedValue', () => {
     expect(poolExpectedValue(pool, { Rare: 100 })).toBe(3.34);
   });
 
-  // Plan 119: the row must only render when the published odds are an
-  // arithmetically coherent promise — Σ≈100, with every published tier
+  // Plan 119: the row must only render when the Pull Odds are an
+  // arithmetically coherent promise — Σ≈100, with every Pull Odds tier
   // actually contributing priced cards. Otherwise the caller's "Card value
   // range" fallback is the honest display.
   it('case 1 — happy path: tiers sum to exactly 100, pins the pre-plan value', () => {
@@ -193,15 +193,15 @@ describe('poolExpectedValue', () => {
     expect(poolExpectedValue(pool, { Rare: 60, Common: 60 })).toBeNull();
   });
 
-  it('case 5 — a published tier with no priced card drops probability mass, suppressed', () => {
-    // Immortal is published at 50% but has zero priced cards in the pool —
+  it('case 5 — a Pull Odds tier with no priced card drops probability mass, suppressed', () => {
+    // Immortal is set at 50% but has zero priced cards in the pool —
     // even though the raw percentages sum to 100, half the promised mass
     // would silently vanish from the fold.
     const pool = [{ rarity: 'Rare', priceMyr: 100 }];
     expect(poolExpectedValue(pool, { Immortal: 50, Rare: 50 })).toBeNull();
   });
 
-  it('case 6 — a published tier at pct 0 with no priced cards cannot disqualify', () => {
+  it('case 6 — a Pull Odds tier at pct 0 with no priced cards cannot disqualify', () => {
     const pool = [{ rarity: 'Rare', priceMyr: 100 }];
     expect(poolExpectedValue(pool, { Immortal: 0, Rare: 100 })).toBe(100);
   });

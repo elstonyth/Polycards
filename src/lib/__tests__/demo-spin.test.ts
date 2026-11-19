@@ -3,7 +3,7 @@ import { parseChance, sampleRarity, demoDraw } from '../demo-spin';
 import type { PackCard, Rarity } from '@/lib/packs-data';
 
 // The guest demo spin is theater: a client-side weighted sample over the
-// backend's odds-SET-3 tier split, falling back to the published display odds
+// backend's odds-SET-3 tier split, falling back to the Pull Odds
 // and then the static ODDS (never the secret per-card weights). These tests pin
 // the weighting math, the tier fallback when the pool lacks a sampled tier, and
 // which of the three odds sources a draw ends up on.
@@ -45,7 +45,7 @@ describe('sampleRarity', () => {
     expect(sampleRarity(ODDS, 0.004)).toBe('Legendary');
   });
 
-  it('crosses tier boundaries at the cumulative published chances', () => {
+  it('crosses tier boundaries at the cumulative Pull Odds chances', () => {
     // cumulative: 0.5 / 5 / 20 / 50 / 100 (%)
     expect(sampleRarity(ODDS, 0.005)).toBe('Mythical');
     expect(sampleRarity(ODDS, 0.049)).toBe('Mythical');
@@ -97,7 +97,7 @@ describe('demoDraw', () => {
     expect(demoDraw([], ODDS, 0.5, 0.5)).toBeNull();
   });
 
-  it('still draws when no pool rarity appears in the published odds', () => {
+  it('still draws when no pool rarity appears in the Pull Odds', () => {
     const offOdds: { rarity: Rarity; chance: string }[] = [
       { rarity: 'Common', chance: '100%' },
     ];

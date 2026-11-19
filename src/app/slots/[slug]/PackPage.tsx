@@ -33,10 +33,13 @@ async function fetchPackPage(id: string): Promise<PackPageData> {
   const data = (await res.json()) as PackPageData;
   // An answer this build can't draw (a deploy landed mid-visit) is a failure:
   // the caller then loads the pack's page the ordinary way.
+  // A detail with no `pullOdds` key is an older build's answer (it named the
+  // odds differently): drawing it would drop the Pull Odds board.
   if (
     data?.pack?.id !== id ||
     !Array.isArray(data.siblings) ||
-    !Array.isArray(data.recentPulls?.pulls)
+    !Array.isArray(data.recentPulls?.pulls) ||
+    (data.detail != null && !('pullOdds' in data.detail))
   ) {
     throw new Error('pack page shape');
   }

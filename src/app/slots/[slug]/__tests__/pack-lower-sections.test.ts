@@ -92,7 +92,7 @@ describe('OddsBoard', () => {
     expect(text()).toContain('Rates for this pack.');
   });
 
-  test('the tiers are one list, in the order published', () => {
+  test('the tiers are one list, in the order given', () => {
     board();
     // tests/e2e/odds-reflection.spec.ts reads the panel as its single <ul>.
     expect(host.querySelectorAll('ul')).toHaveLength(1);
@@ -138,7 +138,7 @@ describe('OddsBoard', () => {
     expect(text()).not.toContain('RM');
   });
 
-  test('nothing published and nothing priced: no board at all', () => {
+  test('no Pull Odds and nothing priced: no board at all', () => {
     board({ odds: [], range: null });
     expect(host.innerHTML).toBe('');
   });

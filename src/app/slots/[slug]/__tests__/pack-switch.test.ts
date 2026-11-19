@@ -193,6 +193,31 @@ describe('switching packs in place', () => {
     expect(window.location.pathname).toBe('/slots/bronze-pack');
   });
 
+  // Mid-rollout an older server can answer with its own name for the odds: a
+  // detail with no `pullOdds` would draw the pack without its Pull Odds board,
+  // so it is a failure and the click loads the page the ordinary way.
+  test('a detail without pullOdds is a failure; one with it is drawn', async () => {
+    const detail = { topHits: [], pool: [] };
+    fetchMock.mockReturnValue(answer({ ...data(silver), detail }));
+    await show();
+    await act(async () =>
+      page.onPick('silver-pack', '/slots/silver-pack?count=2'),
+    );
+    expect(push).toHaveBeenCalledWith('/slots/silver-pack?count=2', {
+      scroll: false,
+    });
+    expect(window.location.pathname).toBe('/slots/bronze-pack');
+
+    push.mockReset();
+    const gold = { ...bronze, id: 'gold-pack', name: 'Gold Pack' };
+    fetchMock.mockReturnValue(
+      answer({ ...data(gold), detail: { ...detail, pullOdds: null } }),
+    );
+    await act(async () => page.onPick('gold-pack', '/slots/gold-pack'));
+    expect(push).not.toHaveBeenCalled();
+    expect(window.location.pathname).toBe('/slots/gold-pack');
+  });
+
   test('the latest pick wins when an earlier one answers late', async () => {
     const gold = { ...bronze, id: 'gold-pack', name: 'Gold Pack' };
     let landSilver: (value: unknown) => void = () => {};
