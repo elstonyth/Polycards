@@ -745,7 +745,7 @@
     "loadError": "Could not load the pull ledger."
   },
   "support": {
-    "title": "Customer Support",
+    "title": "Find a player",
     "subtitle": "Find a player, then open their page for credits, pulls, vault and adjustments.",
     "searchLabel": "Email, phone, name or @handle",
     "searchPlaceholder": "name@example.com or 012-345 6789",
@@ -1545,7 +1545,7 @@
     "players": "Players",
     "playerGroups": "Player groups",
     "referrals": "Referrals",
-    "customerSupport": "Customer support",
+    "customerSupport": "Find a player",
     "packs": "Packs",
     "cards": "Cards",
     "pricing": "Pricing",

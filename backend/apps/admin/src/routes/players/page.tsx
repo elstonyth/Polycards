@@ -135,7 +135,7 @@ const joined = (iso: string): string => {
 // else (real name, pulls) is on the player's own page, one click away.
 const PlayersPage = () => {
   const { t } = useTranslation();
-  // A view-only role (Support viewer) reads players but changes nothing, and
+  // The Customer support role reads players but changes nothing here, and
   // has no dashboard figures: hide the leaders board (GET /admin/stats) and
   // the Generate button (POST /admin/players) rather than show it a 403. The
   // logins export carries partner passwords, so it asks its own policy.

@@ -54,6 +54,11 @@ import { FieldsDialog, TableState } from './bits';
 // (customer:update, api/admin-rbac.ts), never as a button that 403s.
 const useCanEdit = () =>
   usePermissions().hasPermission('customer:update' as Permission);
+// The support fixes have their own policy (customer_support:update,
+// admin-rbac.ts CUSTOMER_SUPPORT_WRITE): real name, and add, remove or verify
+// a saved bank. Super admins hold it through `*:*`.
+const useCanSupportEdit = () =>
+  usePermissions().hasPermission('customer_support:update' as Permission);
 // Unbans have their own policy (assistant_unban:update, admin-rbac.ts), the
 // assistant's: the number buttons show only to a role that may lift one.
 const useCanUnban = () =>
@@ -253,9 +258,13 @@ const VisitorSignalsCard = ({ customerId }: { customerId: string }) => {
  *  player, so the warning sits on the card, not on a row. */
 const SavedBankAccountsCard = ({
   customerId,
+  canManage,
   canEdit,
 }: {
   customerId: string;
+  /** Add, remove, verify: customer_support:update. */
+  canManage: boolean;
+  /** Name clash and the ban-list unban: customer:update, admins only. */
   canEdit: boolean;
 }) => {
   const { t } = useTranslation();
@@ -319,7 +328,7 @@ const SavedBankAccountsCard = ({
                   {account.bank_name} · {account.account_number} ·{' '}
                   {account.account_holder_name}
                 </Text>
-                {canEdit && (
+                {canManage && (
                   <Button
                     size="small"
                     variant="secondary"
@@ -340,7 +349,7 @@ const SavedBankAccountsCard = ({
                         })
                       : t('players.savedBankShared')}
                   </StatusBadge>
-                  {canEdit && (
+                  {canManage && (
                     <Button
                       size="small"
                       variant="secondary"
@@ -440,22 +449,26 @@ const SavedBankAccountsCard = ({
               )}
             </div>
           ))}
-          {canEdit && (
+          {(canManage || canEdit) && (
             <div className="flex flex-wrap gap-2 border-t px-6 py-4">
-              <Button
-                size="small"
-                variant="secondary"
-                onClick={() => setDialog({ kind: 'add' })}
-              >
-                {t('players.savedBankAdd')}
-              </Button>
-              <Button
-                size="small"
-                variant="secondary"
-                onClick={() => setDialog({ kind: 'clearName' })}
-              >
-                {t('players.savedBankNameClear')}
-              </Button>
+              {canManage && (
+                <Button
+                  size="small"
+                  variant="secondary"
+                  onClick={() => setDialog({ kind: 'add' })}
+                >
+                  {t('players.savedBankAdd')}
+                </Button>
+              )}
+              {canEdit && (
+                <Button
+                  size="small"
+                  variant="secondary"
+                  onClick={() => setDialog({ kind: 'clearName' })}
+                >
+                  {t('players.savedBankNameClear')}
+                </Button>
+              )}
               {canUnban && canEdit && (
                 <Button
                   size="small"
@@ -1242,6 +1255,7 @@ const ReferralCardBody = ({
 const PlayerDetailsCard = ({ customerId }: { customerId: string }) => {
   const { t } = useTranslation();
   const canEdit = useCanEdit();
+  const canSupportEdit = useCanSupportEdit();
   const { data, isError } = useCustomerDetail(customerId);
   const { data: audit } = useCustomerAudit(customerId, 0);
   const setName = useSetCustomerRealName();
@@ -1282,7 +1296,7 @@ const PlayerDetailsCard = ({ customerId }: { customerId: string }) => {
           <dt className="text-ui-fg-subtle">{t('playerDetail.realName')}</dt>
           <dd className="flex flex-wrap items-center gap-2">
             <span>{realName ?? t('playerDetail.notEntered')}</span>
-            {canEdit && (
+            {canSupportEdit && (
               <Button
                 size="small"
                 variant="secondary"
@@ -1440,12 +1454,13 @@ export const ProfileTab = ({ customerId }: { customerId: string }) => {
   const { t } = useTranslation();
   const permissions = usePermissions();
   // Full bank numbers ask their own policy (api/admin-rbac.ts SECRET_READS):
-  // the view-only Support viewer gets no bank card and no request for it.
+  // a role without it gets no bank card and no request for it.
   const canSeeBank = permissions.hasPermission(
     'customer_bank_account:read' as Permission,
   );
   const canSeePayments = permissions.hasPermission('payment:read');
   const canEdit = useCanEdit();
+  const canSupportEdit = useCanSupportEdit();
   const { data: payout, isError: payoutError } = usePayoutDetails(
     canSeeBank ? customerId : null,
   );
@@ -1457,7 +1472,11 @@ export const ProfileTab = ({ customerId }: { customerId: string }) => {
       <GroupCard customerId={customerId} />
       <ReferralCard customerId={customerId} />
       {canSeeBank && (
-        <SavedBankAccountsCard customerId={customerId} canEdit={canEdit} />
+        <SavedBankAccountsCard
+          customerId={customerId}
+          canManage={canSupportEdit}
+          canEdit={canEdit}
+        />
       )}
       {canSeeBank && <VisitorSignalsCard customerId={customerId} />}
 

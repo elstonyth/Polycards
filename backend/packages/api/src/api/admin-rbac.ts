@@ -123,6 +123,12 @@ const update = (resource: string): Policy => ({
 const customerWrite = update(CORE_READ_PREFIXES.customers);
 const groupWrite = update(CORE_READ_PREFIXES['customer-groups']);
 const paymentWrite = update(CORE_READ_PREFIXES.payments);
+/** The customer-service fixes a support login makes (owner, 2026-11-19):
+ *  correct a real name, and add, remove or verify a saved bank account.
+ *  customer:update also moves money (credits, gifts, tickets) and freezes or
+ *  disables accounts, so support gets this policy instead of that one.
+ *  Declared in policies/customer-support.ts. */
+export const CUSTOMER_SUPPORT_WRITE: Policy = update('customer_support');
 /** A secret-bearing GET: its own read policy and the shared admin budget. */
 const secretRead = (matcher: string, resource: string): AdminRoute => ({
   matcher,
@@ -213,7 +219,7 @@ export const ADMIN_ROUTES: readonly AdminRoute[] = [
   // Customer-service corrections (spec 2026-10-06). The phone route's body
   // key is `new_phone` because rejectAdminPhoneWrite on middlewares.ts's
   // '/admin/customers/*' entry also matches this path.
-  ...['enable', 'real-name', 'phone', 'payout-details'].map(
+  ...['enable', 'phone', 'payout-details'].map(
     (sub): AdminRoute => ({
       matcher: `/admin/customers/*/${sub}`,
       method: 'POST',
@@ -221,6 +227,12 @@ export const ADMIN_ROUTES: readonly AdminRoute[] = [
       limits: ACTION,
     }),
   ),
+  {
+    matcher: '/admin/customers/*/real-name',
+    method: 'POST',
+    policy: CUSTOMER_SUPPORT_WRITE,
+    limits: ACTION,
+  },
   // Other accounts on this player's browser or network: carries IP addresses.
   {
     ...secretRead(
@@ -233,14 +245,22 @@ export const ADMIN_ROUTES: readonly AdminRoute[] = [
   // payout-details GET below), and the writes are support's only way to
   // change a tied account.
   secretRead('/admin/customers/*/bank-accounts', 'customer_bank_account'),
-  ...['add', 'remove', 'verify', 'name-clash'].map(
+  ...['add', 'remove', 'verify'].map(
     (sub): AdminRoute => ({
       matcher: `/admin/customers/*/bank-accounts/${sub}`,
       method: 'POST',
-      policy: customerWrite,
+      policy: CUSTOMER_SUPPORT_WRITE,
       limits: ACTION,
     }),
   ),
+  {
+    // Clearing a shared name lets it past other accounts: admins only
+    // (owner, 2026-11-04, modules/packs/ban-list-access.ts), not support.
+    matcher: '/admin/customers/*/bank-accounts/name-clash',
+    method: 'POST',
+    policy: customerWrite,
+    limits: ACTION,
+  },
   {
     // Taking a bank number off the ban list is an unban (owner, 2026-11-04):
     // the same policy as the assistant's unban_bank_number, so one role
@@ -597,9 +617,9 @@ export const CORE_PREFIX_WRITES = ADMIN_ROUTES.filter(
  *  read policy: partner logins' passwords (the players export) and full bank
  *  account numbers (a customer's payout details, a withdrawal's account). Each
  *  asks for its OWN read policy on top of the prefix's — Medusa ANDs
- *  overlapping entries — so the view-only Support viewer (player / customer /
- *  payment:read, scripts/create-support-viewer.ts) is refused, while `*:*`
- *  staff and the `*:read` desk bots pass as before. Declared in
+ *  overlapping entries — so a read role holding only the screen policy
+ *  (player / customer / payment:read) is refused, while `*:*` staff and the
+ *  `*:read` desk bots pass as before. Declared in
  *  policies/admin-surfaces.ts. Resources must be NEW names: Mercur already
  *  owns `payout_account` (its seller payouts, key-unique policy rows). Core's
  *  customer reads carry the same values in metadata: redactCustomerSecrets

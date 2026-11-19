@@ -16,7 +16,7 @@ export const assistantPolicies = definePolicies([
   },
   {
     // admin_read: any admin screen the asker's own roles open. Withheld from
-    // the per-customer Support viewer (owner, 2026-10-29: one named customer
+    // the per-customer Customer support role (owner, 2026-10-29: one named customer
     // at a time), granted to the stock and order roles.
     name: 'Polycards read assistant_browse',
     resource: 'assistant_browse',
@@ -27,9 +27,9 @@ export const assistantPolicies = definePolicies([
     // unban_account: lift a permanent ban (owner, 2026-11-03), with the saved
     // banks cleared; unban_bank_number: unban a number for one player
     // (2026-11-04), also the player page's bank-accounts/unban-number route.
-    // Granted to the Support viewer (yu) beside super admins. free_bank_number
+    // Granted to the Customer support role (yu) beside super admins. free_bank_number
     // and clear_name_clash need it too, with customer:update: admins only,
-    // not the Support viewer (owner, 2026-11-04).
+    // not the Customer support role (owner, 2026-11-04).
     name: 'Polycards update assistant_unban',
     resource: 'assistant_unban',
     operation: 'update',

@@ -255,7 +255,7 @@ describe('who the person named', () => {
 });
 
 describe('bank_save_check', () => {
-  it('reads to the Support viewer and runs in a scheduled task: it changes nothing', () => {
+  it('reads to the Customer support role and runs in a scheduled task: it changes nothing', () => {
     expect(tool('bank_save_check').needs).toEqual([
       { resource: 'customer', operation: 'read' },
       { resource: 'payment', operation: 'read' },
@@ -542,7 +542,7 @@ describe('bank_save_check', () => {
     });
   });
 
-  it('an admin-only fix says so to the Support viewer', async () => {
+  it('an admin-only fix says so to the Customer support role', async () => {
     const support = {
       userId: 'user_2',
       superAdmin: false,

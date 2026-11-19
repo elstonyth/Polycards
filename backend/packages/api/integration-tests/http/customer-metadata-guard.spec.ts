@@ -4,7 +4,6 @@ import {
   generateJwtToken,
   Modules,
 } from '@medusajs/framework/utils';
-import { supportViewerRoleId } from '../../src/scripts/create-support-viewer';
 import {
   mintSuperAdmin,
   postStoreCustomer,
@@ -197,9 +196,13 @@ medusaIntegrationTestRunner({
           );
           return tokenFor(name, role.id);
         };
-        const viewer = tokenFor(
+        // A read role on the player screens, without the secret reads. Not the
+        // Customer support role: it holds customer_bank_account:read since
+        // 2026-11-19, so bank numbers are meant to reach it.
+        const viewer = await mintRole(
           'guard-viewer',
-          await supportViewerRoleId(container),
+          ['store', 'customer', 'player', 'payment'],
+          ['read'],
         );
         const staff = await mintSuperAdmin(
           container,

@@ -13,7 +13,7 @@ import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 //  - "AI assistant browse" (only with ASSISTANT_BROWSE=1): admin_read, the
 //    assistant reading admin screens AS them (their own RBAC still applies).
 //    Given to the stock and order roles (anson@polycards.gg), withheld from
-//    the per-customer Support viewer (yu@polycards.gg), owner 2026-10-29.
+//    the per-customer Customer support role (yu@polycards.gg), owner 2026-10-29.
 // A new role only applies after the user signs out and in (the roles are
 // copied into the login session).
 

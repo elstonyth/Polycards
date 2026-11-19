@@ -61,7 +61,7 @@ beforeEach(() => {
 });
 
 describe('unban_bank_number', () => {
-  it('needs the unban policy, which the Support viewer holds', () => {
+  it('needs the unban policy, which the Customer support role holds', () => {
     expect(tool.needs).toEqual([UNBAN_NEED]);
   });
 
@@ -196,7 +196,7 @@ describe('saveProposal unban_number', () => {
     expect(packs.setPayoutBanLifted).not.toHaveBeenCalled();
   });
 
-  it('a Support viewer (no customer:update) gets no ban-list fallback on tap', async () => {
+  it('a Customer support login (no customer:update) gets no ban-list fallback on tap', async () => {
     const can = jest.fn(async (n: unknown) => n === UNBAN_NEED);
     await saveProposal(NUMBER, { userId: 'user_2', superAdmin: false, can }, container);
     expect(packs.setPayoutBanLifted).toHaveBeenCalledWith(
