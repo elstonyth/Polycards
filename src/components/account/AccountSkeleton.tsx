@@ -23,12 +23,7 @@ import { cn } from '@/lib/utils';
 // line) get none.
 
 export type AccountSkeletonKind =
-  | 'vault'
-  | 'vault-history'
-  | 'lucky-draw'
-  | 'me'
-  | 'coin-flip'
-  | 'generic';
+  'vault' | 'vault-history' | 'lucky-draw' | 'me' | 'coin-flip' | 'generic';
 
 const under = (pathname: string, prefix: string) =>
   pathname === prefix || pathname.startsWith(`${prefix}/`);
