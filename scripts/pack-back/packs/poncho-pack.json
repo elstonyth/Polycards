@@ -1,0 +1,20 @@
+{
+  "name": "poncho-pack",
+  "family": "graded",
+  "_comment": "restyle-back.cjs: the 151 back restyled to a graded front. Only the colours are per pack; the film level, sheen, grain and chroma are measured from the front by the tool.",
+  "front": "docs/research/home-3d/pack-back/fronts/poncho-pack-front.webp",
+  "backRef": "docs/research/home-3d/pack-back/151-back-a.png",
+  "ref": "151",
+  "outDir": "docs/research/home-3d/pack-back/poncho-pack",
+  "palette": {
+    "_source": "poncho-pack-front.webp. metal = median of the brightest 30% of the tier lettering box (150-780 x 1293-1387); pale = median of the brightest 25% of the logo box (285-580 x 555-915); dark = median of the darkest 10% of the body",
+    "panel": "#b2d9ef",
+    "panelInk": "#030509",
+    "band": "#88a8c2",
+    "bandInk": "#030509",
+    "text": "#b2d9ef",
+    "outline": "#88a8c2"
+  },
+  "printHold": false,
+  "_printHold": "Accepted plate: its live zones already meet the print-area contrast target as printed, so the print-area hold stays off and the plate reproduces byte for byte."
+}

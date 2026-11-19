@@ -1,0 +1,94 @@
+{
+  "name": "ah",
+  "_paths": "Relative paths resolve against the repo root. backRef is made by recolour-back.cjs (step ref) from the 151 back with its live zones blanked.",
+  "front": "docs/research/home-3d/pack-back/fronts/ah-front.webp",
+  "backRef": "docs/research/home-3d/pack-back/ah/ah-back-ref.png",
+  "outDir": "docs/research/home-3d/pack-back/ah",
+  "back": {
+    "_comment": "The 151 numbers moved by recolour.scale and the centring pad (recolour-back.cjs checks them). backRef pixels.",
+    "bodyTop": 131,
+    "bodyBottom": 1531,
+    "textTop": 195,
+    "textBottom": 1452,
+    "stripRight": 87,
+    "seam": [458, 540],
+    "xL": 59,
+    "xR": 874,
+    "inset": 1.5,
+    "edgeThreshold": 4
+  },
+  "seamMode": "crimp",
+  "feather": { "start": 0, "end": 7, "shadow": 0.22, "shadowLen": 12 },
+  "rim": { "solid": 5, "fade": 16 },
+  "strip": {
+    "rimBand": [4, 34],
+    "rimBlur": 18,
+    "chromaGain": 1.0,
+    "contrast": 1.8,
+    "drift": 0.35,
+    "driftBlur": 24,
+    "lift": -4,
+    "navyToNeon": [22, 62]
+  },
+  "recolour": {
+    "source": {
+      "back": "docs/research/home-3d/pack-back/151-back-a.png",
+      "matched": "docs/research/home-3d/pack-back/151-back-matched.png",
+      "plate": "docs/research/home-3d/pack-back/151-back-plate.png",
+      "geometry": "docs/research/home-3d/pack-back/151-back-geometry.json"
+    },
+    "scale": 1,
+    "_scale": "front body 873.2 px holds the 151 text block 1:1 (no resampling)",
+    "regions": {
+      "stripRight": 73,
+      "seam": [444, 526],
+      "band": [348, 443],
+      "bandBorder": [347, 348],
+      "rows": [120, 1545],
+      "diagonalScan": [
+        [80, 160, 560],
+        [262, 340, 450]
+      ],
+      "diagonalHalf": 2
+    },
+    "inks": {
+      "white": {
+        "region": "navy",
+        "core": { "Lmin": 55, "Cmax": 20 },
+        "to": "same"
+      },
+      "goldLine": {
+        "region": "navy",
+        "core": { "bmin": 20, "Lmin": 35 },
+        "to": "same"
+      },
+      "goldBand": {
+        "region": "band",
+        "core": { "bmin": 20 },
+        "to": "bandReadable"
+      },
+      "whiteBand": {
+        "region": "band",
+        "core": { "Lmin": 80, "Cmax": 20 },
+        "to": "bandReadable"
+      },
+      "logo": { "region": "pale", "core": { "Lmax": 75 }, "to": "navy" }
+    },
+    "darkInkFrom": "logo",
+    "inkRing": 2,
+    "fillIterations": 400,
+    "targets": {
+      "_calibration": "ground: set so the back ground patch (right panel, flat) relates to the front dark ground (L<22 median) as 151 does: L x0.95, chroma x0.645, hue -9 deg (harness-raw/ground-match.cjs measures it).",
+      "_sampled": "front: dark L<22 median L 6.3 C 13.2 h -28; saturated peaks h345 L55 #df48a5 (magenta), h55 L63 C85 #fa6f09 (orange), h95 L91 C41 #f9e496 (wing cream); pale L>88 median 93.6/0.4/1.6 #efece9",
+      "navy": { "lab": [7.6, 3.2, -2.8], "mode": "ratio", "floorL": 2 },
+      "band": { "lab": [64, 42, 60], "mode": "offset", "kL": 0.8 },
+      "_pale": "the wing cream's hue (h95) at a panel's softness (C18), L93",
+      "pale": {
+        "lab": [93, -1.6, 17.9],
+        "mode": "offset",
+        "chroma": "offset",
+        "kd": 1
+      }
+    }
+  }
+}

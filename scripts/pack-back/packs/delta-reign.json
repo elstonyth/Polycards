@@ -1,0 +1,93 @@
+{
+  "name": "delta-reign",
+  "_paths": "Relative paths resolve against the repo root. backRef is made by recolour-back.cjs (step ref) from the 151 back with its live zones blanked.",
+  "front": "docs/research/home-3d/pack-back/fronts/delta-reign-front.webp",
+  "backRef": "docs/research/home-3d/pack-back/delta-reign/delta-reign-back-ref.png",
+  "outDir": "docs/research/home-3d/pack-back/delta-reign",
+  "back": {
+    "_comment": "The 151 numbers moved by recolour.scale and the centring pad (recolour-back.cjs checks them). backRef pixels.",
+    "bodyTop": 131,
+    "bodyBottom": 1531,
+    "textTop": 195,
+    "textBottom": 1452,
+    "stripRight": 82,
+    "seam": [453, 535],
+    "xL": 54,
+    "xR": 869,
+    "inset": 1.5,
+    "edgeThreshold": 4
+  },
+  "seamMode": "crimp",
+  "feather": { "start": 0, "end": 7, "shadow": 0.22, "shadowLen": 12 },
+  "rim": { "solid": 5, "fade": 16 },
+  "strip": {
+    "rimBand": [4, 34],
+    "rimBlur": 18,
+    "chromaGain": 1.0,
+    "contrast": 1.8,
+    "drift": 0.35,
+    "driftBlur": 24,
+    "lift": -4,
+    "navyToNeon": [22, 62]
+  },
+  "recolour": {
+    "source": {
+      "back": "docs/research/home-3d/pack-back/151-back-a.png",
+      "matched": "docs/research/home-3d/pack-back/151-back-matched.png",
+      "plate": "docs/research/home-3d/pack-back/151-back-plate.png",
+      "geometry": "docs/research/home-3d/pack-back/151-back-geometry.json"
+    },
+    "scale": 1,
+    "_scale": "front body 874.7 px holds the 151 text block 1:1 (no resampling)",
+    "regions": {
+      "stripRight": 73,
+      "seam": [444, 526],
+      "band": [348, 443],
+      "bandBorder": [347, 348],
+      "rows": [120, 1545],
+      "diagonalScan": [
+        [80, 160, 560],
+        [262, 340, 450]
+      ],
+      "diagonalHalf": 2
+    },
+    "inks": {
+      "white": {
+        "region": "navy",
+        "core": { "Lmin": 55, "Cmax": 20 },
+        "to": "same"
+      },
+      "goldLine": {
+        "region": "navy",
+        "core": { "bmin": 20, "Lmin": 35 },
+        "to": "same"
+      },
+      "goldBand": {
+        "region": "band",
+        "core": { "bmin": 20 },
+        "to": "bandReadable"
+      },
+      "whiteBand": {
+        "region": "band",
+        "core": { "Lmin": 80, "Cmax": 20 },
+        "to": "bandReadable"
+      },
+      "logo": { "region": "pale", "core": { "Lmax": 75 }, "to": "navy" }
+    },
+    "darkInkFrom": "logo",
+    "inkRing": 2,
+    "fillIterations": 400,
+    "targets": {
+      "_calibration": "ground: set so the back ground patch (right panel, flat) relates to the front dark ground (L<22 median) as 151 does: L x0.95, chroma x0.645, hue -9 deg (harness-raw/ground-match.cjs measures it). pale = front pale (L>88) median, L -2.4.",
+      "_sampled": "front: dark green (L<22, hue 120-180, half the dark pixels) median L 11.8 C 18.4 h 150; saturated peaks h95 L87 #f4da3d, h105 L95 #f7f678, h85 L79 C77 #f2bc21 (gold), h145 L42 #187332 (green), h335 #e743c8 (magenta); pale L>88 median 96.8/-6.7/10.0 #f1f9e2",
+      "navy": { "lab": [18.2, -10.6, 8.6], "mode": "ratio", "floorL": 2 },
+      "band": { "lab": [79, 6, 68], "mode": "offset", "kL": 0.7 },
+      "pale": {
+        "lab": [94.4, -6.7, 10.0],
+        "mode": "offset",
+        "chroma": "offset",
+        "kd": 1
+      }
+    }
+  }
+}

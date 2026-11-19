@@ -59,7 +59,15 @@ export type PackPrintSpec = {
   ink: { color: string; softness: number };
   /** Space kept clear inside a zone's long edge (u) when fitting, px. */
   inset: number;
-  price: { font: PrintFont; x: number; baseline: number };
+  price: {
+    font: PrintFont;
+    x: number;
+    baseline: number;
+    /** A price is never cut or wrapped: one wider than its room shrinks to
+     *  fit whatever it takes, and below this scale the layout's fit report
+     *  flags it (belowMin). Absent = no floor to report against. */
+    minScale?: number;
+  };
   productLine: {
     font: PrintFont;
     x: number;
@@ -121,6 +129,18 @@ export type PrintLayout = {
   /** Zones in text space (u along, v down), for checks and the draw bounds. */
   zones: Record<keyof PackPrintSpec['zones'], TextRect>;
   ink: PackPrintSpec['ink'];
+  /** How each field fitted: scale against the spec's size (1 = full size). */
+  fit?: PrintFit;
+};
+
+/** What the layout had to do to make each field fit its zone. */
+export type PrintFit = {
+  price?: { scale: number; belowMin: boolean };
+  /** `dropped`: trailing facts left off (a wording change: treat as a fault). */
+  productLine?: { scale: number; dropped: string[] };
+  odds?: { scale: number };
+  /** `overflow`: the last line sits past the lowest baseline even at minScale. */
+  buyback?: { scale: number; lines: number; overflow: boolean };
 };
 
 /** A rectangle in text space: u along the lines, v down the stack. */
@@ -250,13 +270,20 @@ export function layoutPackPrint(
       width: runWidth(text, font, measure),
     });
 
+  const fit: PrintFit = {};
+
   // --- price and product line (headline zone) ---------------------------------
   const lineEnd = zones.headline.u1 - inset;
   if (details.price) {
     const x = spec.price.x * k;
     let font = scaleFont(spec.price.font, k);
     const w = runWidth(details.price, font, measure);
-    if (w > lineEnd - x) font = scaleFont(font, (lineEnd - x) / w);
+    let scale = 1;
+    if (w > lineEnd - x) {
+      scale = (lineEnd - x) / w;
+      font = scaleFont(font, scale);
+    }
+    fit.price = { scale, belowMin: scale < (spec.price.minScale ?? 0) };
     push('price', details.price, font, x, spec.price.baseline * kv);
   }
   const parts = details.productLine.map((p) => p.trim()).filter(Boolean);
@@ -284,6 +311,10 @@ export function layoutPackPrint(
     const text = shown.join(s.separator);
     const w = runWidth(text, font, measure);
     if (w > room) font = scaleFont(font, room / w);
+    fit.productLine = {
+      scale: font.size / base.size,
+      dropped: parts.slice(shown.length),
+    };
     push('productLine', text, font, x, s.baseline * kv);
   }
 
@@ -320,6 +351,7 @@ export function layoutPackPrint(
       const room = (c.valueRight - c.labelX) * k;
       if (need > room) font = scaleFont(font, room / need);
     }
+    fit.odds = { scale: font.size / (s.font.size * k) };
     odds.forEach((row, i) => {
       const c = s.columns[Math.floor(i / perCol)];
       if (!c) return;
@@ -358,6 +390,13 @@ export function layoutPackPrint(
     lines.forEach((line, i) =>
       push('buyback', line, font, x, first + i * s.pitch * kv * scale),
     );
+    fit.buyback = {
+      scale,
+      lines: lines.length,
+      overflow:
+        lines.length > 1 &&
+        first + (lines.length - 1) * s.pitch * kv * scale > last + 1e-9,
+    };
   }
 
   return {
@@ -369,6 +408,7 @@ export function layoutPackPrint(
     zones,
     // softness in this texture's px
     ink: { color: spec.ink.color, softness: spec.ink.softness * k },
+    fit,
   };
 }
 

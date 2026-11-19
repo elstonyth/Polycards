@@ -1,0 +1,29 @@
+{
+  "name": "diamond-pack",
+  "family": "graded",
+  "_comment": "restyle-back.cjs: the 151 back restyled to a graded front. Only the colours are per pack; the film level, sheen, grain and chroma are measured from the front by the tool.",
+  "front": "docs/research/home-3d/pack-back/fronts/diamond-pack-front.webp",
+  "backRef": "docs/research/home-3d/pack-back/151-back-a.png",
+  "ref": "151",
+  "outDir": "docs/research/home-3d/pack-back/diamond-pack",
+  "palette": {
+    "_source": "diamond-pack-front.webp. metal = median of the brightest 30% of the tier lettering box (150-780 x 1290-1383); pale = median of the brightest 25% of the logo box (285-550 x 705-1005); dark = median of the darkest 10% of the body",
+    "panel": "#f1eff2",
+    "panelInk": "#010101",
+    "band": "#4384a6",
+    "bandInk": "#010101",
+    "text": "#f1eff2",
+    "outline": "#4384a6",
+    "_decision": "Owner decision 2026-11-19: band and odds outline in the front's blue (median of its chromatic hue-240 pixels); the neutral tier metal is variant \"neutral\"."
+  },
+  "variants": {
+    "neutral": {
+      "palette": {
+        "band": "#aaa8a9",
+        "outline": "#aaa8a9"
+      }
+    }
+  },
+  "printHold": false,
+  "_printHold": "Accepted plate: its live zones already meet the print-area contrast target as printed, so the print-area hold stays off and the plate reproduces byte for byte."
+}

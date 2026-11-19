@@ -1,0 +1,20 @@
+{
+  "name": "silver-pack",
+  "family": "graded",
+  "_comment": "restyle-back.cjs: the 151 back restyled to a graded front. Only the colours are per pack; the film level, sheen, grain and chroma are measured from the front by the tool.",
+  "front": "docs/research/home-3d/pack-back/fronts/silver-pack-front.webp",
+  "backRef": "docs/research/home-3d/pack-back/151-back-a.png",
+  "ref": "151",
+  "outDir": "docs/research/home-3d/pack-back/silver-pack",
+  "palette": {
+    "_source": "silver-pack-front.webp. metal = median of the brightest 30% of the tier lettering box (150-780 x 1270-1366); pale = median of the brightest 25% of the logo box (310-580 x 600-885); dark = median of the darkest 10% of the body",
+    "panel": "#e8e6e9",
+    "panelInk": "#202123",
+    "band": "#b7b6b8",
+    "bandInk": "#202123",
+    "text": "#e8e6e9",
+    "outline": "#b7b6b8"
+  },
+  "seamFlatten": true,
+  "_seamFlatten": "Silver's crimp carries big reflection spots that repeated along the fin; the fin takes each crimp row's median instead."
+}

@@ -1,0 +1,32 @@
+{
+  "name": "platinum-pack",
+  "family": "graded",
+  "_comment": "restyle-back.cjs: the 151 back restyled to a graded front. Only the colours are per pack; the film level, sheen, grain and chroma are measured from the front by the tool.",
+  "front": "docs/research/home-3d/pack-back/fronts/platinum-pack-front.webp",
+  "backRef": "docs/research/home-3d/pack-back/151-back-a.png",
+  "ref": "151",
+  "outDir": "docs/research/home-3d/pack-back/platinum-pack",
+  "palette": {
+    "_source": "platinum-pack-front.webp. metal = median of the brightest 30% of the tier lettering box (150-780 x 1251-1352); pale = median of the brightest 25% of the logo box (285-550 x 540-855); dark = median of the darkest 10% of the body",
+    "panel": "#e9e0e6",
+    "panelInk": "#131418",
+    "band": "#9f6eb2",
+    "bandInk": "#131418",
+    "text": "#e9e0e6",
+    "outline": "#9f6eb2",
+    "_decision": "Owner decision 2026-11-19: band and odds outline in the front's purple (median of the most chromatic 30% of its hue-330 pixels), dark ink; the neutral tier metal is variant \"neutral\"."
+  },
+  "filmMatch": {
+    "_comment": "Platinum's body is a gunmetal film darker than its sheen bands: restyle-back.cjs lowers the film level to the front body's 25th-percentile L* (below the level the film scales with it, above it the sheen keeps its height).",
+    "levelPct": 0.25,
+    "sheenKeep": 1
+  },
+  "variants": {
+    "neutral": {
+      "palette": {
+        "band": "#adacb0",
+        "outline": "#adacb0"
+      }
+    }
+  }
+}
