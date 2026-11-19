@@ -121,6 +121,13 @@ export const GatewayDeposit = model
     // reported; the migration marked every deposit settled before it as
     // reported, so history is never replayed.
     pixel_reported_at: model.dateTime().nullable(),
+    // A short payment credited by hand for what arrived: the gateway will not
+    // approve a different amount, so it keeps this order FAILED and books the
+    // arrived sum as its OWN manual entry (GlobePay365: Merchant Reference ID
+    // MD…). That entry's merchant reference, linked on Settlement after a live
+    // check (deposit-adjustment-entry.ts), is what the audit then checks in
+    // place of the order. One entry backs one row (partial unique index).
+    gateway_adjustment_ref: model.text().nullable(),
   })
   .indexes([
     // Callback lookup path: they hand us a MerchantTransactionId and we must
@@ -141,6 +148,12 @@ export const GatewayDeposit = model
       name: 'IDX_gateway_deposit_gateway_transaction_id',
       on: ['gateway_transaction_id'],
       where: 'deleted_at IS NULL',
+    },
+    {
+      name: 'IDX_gateway_deposit_adjustment_ref_unique',
+      on: ['gateway_adjustment_ref'],
+      unique: true,
+      where: 'gateway_adjustment_ref IS NOT NULL AND deleted_at IS NULL',
     },
   ]);
 

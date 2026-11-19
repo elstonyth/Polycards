@@ -17,6 +17,7 @@ import {
   GATEWAY_AUDIT_FINDING_REPEAT_MS,
   GATEWAY_AUDIT_REPEAT_MS,
   GATEWAY_AUDIT_WINDOW_MS,
+  adjustmentAuditNote,
   depositAuditNote,
   ledgerTrail,
   stampNote,
@@ -91,6 +92,19 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
     { filter: fresh, order: { created_at: 'ASC' } },
     { filter: stale, order: { audited_at: 'ASC' } },
   ];
+  // Deposits only: a row linked to the gateway's manual entry for a short
+  // payment is re-checked daily at ANY age, not just inside the 7-day window.
+  // Linking clears the note, so without this an old row would leave every
+  // other step for good, and a later change at the gateway would go unseen.
+  const linked = {
+    filter: {
+      gateway_adjustment_ref: { $ne: null },
+      audited_at: { $lt: repeatBefore },
+      gateway: { $nin: [...RETIRED_GATEWAYS] },
+    },
+    order: { audited_at: 'ASC' as const },
+    cap: GATEWAY_AUDIT_FINDING_BATCH,
+  };
   // One batch per kind, filled in that order; a row two steps both pick is
   // checked once.
   async function queue<R extends { id: string }>(
@@ -99,10 +113,13 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
       opts: { take: number; order: Record<string, 'ASC' | 'DESC'> },
     ) => Promise<R[]>,
     status: string[],
+    extra: typeof steps = [],
   ): Promise<R[]> {
     const out: R[] = [];
     const seen = new Set<string>();
-    for (const step of steps) {
+    // `extra` goes after the never-checked rows and before the daily
+    // re-checks, which would otherwise fill what is left of every batch.
+    for (const step of [steps[0], steps[1], ...extra, ...steps.slice(2)]) {
       const take = Math.min(
         GATEWAY_AUDIT_BATCH - out.length,
         step.cap ?? GATEWAY_AUDIT_BATCH,
@@ -128,6 +145,7 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
   const deposits = await queue(
     (f, o) => packs.listGatewayDeposits(f as never, o),
     ['settled', 'failed', 'expired'],
+    [linked],
   );
   for (const row of deposits) {
     let answer: GatewayAnswer;
@@ -139,7 +157,10 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
       await packs.updateGatewayDeposits({
         id: row.id,
         audited_at: now,
-        ...stampNote(row, `gateway "${row.gateway}" is not configured here — not audited`),
+        ...stampNote(
+          row,
+          `gateway "${row.gateway}" is not configured here — not audited`,
+        ),
       });
       findings += 1;
       continue;
@@ -170,23 +191,60 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
     const audited = {
       status: row.status,
       amount: toOptionalMoney(row.amount_settled),
+      requested: toOptionalMoney(row.amount_requested),
     };
-    // Rewritten against the ledger only when the gateway disagrees: most rows
-    // agree, and this costs two more reads.
-    const note =
-      depositAuditNote(audited, answer) &&
-      depositAuditNote(
-        audited,
-        answer,
-        await ledgerTrail(packs, {
-          customerId: row.customer_id,
-          anchor: topupIdempotencyReference(
-            row.customer_id,
-            row.merchant_transaction_id,
-          ),
-          refs: [row.merchant_transaction_id, row.gateway_transaction_id],
-        }),
-      );
+    let note: string | null;
+    const entryRef = row.gateway_adjustment_ref;
+    if (
+      entryRef &&
+      row.status === 'settled' &&
+      answer.kind === 'detail' &&
+      answer.state === 'failed'
+    ) {
+      // A short payment credited by hand: the gateway keeps the order FAILED
+      // and books what arrived as its own manual entry, linked here on
+      // Settlement. That entry is what backs the credit, so it is what gets
+      // checked. Same rule as the order: an ambiguous answer stamps nothing.
+      let entry: GatewayAnswer;
+      try {
+        const e = await getDepositDetail(entryRef, config, rowFx(row));
+        entry = { kind: 'detail', state: e.state, amount: Number(e.amount) };
+        netAmount =
+          e.state === 'success' && Number.isFinite(Number(e.netAmount))
+            ? Number(e.netAmount)
+            : null;
+      } catch (error) {
+        if (classifyRequeryError(error).kind !== 'not-found') {
+          skipped += 1;
+          logger.warn(
+            `[gateway-audit] deposit ${row.merchant_transaction_id}: manual entry ${entryRef} answer ambiguous (${
+              error instanceof Error ? error.message : String(error)
+            }) — retry next run`,
+          );
+          continue;
+        }
+        entry = { kind: 'not-found' };
+        netAmount = null;
+      }
+      note = adjustmentAuditNote(audited, entryRef, entry);
+    } else {
+      // Rewritten against the ledger only when the gateway disagrees: most
+      // rows agree, and this costs two more reads.
+      note =
+        depositAuditNote(audited, answer) &&
+        depositAuditNote(
+          audited,
+          answer,
+          await ledgerTrail(packs, {
+            customerId: row.customer_id,
+            anchor: topupIdempotencyReference(
+              row.customer_id,
+              row.merchant_transaction_id,
+            ),
+            refs: [row.merchant_transaction_id, row.gateway_transaction_id],
+          }),
+        );
+    }
     await packs.updateGatewayDeposits({
       id: row.id,
       audited_at: now,
@@ -217,7 +275,10 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
     if (!config) {
       await stampWithdrawalAudit(packs, row.id, {
         audited_at: now,
-        ...stampNote(row, `gateway "${row.gateway}" is not configured here — not audited`),
+        ...stampNote(
+          row,
+          `gateway "${row.gateway}" is not configured here — not audited`,
+        ),
       });
       findings += 1;
       continue;

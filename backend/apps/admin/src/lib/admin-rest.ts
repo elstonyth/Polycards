@@ -798,9 +798,8 @@ import type {
   GatewayAudit,
 } from '@acme/api/admin/payments/audit';
 import type { MoneyIntegrity } from '@acme/api/admin/payments/integrity';
-import type {
-  CreditDepositResult,
-} from '@acme/api/admin/payments/deposits/[id]/credit';
+import type { CreditDepositResult } from '@acme/api/admin/payments/deposits/[id]/credit';
+import type { LinkAdjustmentEntryResult } from '@acme/api/admin/payments/deposits/[id]/adjustment-entry';
 import type {
   GatewayPreflightRefusal,
   PaymentGateway,
@@ -853,11 +852,7 @@ export const acknowledgeAuditFinding = (body: {
   id: string;
   note: string;
   reason: string;
-}) =>
-  postJson<AcknowledgeResult>(
-    '/admin/payments/audit/acknowledge',
-    body,
-  );
+}) => postJson<AcknowledgeResult>('/admin/payments/audit/acknowledge', body);
 
 export const getMoneyIntegrity = () =>
   getJson<MoneyIntegrity>('/admin/payments/integrity');
@@ -867,6 +862,17 @@ export const creditGatewayDeposit = (body: { id: string; reason: string }) =>
   postJson<CreditDepositResult>(
     `/admin/payments/deposits/${encodeURIComponent(body.id)}/credit`,
     { reason: body.reason },
+  );
+
+/** Settlement's Link gateway entry: the backend checks the entry live first. */
+export const linkGatewayAdjustmentEntry = (body: {
+  id: string;
+  ref: string;
+  reason: string;
+}) =>
+  postJson<LinkAdjustmentEntryResult>(
+    `/admin/payments/deposits/${encodeURIComponent(body.id)}/adjustment-entry`,
+    { ref: body.ref, reason: body.reason },
   );
 
 export async function getGatewayAudit(currency: string): Promise<GatewayAudit> {
@@ -1813,12 +1819,17 @@ export interface WithdrawalApproveResult {
  *  or the row was never actually debited — each with its own specific
  *  MedusaError message, which is what reaches the operator's toast. No body:
  *  the route acts only on `:id` and the session's admin actor. */
-export const approveWithdrawal = (id: string, verifyDevicePeers: string[] = []) =>
+export const approveWithdrawal = (
+  id: string,
+  verifyDevicePeers: string[] = [],
+) =>
   postJson<WithdrawalApproveResult>(
     `/admin/payments/withdrawals/${encodeURIComponent(id)}/approve`,
     // Also confirms these accounts (the ones the review drawer showed) as one
     // household with it, so its next withdrawal is not held for them (ADR 0018).
-    verifyDevicePeers.length > 0 ? { verify_device_peers: verifyDevicePeers } : {},
+    verifyDevicePeers.length > 0
+      ? { verify_device_peers: verifyDevicePeers }
+      : {},
   );
 
 /** One account on the review screen, money in RM. */

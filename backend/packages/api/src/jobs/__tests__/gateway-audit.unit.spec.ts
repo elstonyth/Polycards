@@ -197,10 +197,18 @@ describe('gateway audit job', () => {
     expect(calls[0][0]).toMatchObject({ audit_note: { $ne: null } });
     expect(calls[1][0]).toMatchObject({ audited_at: null });
     expect(calls[1][1]).toEqual({ take: 50, order: { created_at: 'ASC' } });
+    // Deposits linked to a gateway entry next, a capped share at any age.
     expect(calls[2][0]).toMatchObject({
+      gateway_adjustment_ref: { $ne: null },
+    });
+    expect(calls[2][1]).toEqual({ take: 10, order: { audited_at: 'ASC' } });
+    // The daily re-checks take what is left (the linked query returned the
+    // stale row here too; it is checked once).
+    expect(calls[3][0]).toMatchObject({
       audited_at: { $lt: expect.any(Date) },
     });
-    expect(calls[2][1]).toEqual({ take: 49, order: { audited_at: 'ASC' } });
+    expect(calls[3][0]).not.toHaveProperty('gateway_adjustment_ref');
+    expect(calls[3][1]).toEqual({ take: 48, order: { audited_at: 'ASC' } });
     const ids = (
       h.packs.updateGatewayDeposits.mock.calls as unknown as [{ id: string }][]
     ).map((c) => c[0].id);
@@ -368,6 +376,161 @@ describe('gateway audit job', () => {
     });
   });
 
+  // From the real 2026-11-08 row: asked RM 64.56, 14 of 16 USDT arrived,
+  // credited RM 56.49 by hand; the gateway keeps the order FAILED.
+  describe('a short payment credited by hand', () => {
+    const short = {
+      ...settledDeposit,
+      id: 'gpd_short',
+      customer_id: 'cus_s',
+      amount_settled: '56.49',
+      amount_requested: '64.56',
+    };
+    const run = async (row: Record<string, unknown>) => {
+      fakeGateway.script({ getDepositDetail: { state: 'failed', amount: 0 } });
+      const h = harness([row]);
+      await gatewayAuditJob(h.container as never);
+      return (
+        h.packs.updateGatewayDeposits.mock.calls as unknown as [
+          Record<string, unknown>,
+        ][]
+      )[0][0];
+    };
+
+    it('gets the short-payment note, not the alarm', async () => {
+      const update = await run(short);
+      expect(update.audit_note).toMatch(
+        /credited RM 56\.49 of RM 64\.56 asked/,
+      );
+      expect(update.audit_note).not.toMatch(/without gateway confirmation/);
+    });
+
+    it('keeps an acknowledgement of the alarm it replaces', async () => {
+      const alarm =
+        'gateway says FAILED but the row is settled — credit issued without gateway confirmation, investigate';
+      const update = await run({
+        ...short,
+        audit_note: alarm,
+        audit_ack_note: alarm,
+        audit_ack_by: 'ops@test.dev',
+        audit_ack_at: new Date(0),
+      });
+      expect(update.audit_ack_note).toBe(update.audit_note);
+      expect(update).not.toHaveProperty('audit_ack_by');
+    });
+  });
+
+  // The order stays FAILED at the gateway; the linked manual entry is the
+  // record that backs the hand credit, so the audit checks that instead.
+  describe("a short payment linked to the gateway's manual entry", () => {
+    const linked = {
+      ...settledDeposit,
+      id: 'gpd_linked',
+      customer_id: 'cus_l',
+      amount_settled: '56.49',
+      amount_requested: '64.56',
+      gateway_adjustment_ref: 'MD-ENTRY-1',
+    };
+    const byRef =
+      (entry: Record<string, unknown> | Error) =>
+      (): Record<string, unknown> => {
+        const ref = fakeGateway.calls.depositDetails.at(-1);
+        if (ref === 'PC-1') return { state: 'failed', amount: 0 };
+        if (entry instanceof Error) throw entry;
+        return entry;
+      };
+    const run = async (
+      entry: Record<string, unknown> | Error,
+      row = linked,
+    ) => {
+      fakeGateway.script({ getDepositDetail: byRef(entry) as never });
+      const h = harness([row]);
+      await gatewayAuditJob(h.container as never);
+      return h;
+    };
+    const update = (h: Awaited<ReturnType<typeof run>>) =>
+      (
+        h.packs.updateGatewayDeposits.mock.calls as unknown as [
+          Record<string, unknown>,
+        ][]
+      )[0]?.[0];
+
+    it('clears the finding when the entry is paid for what was credited', async () => {
+      const h = await run({ state: 'success', amount: 56.49 });
+      expect(fakeGateway.calls.depositDetails).toEqual(['PC-1', 'MD-ENTRY-1']);
+      expect(update(h)).toMatchObject({ id: 'gpd_linked', audit_note: null });
+      expect(h.logger.error).not.toHaveBeenCalled();
+    });
+
+    it('names the entry when it paid a different sum', async () => {
+      const h = await run({ state: 'success', amount: 50 });
+      expect(update(h)?.audit_note).toBe(
+        "gateway's manual entry MD-ENTRY-1 paid 50.00, row credited 56.49 — investigate",
+      );
+    });
+
+    it('is loud when the gateway has no such entry', async () => {
+      const h = await run(
+        new GatewayError('Not found', [], 400, false, { result: 'not-found' }),
+      );
+      expect(update(h)?.audit_note).toMatch(
+        /NO record of manual entry MD-ENTRY-1/,
+      );
+    });
+
+    it('leaves the row untouched when the entry lookup is ambiguous', async () => {
+      const h = await run(new GatewayError('their outage', [], 500));
+      expect(h.packs.updateGatewayDeposits).not.toHaveBeenCalled();
+      expect(h.logger.warn).toHaveBeenCalledWith(
+        expect.stringMatching(/MD-ENTRY-1.*retry next run/),
+      );
+    });
+
+    // A link clears the note, so an old linked row would otherwise drop out
+    // of every step (security review, 2026-11-18).
+    it('re-checks linked deposits daily at any age, payouts never', async () => {
+      const h = harness([]);
+      const before = Date.now();
+      await gatewayAuditJob(h.container as never);
+      const filters = (
+        h.packs.listGatewayDeposits.mock.calls as unknown as [
+          Record<string, unknown>,
+          { take: number; order: Record<string, string> },
+        ][]
+      ).filter(([f]) => 'gateway_adjustment_ref' in f);
+      expect(filters).toHaveLength(1);
+      const [[filter, opts]] = filters as unknown as [
+        {
+          gateway_adjustment_ref: unknown;
+          audited_at: { $lt: Date };
+          gateway: { $nin: string[] };
+          created_at?: unknown;
+        },
+        { take: number },
+      ][];
+      expect(filter.gateway_adjustment_ref).toEqual({ $ne: null });
+      expect(filter.created_at).toBeUndefined();
+      expect(filter.gateway.$nin).toContain('globepay');
+      const age = before - filter.audited_at.$lt.getTime();
+      expect(age).toBeGreaterThanOrEqual(24 * 60 * 60 * 1000 - 1000);
+      expect(age).toBeLessThan(25 * 60 * 60 * 1000);
+      expect(opts.take).toBe(10);
+      for (const [f] of h.packs.listGatewayWithdrawals.mock
+        .calls as unknown as [Record<string, unknown>][]) {
+        expect(f).not.toHaveProperty('gateway_adjustment_ref');
+      }
+    });
+
+    it('never asks about the entry while the order itself agrees', async () => {
+      fakeGateway.script({
+        getDepositDetail: { state: 'success', amount: 56.49 },
+      });
+      const h = harness([linked]);
+      await gatewayAuditJob(h.container as never);
+      expect(fakeGateway.calls.depositDetails).toEqual(['PC-1']);
+    });
+  });
+
   it('does nothing while the real-gateway switch is off', async () => {
     process.env.GATEWAY_ENABLED = 'false';
     const h = harness([settledDeposit]);
@@ -392,7 +555,8 @@ describe('gateway audit job — payout net_amount', () => {
   });
   const lastWithdrawalUpdate = (h: ReturnType<typeof harness>) =>
     (h.packs.updateGatewayWithdrawals.mock.calls as unknown[][]).at(-1)?.[0] as
-      Record<string, unknown> | undefined;
+      | Record<string, unknown>
+      | undefined;
 
   it('backfills a NULL payout net from the gateway’s answer', async () => {
     fakeGateway.script({

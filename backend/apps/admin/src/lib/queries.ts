@@ -65,6 +65,7 @@ import {
   getGatewayAudit,
   acknowledgeAuditFinding,
   creditGatewayDeposit,
+  linkGatewayAdjustmentEntry,
   getMoneyIntegrity,
   getPaymentGateway,
   savePaymentGateway,
@@ -463,6 +464,17 @@ export const useCreditDeposit = () => {
   return useMutation({
     mutationFn: creditGatewayDeposit,
     onSuccess: () => toast.success(t('settlement.creditedToast')),
+    onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.gatewayAuditKey }),
+  });
+};
+
+export const useLinkAdjustmentEntry = () => {
+  const qc = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: linkGatewayAdjustmentEntry,
+    onSuccess: () => toast.success(t('settlement.linkedToast')),
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
     onSettled: () => qc.invalidateQueries({ queryKey: qk.gatewayAuditKey }),
   });
