@@ -149,7 +149,7 @@ const nextConfig: NextConfig = {
       // Unhashed and sometimes replaced under the same name, so a day and not
       // `immutable`. They shipped max-age=0, so every page view asked a pod again.
       {
-        source: '/:dir(images|sounds|branding|fonts|seo)/:path*',
+        source: '/:dir(images|sounds|branding|fonts|seo|pack-3d)/:path*',
         headers: [
           {
             key: 'Cache-Control',

@@ -45,6 +45,8 @@ export interface BrandLoaderProps {
   ready: boolean;
   /** Called once, after the exit fade, when the loader has unmounted its overlay. */
   onDone?: () => void;
+  /** Called once, when the exit fade starts (what it covers may begin to enter). */
+  onLeave?: () => void;
   /** Earliest exit in ms (default 1600, so the reveal always completes). */
   minMs?: number;
   /** Exit after this many ms even if `ready` never comes (default 6000). */
@@ -66,6 +68,7 @@ export interface BrandLoaderProps {
 export function BrandLoader({
   ready,
   onDone,
+  onLeave,
   minMs = DEFAULT_TIMINGS.minMs,
   maxMs = DEFAULT_TIMINGS.maxMs,
   exitMs = DEFAULT_TIMINGS.exitMs,
@@ -93,6 +96,15 @@ export function BrandLoader({
   useEffect(() => {
     onDoneRef.current = onDone;
   }, [onDone]);
+
+  const onLeaveRef = useRef(onLeave);
+  useEffect(() => {
+    onLeaveRef.current = onLeave;
+  }, [onLeave]);
+  // `leaving` only ever turns true once (the exit timer stops after it does).
+  useEffect(() => {
+    if (leaving) onLeaveRef.current?.();
+  }, [leaving]);
 
   // Reveal clock: pinned holds one frame, reduced motion jumps to the finished logo.
   useEffect(() => {

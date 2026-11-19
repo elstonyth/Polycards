@@ -64,7 +64,7 @@ function implausibleCardPath(pathname: string): boolean {
 // walks src/app and fails when a route is missing from this list).
 const KNOWN_ROUTE = [
   /^\/$/,
-  /^\/(about|addresses|audio-preview|bank|bank-withdrawal|contact|download|healthz|how-it-works|leaderboard|loader-preview|lucky-draw|me|notifications|orders|privacy|referral|reset-password|rules|settings|slots|task|transactions|vault|wallet)\/?$/,
+  /^\/(about|addresses|audio-preview|bank|bank-withdrawal|contact|download|healthz|home-preview|how-it-works|leaderboard|loader-preview|lucky-draw|me|notifications|orders|privacy|referral|reset-password|rules|settings|slots|task|transactions|vault|wallet)\/?$/,
   /^\/vault\/(history|coin-flip)\/?$/,
   /^\/auth\/google\/(callback|failed)\/?$/,
   /^\/(card|profile|r)\/[^/]+\/?$/,
@@ -140,7 +140,7 @@ export function proxy(request: NextRequest) {
 // polled public JSON routes.
 export const config = {
   matcher: [
-    '/((?!_next/|api/|3dicons/|branding/|cdn/|coin-flip/|fonts/|images/|pack-index-icons/|seo/|social/|sounds/|videos/).*)',
+    '/((?!_next/|api/|3dicons/|branding/|cdn/|coin-flip/|fonts/|images/|pack-3d/|pack-index-icons/|seo/|social/|sounds/|videos/).*)',
     '/api/pack-detail/:path*',
     '/api/pack-page/:path*',
     '/api/cards/:path*',

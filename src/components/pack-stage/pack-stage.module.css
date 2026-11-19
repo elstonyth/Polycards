@@ -1,0 +1,337 @@
+/*
+ * Pack stage (plan sections 1, 3, 6, 10). The flat stage is posed entirely in
+ * CSS: each tile carries its pose as unitless custom properties written by
+ * StageTrack from `poseAt` (steps for x, art heights for y and z, radians,
+ * scale, brightness), for phones (--m-*) and desktop (--d-*); the media query
+ * below picks one set. So the server HTML is already the posed carousel and
+ * hydration moves nothing.
+ *
+ * Layout boxes stay untransformed for the 3D provider to measure: the row
+ * translates by whole steps, each `li` is one step wide, and `[data-stage-art]`
+ * is the art box at its linear slot. The pose lives on `.pose` inside it.
+ * Nothing between `.viewport` (the perspective) and `.pose` may carry opacity,
+ * filter, mask or overflow, or the 3D flattens: fades sit on `.fade` and the
+ * image, under the pose.
+ */
+
+/* ---- Stage sizes: the art box drives everything ------------------------ */
+
+.stage {
+  /* Phone: centre pack about 190x352 on an iPhone 13, neighbours' inner
+     halves showing at the screen edges. */
+  --art-h: clamp(232px, calc(100svh - 470px), 352px);
+  --art-w: calc(var(--art-h) * 0.54);
+  --step: calc(var(--art-h) * 0.511);
+  /* Phones label only the centred pack, in the info block. */
+  --label-h: 0.5rem;
+  position: relative;
+  /* Clip, never hidden: a scroll container would trap the page's scroll. */
+  overflow-x: clip;
+}
+
+@media (min-width: 1024px) {
+  .stage {
+    /* Desktop: centre about 300x560 at its tallest, +-1 one step (330 px at
+       full size) out, +-2 at 560 px. Shrinks with a short window so the info
+       block stays on the first screen. */
+    --art-h: clamp(340px, calc(100svh - 470px), 560px);
+    --art-w: calc(var(--art-h) * 0.5357);
+    --step: calc(var(--art-h) * 0.589);
+    --label-h: 3.5rem;
+    min-height: min(calc(100svh - 4.4rem), 860px);
+  }
+}
+
+/* ---- Carousel ----------------------------------------------------------- */
+
+.viewport {
+  position: relative;
+  height: calc(var(--art-h) + var(--label-h));
+  /* Camera distance in CSS px (fov 28 deg: hostH / (2 tan 14 deg)) and the
+     host centre, measured by StageTrack; these defaults are close enough for
+     the first paint. */
+  perspective: var(--persp, calc(var(--art-h) * 4));
+  perspective-origin: var(--po-x, 50%) var(--po-y, 50%);
+  /* Horizontal swipes are ours; vertical scroll stays the page's. */
+  touch-action: pan-y;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.row {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  transform-style: preserve-3d;
+  /* --track: the continuous centred index, written per frame. */
+  transform: translate3d(
+    calc((var(--track, 0) + 0.5) * var(--step) * -1),
+    0,
+    0
+  );
+}
+
+.tile {
+  /* The pose the media query picks. */
+  --dx: var(--m-dx, 0);
+  --dy: var(--m-dy, 0);
+  --z: var(--m-z, 0);
+  --rx: var(--m-rx, 0);
+  --ry: var(--m-ry, 0);
+  --s: var(--m-s, 1);
+  --dim: var(--m-dim, 1);
+  --op: var(--m-op, 1);
+  --lo: var(--m-lo, 0);
+  --pe: var(--m-pe, auto);
+  --lpe: var(--m-lpe, none);
+  position: relative;
+  flex: none;
+  width: var(--step);
+  display: flex;
+  justify-content: center;
+  transform-style: preserve-3d;
+}
+
+@media (min-width: 1024px) {
+  .tile {
+    --dx: var(--d-dx, 0);
+    --dy: var(--d-dy, 0);
+    --z: var(--d-z, 0);
+    --rx: var(--d-rx, 0);
+    --ry: var(--d-ry, 0);
+    --s: var(--d-s, 1);
+    --dim: var(--d-dim, 1);
+    --op: var(--d-op, 1);
+    --lo: var(--d-lo, 0);
+    --pe: var(--d-pe, auto);
+    --lpe: var(--d-lpe, none);
+  }
+}
+
+/* The link (or the sold-out div). Its own box takes no hits: the posed art
+   and the label do, so a click lands where the pack is drawn. */
+.hit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transform-style: preserve-3d;
+  pointer-events: none;
+  outline: none;
+  color: inherit;
+  text-decoration: none;
+}
+
+.art {
+  position: relative;
+  flex: none;
+  width: var(--art-w);
+  height: var(--art-h);
+  transform-style: preserve-3d;
+}
+
+.pose {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  transform: translate3d(
+      calc(var(--dx) * var(--step)),
+      calc(var(--dy) * var(--art-h)),
+      calc(var(--z) * var(--art-h))
+    )
+    rotateY(calc(var(--ry) * 1rad)) rotateX(calc(var(--rx) * 1rad))
+    scale(var(--s));
+  opacity: var(--op);
+  pointer-events: var(--pe);
+  border-radius: 1rem;
+}
+
+.hit:focus-visible .pose {
+  outline: 2px solid rgb(255 255 255 / 0.5);
+  outline-offset: 6px;
+}
+
+.fade {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+}
+
+.pic {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: brightness(var(--dim));
+  -webkit-user-drag: none;
+  user-select: none;
+  transition: opacity 200ms linear;
+}
+
+/* The slot contract: the provider sets data-live="1" once the 3D pack is drawn
+   at this tile's pose, and the picture fades out over it. */
+.art[data-live='1'] img {
+  opacity: 0;
+}
+
+/* Capsules (Poly): the flat panel sways gently around its upright axis. */
+.sway {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  animation: stage-sway 6s ease-in-out infinite alternate;
+  animation-delay: calc(var(--i, 0) * -1.7s);
+}
+
+@keyframes stage-sway {
+  from {
+    transform: rotateY(-9deg);
+  }
+  to {
+    transform: rotateY(9deg);
+  }
+}
+
+/* A soft pool of neutral light under the centred pack: the pack is the only
+   thing lit (the /slots catalogue's pedestal, no colour). */
+.pool {
+  position: absolute;
+  left: 50%;
+  top: calc(var(--art-h) * 0.5);
+  width: calc(var(--art-w) * 2.6);
+  height: calc(var(--art-h) * 1.15);
+  transform: translate(-50%, -50%);
+  background: radial-gradient(
+    closest-side,
+    rgb(255 255 255 / 0.09),
+    rgb(255 255 255 / 0.03) 55%,
+    transparent
+  );
+  pointer-events: none;
+}
+
+.label {
+  position: relative;
+  margin-top: 0.75rem;
+  width: max-content;
+  max-width: calc(var(--step) * 1.25);
+  text-align: center;
+  /* Follows its pack: the same x offset, and up by the height the scale took
+     off the art's bottom half. */
+  transform: translate3d(
+    calc(var(--dx) * var(--step)),
+    calc((var(--s) - 1) * var(--art-h) * 0.5),
+    0
+  );
+  opacity: var(--lo);
+  pointer-events: var(--lpe);
+}
+
+/* Previous / next discs: beside the centred pack on phones, at the edges on
+   desktop; vertically centred on the art. */
+.nav {
+  position: absolute;
+  top: calc(var(--art-h) * 0.5);
+  z-index: 2;
+  translate: 0 -50%;
+}
+
+.navPrev {
+  left: max(0.5rem, calc(50% - var(--art-w) * 0.5 - 3.5rem));
+}
+
+.navNext {
+  right: max(0.5rem, calc(50% - var(--art-w) * 0.5 - 3.5rem));
+}
+
+@media (min-width: 1024px) {
+  .navPrev {
+    left: clamp(1rem, 2.5vw, 3rem);
+  }
+  .navNext {
+    right: clamp(1rem, 2.5vw, 3rem);
+  }
+}
+
+/* (The category switch's sink and rise are in the pose itself: the provider's
+   `swap` value, through poseAt, like the float-in.) */
+
+@keyframes stage-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* ---- Loader (plan section 6) --------------------------------------------- */
+
+/* The shell exists in every server render but shows only once the inline
+   pre-paint script has set html[data-stage-loader] (a first visit that
+   predicts 3D). If JS never hydrates, it hides itself (--stage-failsafe). */
+.shell {
+  display: none;
+}
+
+/* The failsafe fires 3.5 s after the element is first styled (a little after
+   navigation start), so the shell is gone by 4.0 s from navigation even if JS
+   never runs. JS ends first: the cap (3000 ms + 400 ms exit), and a BrandLoader
+   chunk arriving after 2.2 s skips its reveal (StageLoader). */
+.shell,
+.stage {
+  --stage-failsafe: 3.5s;
+}
+
+/* Its own stacking context at the overlay's height: the failsafe's opacity
+   animation makes the shell a stacking context, and at z-index auto that
+   context (and the overlay's z-1000 inside it) painted under the stage. */
+:global(html[data-stage-loader]) .shell {
+  display: block;
+  position: relative;
+  z-index: 1000;
+  animation: stage-loader-failsafe 0s linear var(--stage-failsafe) forwards;
+}
+
+@keyframes stage-loader-failsafe {
+  to {
+    visibility: hidden;
+    opacity: 0;
+  }
+}
+
+/* Under the loader the pictures, names and the info block wait unseen, so the
+   loader's exit can hand over to them. The hold is itself an animation that
+   ends with the shell's failsafe, so nothing stays hidden if JS never
+   runs. */
+:global(html[data-stage-loader]) .stage [data-stage-fade] {
+  animation: stage-hold 0s linear var(--stage-failsafe) backwards;
+}
+
+@keyframes stage-hold {
+  from,
+  to {
+    opacity: 0;
+  }
+}
+
+/* The loader is leaving: centre pack first, neighbours 90 ms apart, names and
+   prices 120 ms after their pack. Stays applied (filled at 1) after the html
+   attribute goes, so nothing restarts. */
+/* (`html` keeps these at the hold rule's specificity, so order decides.) */
+:global(html) .stage[data-revealed='1'] [data-stage-fade] {
+  animation: stage-in 700ms cubic-bezier(0.32, 0.72, 0, 1)
+    var(--fade-delay, 0ms) both;
+}
+
+/* ---- Reduced motion ------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .sway {
+    animation: none;
+  }
+  .pic {
+    transition: none;
+  }
+}

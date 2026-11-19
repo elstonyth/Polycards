@@ -22,6 +22,9 @@ import CookieConsent from '@/components/CookieConsent';
 import MetaPixel from '@/components/MetaPixel';
 import { SITE_URL } from '@/lib/site';
 import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
+import { stageLoaderScript } from '@/components/pack-stage/stage-loader-script';
+
+const STAGE_LOADER_SCRIPT = stageLoaderScript();
 
 const SITE_DESCRIPTION = `Rip packs. Pull real cards. Hold, redeem, or sell from your vault at ${BUYBACK_RATE_LABEL} of card value.`;
 
@@ -85,6 +88,13 @@ export default async function RootLayout({
       suppressHydrationWarning
       className={`dark ${geistSans.variable} ${nekst.variable} h-full antialiased`}
     >
+      <head>
+        {/* The home pack stage's pre-paint loader gate. Runs before anything
+            paints, so the header never shows ahead of the loader's cover;
+            inert on every path but STAGE_LOADER_PATHS (stage-loader-script.ts).
+            Reads no cookie or header: the routes stay route-cacheable. */}
+        <script dangerouslySetInnerHTML={{ __html: STAGE_LOADER_SCRIPT }} />
+      </head>
       <body
         suppressHydrationWarning
         className="min-h-full flex flex-col bg-neutral-950 text-neutral-50"

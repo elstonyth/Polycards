@@ -29,6 +29,9 @@ describe('proxy matcher — every page path, never static files', () => {
     expect(matches('/_next/static/chunks/app.js')).toBe(false);
     expect(matches('/images/polycards/gold-pack.webp')).toBe(false);
     expect(matches('/videos/factory.mp4')).toBe(false);
+    // The home pack stage's bundled 3D pictures (public/pack-3d/<id>/).
+    expect(matches('/pack-3d/x.webp')).toBe(false);
+    expect(matches('/pack-3d/151/front-half.webp?v=4abf4574')).toBe(false);
     expect(matches('/api/me')).toBe(false);
     expect(matches('/api/presence')).toBe(false);
   });
@@ -115,6 +118,8 @@ describe('unknown routes — a cacheable 404 before rendering', () => {
       '/lucky-draw',
       '/task',
       '/transactions?ref=gateway',
+      '/home-preview',
+      '/home-preview?loader=always&stage=flat',
     ]) {
       expect(get(path), path).toBeUndefined();
     }
