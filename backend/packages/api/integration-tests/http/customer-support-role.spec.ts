@@ -5,6 +5,7 @@ import {
   Modules,
 } from '@medusajs/framework/utils';
 import { supportViewerRoleId } from '../../src/scripts/create-support-viewer';
+import { REAL_NAME_INVALID_ADMIN } from '../../src/utils/real-name';
 import { mintSuperAdmin, staffIdentityWithAuthenticator } from './utils';
 
 jest.setTimeout(240 * 1000);
@@ -69,6 +70,14 @@ medusaIntegrationTestRunner({
         );
         expect(named.status).toBe(200);
         expect(named.data.real_name).toBe('Test Support Name');
+        // A bad name is refused in words for staff, not the customer's.
+        const bad = await post(
+          '/real-name',
+          { real_name: 'x', reason: 'support role test' },
+          support,
+        );
+        expect(bad.status).toBe(400);
+        expect(bad.data.message).toBe(REAL_NAME_INVALID_ADMIN);
         // Passes RBAC: the bank routes reach their own validation, not a 403.
         for (const sub of ['add', 'remove', 'verify']) {
           const res = await post(`/bank-accounts/${sub}`, {}, support);

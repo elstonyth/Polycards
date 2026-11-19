@@ -8,7 +8,7 @@ import { PACKS_MODULE } from '../../../../../modules/packs';
 import type PacksModuleService from '../../../../../modules/packs/service';
 import {
   normalizeRealName,
-  REAL_NAME_INVALID,
+  REAL_NAME_INVALID_ADMIN,
 } from '../../../../../utils/real-name';
 
 type Body = { real_name?: unknown; reason?: unknown };
@@ -40,7 +40,10 @@ export async function POST(
   }
   const realName = normalizeRealName(req.body?.real_name);
   if (!realName) {
-    throw new MedusaError(MedusaError.Types.INVALID_DATA, REAL_NAME_INVALID);
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      REAL_NAME_INVALID_ADMIN,
+    );
   }
   // A mistyped id must 404, not leave an orphan account-state row and an
   // audit row behind (retrieveCustomer throws NOT_FOUND).

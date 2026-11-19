@@ -36,6 +36,12 @@ export const SUPPORT_VIEWER_POLICIES = [
   'daily_reward',
   'vip_level',
   'coin_flip',
+  // The Rewards menu that holds Tasks, Weekly challenge, VIP and Lucky Draw
+  // (it asks rewards_setting:read), and what those pages load: the card list
+  // and the avatar frames.
+  'rewards_setting',
+  'card',
+  'avatar_frame',
 ]
   .map((resource) => ({ resource, operation: 'read' as 'read' | 'update' }))
   .concat([
