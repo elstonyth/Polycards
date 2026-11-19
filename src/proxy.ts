@@ -71,6 +71,9 @@ const KNOWN_ROUTE = [
   /^\/(card|profile|r)\/[^/]+\/?$/,
   /^\/(card|slots)\/[^/]+\/share\.jpg$/,
   /^\/slots\/[^/]+(\/spin)?\/?$/,
+  // TEMPORARY: the flow groundwork's preview (src/app/flow-preview); remove
+  // with that route at integration.
+  /^\/flow-preview\/[^/]+\/?$/,
   /^\/(robots\.txt|sitemap\.xml|manifest\.webmanifest|favicon\.ico|icon\.png|apple-icon\.png)$/,
 ];
 export const isKnownRoute = (pathname: string): boolean =>

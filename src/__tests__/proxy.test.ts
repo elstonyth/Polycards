@@ -120,6 +120,9 @@ describe('unknown routes — a cacheable 404 before rendering', () => {
       '/transactions?ref=gateway',
       '/home-preview',
       '/home-preview?loader=always&stage=flat',
+      // TEMPORARY: the flow groundwork's preview route.
+      '/flow-preview/gold-pack',
+      '/flow-preview/gold-pack?from=stage',
     ]) {
       expect(get(path), path).toBeUndefined();
     }
