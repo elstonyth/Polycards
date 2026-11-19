@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 import { rm0 } from '@/lib/format';
 import { isOptimizableImage } from '@/lib/optimizable-image';
 import PackCategoryTabs from '@/components/PackCategoryTabs';
+import CategoryIcon from '@/components/CategoryIcon';
 import { chipVariants } from '@/components/ui/chip';
 import {
   CATALOG_GROUP_HEADING,
@@ -120,14 +121,7 @@ export function PackPicker({
           />
         ) : (
           <div className="flex h-11 items-center gap-2 rounded-full bg-white/[0.06] px-4 text-sm font-semibold text-white ring-1 ring-white/10">
-            <Image
-              src={pack.icon}
-              alt=""
-              aria-hidden
-              width={20}
-              height={20}
-              className="h-5 w-5 object-contain"
-            />
+            <CategoryIcon src={pack.icon} size={20} className="h-5 w-5" />
             {pack.categoryName}
           </div>
         )}

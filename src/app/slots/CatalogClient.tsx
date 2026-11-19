@@ -24,6 +24,7 @@ import { AmbientVideo } from '@/components/AmbientVideo';
 import QtyStepper from '@/components/QtyStepper';
 import FreePackBadge from '@/components/FreePackBadge';
 import PackCategoryTabs from '@/components/PackCategoryTabs';
+import CategoryIcon, { isPolyIcon } from '@/components/CategoryIcon';
 import {
   groupPacks,
   packFacts,
@@ -128,13 +129,10 @@ function PackCard({
         <span className="absolute left-0 top-0 z-[2]">
           <StatusBadge pack={pack} />
         </span>
-        <Image
+        <CategoryIcon
           src={icon}
-          alt=""
-          aria-hidden="true"
-          width={24}
-          height={24}
-          className="absolute right-0 top-0 z-[2] h-6 w-6 object-contain opacity-80"
+          size={24}
+          className="absolute right-0 top-0 z-[2] h-6 w-6 text-white opacity-80"
         />
         <Image
           src={pack.image}
@@ -282,13 +280,14 @@ function PackRow({ entry }: { entry: Entry }) {
             oos && 'opacity-50 grayscale',
           )}
         />
-        <Image
+        <CategoryIcon
           src={icon}
-          alt=""
-          aria-hidden="true"
-          width={16}
-          height={16}
-          className="absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full object-contain"
+          size={16}
+          className={cn(
+            'absolute -bottom-0.5 -right-0.5 h-4 w-4 text-white',
+            // A circle would clip the corners of our upright mark.
+            !isPolyIcon(icon) && 'rounded-full',
+          )}
         />
       </div>
 
@@ -608,13 +607,10 @@ export default function CatalogClient({
         <div className="min-w-0 max-w-2xl">
           {category && (
             <span className={EYEBROW}>
-              <Image
+              <CategoryIcon
                 src={category.icon}
-                alt=""
-                aria-hidden
-                width={16}
-                height={16}
-                className="h-4 w-4 object-contain"
+                size={16}
+                className="h-4 w-4 text-white"
               />
               {category.tab}
               <span aria-hidden className="text-neutral-500">

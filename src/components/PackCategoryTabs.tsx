@@ -1,5 +1,5 @@
-import Image from 'next/image';
 import { cn } from '@/lib/utils';
+import CategoryIcon, { isPolyIcon } from '@/components/CategoryIcon';
 import type { PackTab } from '@/lib/packs-data';
 
 /**
@@ -51,17 +51,17 @@ export default function PackCategoryTabs({
                   : 'text-neutral-400 hover:text-white',
             )}
           >
-            <Image
+            <CategoryIcon
               src={c.icon}
-              alt=""
-              aria-hidden="true"
-              width={28}
-              height={28}
+              size={28}
               className={cn(
-                'h-5 w-5 shrink-0 object-contain',
+                'h-5 w-5 shrink-0',
                 !compact && 'sm:h-6 sm:w-6 lg:h-7 lg:w-7',
                 // The narrowest phones can't fit three icons and "Coming soon".
                 c.soon && 'hidden opacity-50 grayscale-[0.4] min-[360px]:block',
+                // Our mark takes the text colour: idle grey would read as
+                // "Coming soon" beside the full-colour franchise icons.
+                isPolyIcon(c.icon) && !on && !c.soon && 'text-white',
               )}
             />
             {c.soon ? (
