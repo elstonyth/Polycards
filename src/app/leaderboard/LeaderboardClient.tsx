@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { pillVariants } from '@/components/ui/pill';
+import { PAGE_COLUMN } from '@/components/ui/page-frame';
 import { FramedAvatar } from '@/components/FramedAvatar';
 import { RankGlyph } from '@/components/RankGlyph';
 import { PrizeCard } from './PrizeCard';
@@ -82,7 +83,7 @@ export default function LeaderboardClient({
       : null;
 
   return (
-    <div className="px-fluid mx-auto w-full max-w-md pt-6 lg:max-w-3xl">
+    <div className={cn(PAGE_COLUMN, 'pt-6')}>
       <div className="flex items-center justify-between">
         {/* h2: the page's h1 is "Ranks" on the route, which also owns the
             Weekly Challenge block rendered above these standings. */}
@@ -103,7 +104,8 @@ export default function LeaderboardClient({
             aria-pressed={period === p}
             onClick={() => setPeriod(p)}
             className={cn(
-              'rounded-full px-3 py-2.5 text-center text-sm font-semibold transition-colors',
+              'min-h-11 rounded-full px-3 py-2.5 text-center text-sm font-semibold transition-colors',
+              'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
               period === p
                 ? 'bg-neutral-50 text-neutral-950'
                 : 'text-neutral-400 hover:text-white',

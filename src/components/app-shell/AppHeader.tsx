@@ -1,7 +1,6 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 import { LogIn, Plus, Volume2, VolumeX } from 'lucide-react';
 import { useSound } from '@/lib/use-sound';
 import { cn } from '@/lib/utils';
@@ -13,10 +12,8 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import NotificationBell from '@/components/NotificationBell';
 import { Pill } from '@/components/ui/pill';
 import { useTopUp } from './TopUpProvider';
-import { useDrawDot } from './DrawDotProvider';
-import { useVaultDot } from './VaultDotProvider';
-import { openGames } from './games';
-import { TABS, isTabActive } from './tabs';
+import { TabLink } from './TabLink';
+import { TABS } from './tabs';
 
 const LOGO_SRC = '/branding/polycards-logo.png';
 const MARK_SRC = '/branding/polycards-mark.png';
@@ -27,18 +24,13 @@ const MARK_SRC = '/branding/polycards-mark.png';
  * destinations render inline here because the bottom TabBar is hidden.
  */
 export default function AppHeader() {
-  const pathname = usePathname();
   const { customer, isLoading } = useAuth();
   const { muted, toggleMuted } = useSound();
   const { balance, openTopUp } = useTopUp();
-  const { show: vaultDot } = useVaultDot();
-  const { show: drawDot } = useDrawDot();
   // A pack open or a sell-back moves this number; counting to the new figure
   // (and tinting money-in green for a beat) is what tells the customer the
   // action landed. Snaps under reduced motion; the tint still fires.
   const { value: countedBalance, direction } = useCountedValue(balance);
-  // Leaving a game plays the game exit (PageTransition); mirrors TabBar.
-  const inGame = TABS.some((t) => t.opens && isTabActive(t, pathname));
 
   return (
     <header
@@ -82,86 +74,9 @@ export default function AppHeader() {
             aria-label="Primary"
             className="hidden items-center gap-0.5 lg:flex"
           >
-            {TABS.map((tab) => {
-              const active = isTabActive(tab, pathname);
-              const Icon = tab.icon;
-              // The vault's "new CARDS" dot and the Draw tab's "new gate" dot:
-              // the Me tab's balance-movement dot (credits) was retired
-              // 2026-08-11 with its /me History tile — the operator did not want
-              // /transactions announcing itself. Mirrors TabBar, which renders
-              // the same destinations below lg.
-              const dotLabel =
-                tab.href === '/vault' && vaultDot
-                  ? 'new items'
-                  : tab.href === '/lucky-draw' && drawDot
-                    ? 'new gate'
-                    : null;
-              const className = cn(
-                'flex h-10 items-center gap-2 rounded-full px-3.5 text-[13px] font-semibold transition-colors',
-                active
-                  ? 'bg-neutral-50 text-neutral-950'
-                  : 'text-neutral-400 hover:bg-white/5 hover:text-white',
-              );
-              const content = (
-                <>
-                  <span className="relative inline-flex">
-                    <Icon className="h-4 w-4" aria-hidden />
-                    {dotLabel && (
-                      // The active pill is bg-neutral-50, so Paper White would
-                      // vanish on it. Normally moot (being on /vault clears the
-                      // dot), but reachable: a pull can land while the customer
-                      // sits on the page and the next focus refresh relights it.
-                      <span
-                        aria-hidden
-                        className={cn(
-                          'absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full',
-                          active ? 'bg-neutral-950' : 'bg-neutral-50',
-                        )}
-                      />
-                    )}
-                  </span>
-                  {tab.label}
-                </>
-              );
-              // Games opens the picker (a centred dialog on desktop).
-              if (tab.opens) {
-                return (
-                  <button
-                    key={tab.href}
-                    type="button"
-                    onClick={openGames}
-                    aria-haspopup="dialog"
-                    aria-current={active ? 'page' : undefined}
-                    className={className}
-                  >
-                    {content}
-                  </button>
-                );
-              }
-              return (
-                <Link
-                  key={tab.href}
-                  href={tab.href}
-                  transitionTypes={inGame ? ['game-out'] : undefined}
-                  // Gated tabs prompt signup in place for visitors (see TabBar).
-                  onClick={
-                    tab.gated && !customer && !isLoading
-                      ? (e) => {
-                          e.preventDefault();
-                          openAuth('signup');
-                        }
-                      : undefined
-                  }
-                  aria-current={active ? 'page' : undefined}
-                  aria-label={
-                    dotLabel ? `${tab.label}, ${dotLabel}` : undefined
-                  }
-                  className={className}
-                >
-                  {content}
-                </Link>
-              );
-            })}
+            {TABS.map((tab) => (
+              <TabLink key={tab.href} tab={tab} variant="pill" />
+            ))}
           </nav>
         </div>
 

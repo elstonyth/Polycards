@@ -5,6 +5,8 @@ import { getLeaderboard, getOwnWeekly } from '@/lib/data/leaderboard';
 import { getChallenge } from '@/lib/data/challenge';
 import { getOwnProfileHandle } from '@/lib/data/profiles';
 import { getAvatarFrames } from '@/lib/data/avatar-frames';
+import { PAGE_COLUMN, PageBody, PageTitle } from '@/components/ui/page-frame';
+import { cn } from '@/lib/utils';
 
 // Live leaderboard + Weekly Pulled Value Challenge, aggregated from the gacha
 // Pull ledger. Fetched server-side (the storefront origin can reach the backend;
@@ -42,18 +44,22 @@ export default async function LeaderboardPage() {
     <>
       {/* The page owns the h1 — the tab is "Ranks", and the page is both the
           challenge and the standings, neither of which can claim the other's
-          heading. Visually the challenge hero (or LEADERBOARD when the
-          challenge is off) already titles the page. */}
-      <h1 className="sr-only">Ranks</h1>
-      {challenge && <WeeklyChallenge challenge={challenge} />}
-      <LeaderboardClient
-        weekly={weekly}
-        alltime={alltime}
-        ownHandle={ownHandle}
-        ownWeekly={ownWeekly}
-        weeklyPrizes={challenge?.rankPrizes ?? []}
-      />
-      {challenge && <ChallengeRules />}
+          heading. Shown in the shared tab title style (page-frame.tsx), so
+          the challenge hero and LEADERBOARD below are h2s under it. */}
+      <header className={cn(PAGE_COLUMN, 'pt-6')}>
+        <PageTitle>RANKS</PageTitle>
+      </header>
+      <PageBody>
+        {challenge && <WeeklyChallenge challenge={challenge} />}
+        <LeaderboardClient
+          weekly={weekly}
+          alltime={alltime}
+          ownHandle={ownHandle}
+          ownWeekly={ownWeekly}
+          weeklyPrizes={challenge?.rankPrizes ?? []}
+        />
+        {challenge && <ChallengeRules />}
+      </PageBody>
       {/* Clearance so the fixed your-rank card never covers the last block. */}
       {ownHandle != null && <div aria-hidden className="h-24" />}
     </>

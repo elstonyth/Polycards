@@ -17,6 +17,7 @@ import {
 import { getCustomer } from '@/lib/data/customer';
 import { cn } from '@/lib/utils';
 import { pillVariants } from '@/components/ui/pill';
+import { PageBody, PageTitle } from '@/components/ui/page-frame';
 import { getOwnProfileHandle, getPublicProfile } from '@/lib/data/profiles';
 import { getWallet } from '@/lib/actions/wallet';
 import { sen, TOPUP_FIRST_HEADING } from '@/lib/wallet-split';
@@ -129,306 +130,306 @@ export default async function MePage() {
   return (
     <EquippedFrameProvider initial={equippedLevel}>
       <div className="flex flex-col gap-4">
-        {/* Page label, not a heading: MeHeader's display name is already this
-            page's h1 (see MeAppearance.tsx), so an AccountHeader here would
-            give the page two competing h1s. Matches the uppercase section
-            labels below ("Showcase", "Quick access"). */}
-        <p className="text-[12px] font-semibold uppercase tracking-wide text-neutral-400">
-          Me
-        </p>
-        <MeHeader
-          displayName={displayName}
-          username={customer.first_name ?? ''}
-          handle={handle}
-          pulls={profile ? profile.stats.pulls : null}
-          avatarUrl={avatarUrl}
-          frames={avatarFrames}
-          highestLevel={highestLevel}
-        />
+        {/* The tab title in the shared style, but a <p>, not a heading:
+            MeHeader's display name is already this page's h1 (see
+            MeAppearance.tsx), so an AccountHeader here would give the page
+            two competing h1s. */}
+        <PageTitle as="p">Me</PageTitle>
+        <PageBody className="flex flex-col gap-4">
+          <MeHeader
+            displayName={displayName}
+            username={customer.first_name ?? ''}
+            handle={handle}
+            pulls={profile ? profile.stats.pulls : null}
+            avatarUrl={avatarUrl}
+            frames={avatarFrames}
+            highestLevel={highestLevel}
+          />
 
-        {/* Level card (Show's Lv bar): compact, VIP emblem on the right.
+          {/* Level card (Show's Lv bar): compact, VIP emblem on the right.
             The emblem is rendered on pure black and composited with
             mix-blend-screen so it melts into the card background. */}
-        {vipResult.ok && (
-          <div className="rounded-2xl border border-white/10 bg-neutral-900 px-4 py-3">
-            <div className="flex items-center gap-3">
-              <div className="min-w-0 flex-1">
-                <span className="font-heading text-chase text-xl">
-                  LV {vipResult.vip.level}
-                </span>
-                {vipResult.vip.next ? (
-                  <>
-                    <div
-                      className="mt-2 h-1.5 overflow-hidden rounded-full bg-neutral-800"
-                      role="progressbar"
-                      aria-valuemin={levelStart}
-                      aria-valuemax={vipResult.vip.next.threshold}
-                      // Clamped to the segment floor: ARIA requires
-                      // valuenow >= valuemin, and a state-row level can in
-                      // principle run ahead of settled spend.
-                      aria-valuenow={Math.max(
-                        levelStart,
-                        vipResult.vip.next.threshold -
-                          vipResult.vip.next.remaining,
-                      )}
-                      aria-label={`Progress to VIP level ${vipResult.vip.next.level}`}
-                    >
+          {vipResult.ok && (
+            <div className="rounded-2xl border border-white/10 bg-neutral-900 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <div className="min-w-0 flex-1">
+                  <span className="font-heading text-chase text-xl">
+                    LV {vipResult.vip.level}
+                  </span>
+                  {vipResult.vip.next ? (
+                    <>
                       <div
-                        className="bg-chase h-full rounded-full"
-                        style={{
-                          width: `${Math.max(
-                            2,
-                            levelProgressPct(
-                              vipResult.vip.next.threshold -
-                                vipResult.vip.next.remaining,
-                              levelStart,
-                              vipResult.vip.next.threshold,
-                            ),
-                          )}%`,
-                        }}
-                      />
-                    </div>
-                    {/* Left = lifetime spend, right = next level's target —
-                        segment-bound labels read as "my spend" and confused
-                        real users (2026-07-22); the fill stays segment-
-                        relative. */}
-                    <div className="mt-1 flex justify-between text-[10px] font-semibold text-neutral-500">
-                      <span>
-                        {rm0(
+                        className="mt-2 h-1.5 overflow-hidden rounded-full bg-neutral-800"
+                        role="progressbar"
+                        aria-valuemin={levelStart}
+                        aria-valuemax={vipResult.vip.next.threshold}
+                        // Clamped to the segment floor: ARIA requires
+                        // valuenow >= valuemin, and a state-row level can in
+                        // principle run ahead of settled spend.
+                        aria-valuenow={Math.max(
+                          levelStart,
                           vipResult.vip.next.threshold -
                             vipResult.vip.next.remaining,
                         )}
-                      </span>
-                      <span>{rm0(vipResult.vip.next.threshold)}</span>
-                    </div>
-                    <p className="text-[12px] text-neutral-400">
-                      {rm0(vipResult.vip.next.remaining)} more to LV{' '}
-                      {vipResult.vip.next.level}
-                    </p>
-                  </>
-                ) : (
-                  <p className="mt-1 text-[12px] text-neutral-400">
-                    Max level reached — you&rsquo;re at the top of the ladder.
-                  </p>
-                )}
-              </div>
-              <span className="relative shrink-0">
-                {/* Soft amber halo behind the badge. */}
-                <span
-                  aria-hidden
-                  className="bg-chase/25 absolute left-1/2 top-1/2 h-12 w-24 -translate-x-1/2 -translate-y-1/2 rounded-full blur-xl"
-                />
-                {/* Transparent-background asset — no blend mode needed (the
-                    old wordmark was black-field + mix-blend-screen, which
-                    broke inside any ancestor with opacity < 1). */}
-                <Image
-                  src="/images/app/vip-badge.webp"
-                  alt=""
-                  aria-hidden
-                  width={761}
-                  height={360}
-                  className="relative h-9 w-auto"
-                />
-              </span>
-            </div>
-          </div>
-        )}
-
-        {/* 橱窗 — showcased cards. Hidden when the profile read fails. */}
-        {profile && (
-          <section className="rounded-2xl border border-white/10 bg-neutral-900 p-5">
-            <div className="flex items-baseline justify-between">
-              <p className="text-[12px] font-semibold uppercase tracking-wide text-neutral-400">
-                Showcase
-              </p>
-              <Link
-                href="/vault"
-                className="inline-flex min-h-11 items-center text-[12px] font-semibold text-white/70 underline-offset-2 hover:text-white hover:underline"
-              >
-                Manage
-              </Link>
-            </div>
-            {showcased.length > 0 ? (
-              // overflow-x-auto clips BOTH axes, so the tier halo needs room
-              // reserved as padding (negative margins pull the rail back out to
-              // the card's own padding — the PoolByRarity rail pattern).
-              <div className="-mx-5 mt-2 flex gap-5 overflow-x-auto px-5 py-4">
-                {showcased.map((card, i) => (
-                  <Link
-                    // Two showcased pulls of the SAME card are two distinct
-                    // items (and can carry different tier frames — rarity is
-                    // per (pack, card)). The payload has no pull id, so the
-                    // index disambiguates; the public profile keys the same way.
-                    key={`${card.handle}-${i}`}
-                    href={`/card/${card.handle}`}
-                    className="w-20 shrink-0 transition-opacity hover:opacity-90"
-                  >
-                    <SlabImage
-                      // The showcase strip is the one surface that renders the
-                      // profile WIRE row rather than the mapped view — the
-                      // shared mapper is what turns it into a card view here.
-                      card={toCardView(card)}
-                      // Thumbnail-sized slab: the full-size halo is wider than
-                      // the slab itself here and would bleed into neighbours.
-                      glowScale={0.4}
-                      sizes="80px"
-                      className="w-20"
-                    />
-                  </Link>
-                ))}
-              </div>
-            ) : (
-              <p className="mt-2 text-[13px] text-neutral-400">
-                Nothing showcased yet —{' '}
-                <Link
-                  href="/vault"
-                  className="font-semibold text-white underline underline-offset-2"
-                >
-                  pick cards in your Vault
-                </Link>
-                .
-              </p>
-            )}
-          </section>
-        )}
-
-        {/* Balance bar */}
-        <section className="rounded-2xl border border-white/10 bg-neutral-900 p-4">
-          {walletResult.ok ? (
-            <>
-              {/* flex-wrap: a long balance pushes the buttons to their own
-                  row instead of truncating money. */}
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <Link href="/wallet" className="min-w-0 hover:opacity-90">
-                  <p className="flex items-center gap-0.5 text-[12px] font-semibold uppercase tracking-wide text-neutral-400">
-                    Balance
-                    <ChevronRight className="h-3.5 w-3.5" aria-hidden />
-                  </p>
-                  <p className="font-heading mt-0.5 text-2xl text-white">
-                    {rm(walletResult.wallet.balance)}
-                  </p>
-                  {/* Right beside the Withdraw button it would otherwise
-                      find out from. Bonus alone never withdraws, so no hint. */}
-                  {!walletResult.wallet.hasTopup &&
-                    !walletResult.wallet.isFrozen &&
-                    sen(walletResult.wallet.balance) >
-                      sen(walletResult.wallet.bonus) && (
-                      <p className="mt-0.5 text-[12px] font-semibold text-sky-400">
-                        {TOPUP_FIRST_HEADING}
+                        aria-label={`Progress to VIP level ${vipResult.vip.next.level}`}
+                      >
+                        <div
+                          className="bg-chase h-full rounded-full"
+                          style={{
+                            width: `${Math.max(
+                              2,
+                              levelProgressPct(
+                                vipResult.vip.next.threshold -
+                                  vipResult.vip.next.remaining,
+                                levelStart,
+                                vipResult.vip.next.threshold,
+                              ),
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                      {/* Left = lifetime spend, right = next level's target —
+                        segment-bound labels read as "my spend" and confused
+                        real users (2026-07-22); the fill stays segment-
+                        relative. */}
+                      <div className="mt-1 flex justify-between text-[10px] font-semibold text-neutral-500">
+                        <span>
+                          {rm0(
+                            vipResult.vip.next.threshold -
+                              vipResult.vip.next.remaining,
+                          )}
+                        </span>
+                        <span>{rm0(vipResult.vip.next.threshold)}</span>
+                      </div>
+                      <p className="text-[12px] text-neutral-400">
+                        {rm0(vipResult.vip.next.remaining)} more to LV{' '}
+                        {vipResult.vip.next.level}
                       </p>
-                    )}
-                  {unlockSpend !== null && (
-                    <p className="mt-0.5 text-[12px] font-semibold text-sky-400">
-                      Use{' '}
-                      <span className="whitespace-nowrap">
-                        {rm(unlockSpend)}
-                      </span>{' '}
-                      more on packs to unlock withdrawals.
+                    </>
+                  ) : (
+                    <p className="mt-1 text-[12px] text-neutral-400">
+                      Max level reached — you&rsquo;re at the top of the ladder.
                     </p>
                   )}
+                </div>
+                <span className="relative shrink-0">
+                  {/* Soft amber halo behind the badge. */}
+                  <span
+                    aria-hidden
+                    className="bg-chase/25 absolute left-1/2 top-1/2 h-12 w-24 -translate-x-1/2 -translate-y-1/2 rounded-full blur-xl"
+                  />
+                  {/* Transparent-background asset — no blend mode needed (the
+                    old wordmark was black-field + mix-blend-screen, which
+                    broke inside any ancestor with opacity < 1). */}
+                  <Image
+                    src="/images/app/vip-badge.webp"
+                    alt=""
+                    aria-hidden
+                    width={761}
+                    height={360}
+                    className="relative h-9 w-auto"
+                  />
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* 橱窗 — showcased cards. Hidden when the profile read fails. */}
+          {profile && (
+            <section className="rounded-2xl border border-white/10 bg-neutral-900 p-5">
+              <div className="flex items-baseline justify-between">
+                <p className="text-[12px] font-semibold uppercase tracking-wide text-neutral-400">
+                  Showcase
+                </p>
+                <Link
+                  href="/vault"
+                  className="inline-flex min-h-11 items-center text-[12px] font-semibold text-white/70 underline-offset-2 hover:text-white hover:underline"
+                >
+                  Manage
                 </Link>
-                <div className="flex shrink-0 gap-2">
-                  {canWithdraw ? (
-                    <WithdrawLink
-                      className={cn(
-                        pillVariants({ variant: 'secondary', size: 'sm' }),
-                      )}
+              </div>
+              {showcased.length > 0 ? (
+                // overflow-x-auto clips BOTH axes, so the tier halo needs room
+                // reserved as padding (negative margins pull the rail back out to
+                // the card's own padding — the PoolByRarity rail pattern).
+                <div className="-mx-5 mt-2 flex gap-5 overflow-x-auto px-5 py-4">
+                  {showcased.map((card, i) => (
+                    <Link
+                      // Two showcased pulls of the SAME card are two distinct
+                      // items (and can carry different tier frames — rarity is
+                      // per (pack, card)). The payload has no pull id, so the
+                      // index disambiguates; the public profile keys the same way.
+                      key={`${card.handle}-${i}`}
+                      href={`/card/${card.handle}`}
+                      className="w-20 shrink-0 transition-opacity hover:opacity-90"
                     >
-                      Withdraw
-                    </WithdrawLink>
-                  ) : (
-                    unlockSpend !== null && (
-                      <Link
-                        href="/slots"
+                      <SlabImage
+                        // The showcase strip is the one surface that renders the
+                        // profile WIRE row rather than the mapped view — the
+                        // shared mapper is what turns it into a card view here.
+                        card={toCardView(card)}
+                        // Thumbnail-sized slab: the full-size halo is wider than
+                        // the slab itself here and would bleed into neighbours.
+                        glowScale={0.4}
+                        sizes="80px"
+                        className="w-20"
+                      />
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 text-[13px] text-neutral-400">
+                  Nothing showcased yet —{' '}
+                  <Link
+                    href="/vault"
+                    className="font-semibold text-white underline underline-offset-2"
+                  >
+                    pick cards in your Vault
+                  </Link>
+                  .
+                </p>
+              )}
+            </section>
+          )}
+
+          {/* Balance bar */}
+          <section className="rounded-2xl border border-white/10 bg-neutral-900 p-4">
+            {walletResult.ok ? (
+              <>
+                {/* flex-wrap: a long balance pushes the buttons to their own
+                  row instead of truncating money. */}
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <Link href="/wallet" className="min-w-0 hover:opacity-90">
+                    <p className="flex items-center gap-0.5 text-[12px] font-semibold uppercase tracking-wide text-neutral-400">
+                      Balance
+                      <ChevronRight className="h-3.5 w-3.5" aria-hidden />
+                    </p>
+                    <p className="font-heading mt-0.5 text-2xl text-white">
+                      {rm(walletResult.wallet.balance)}
+                    </p>
+                    {/* Right beside the Withdraw button it would otherwise
+                      find out from. Bonus alone never withdraws, so no hint. */}
+                    {!walletResult.wallet.hasTopup &&
+                      !walletResult.wallet.isFrozen &&
+                      sen(walletResult.wallet.balance) >
+                        sen(walletResult.wallet.bonus) && (
+                        <p className="mt-0.5 text-[12px] font-semibold text-sky-400">
+                          {TOPUP_FIRST_HEADING}
+                        </p>
+                      )}
+                    {unlockSpend !== null && (
+                      <p className="mt-0.5 text-[12px] font-semibold text-sky-400">
+                        Use{' '}
+                        <span className="whitespace-nowrap">
+                          {rm(unlockSpend)}
+                        </span>{' '}
+                        more on packs to unlock withdrawals.
+                      </p>
+                    )}
+                  </Link>
+                  <div className="flex shrink-0 gap-2">
+                    {canWithdraw ? (
+                      <WithdrawLink
                         className={cn(
                           pillVariants({ variant: 'secondary', size: 'sm' }),
                         )}
                       >
-                        Open packs
-                      </Link>
-                    )
-                  )}
-                  <TopUpButton size="sm" className="" />
+                        Withdraw
+                      </WithdrawLink>
+                    ) : (
+                      unlockSpend !== null && (
+                        <Link
+                          href="/slots"
+                          className={cn(
+                            pillVariants({ variant: 'secondary', size: 'sm' }),
+                          )}
+                        >
+                          Open packs
+                        </Link>
+                      )
+                    )}
+                    <TopUpButton size="sm" className="" />
+                  </div>
                 </div>
-              </div>
-            </>
-          ) : (
-            <p className="text-sm text-neutral-400">
-              Couldn&rsquo;t load your balance.{' '}
-              <Link
-                href="/wallet"
-                className="font-semibold text-white underline"
-              >
-                Open wallet
-              </Link>
-            </p>
-          )}
-        </section>
-
-        {/* Quick access grid */}
-        <section className="rounded-2xl border border-white/10 bg-neutral-900 p-5">
-          <p className="text-[12px] font-semibold uppercase tracking-wide text-neutral-400">
-            Quick access
-          </p>
-          <div className="mt-4 grid grid-cols-3 gap-y-5">
-            {QUICK_ACCESS.map((item) => {
-              const Icon = item.icon;
-              // A phoneless account is refused by every money/goods path
-              // (backend requirePhoneVerified: top-up, deposit, withdraw,
-              // delivery), and nothing on this screen says so until they hit
-              // the wall. Light the tile that fixes it.
-              const highlight = needsPhone && item.href === '/settings';
-              return (
+              </>
+            ) : (
+              <p className="text-sm text-neutral-400">
+                Couldn&rsquo;t load your balance.{' '}
                 <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    'flex flex-col items-center gap-1.5 transition-colors',
-                    highlight
-                      ? 'text-white'
-                      : 'text-neutral-300 hover:text-white',
-                  )}
+                  href="/wallet"
+                  className="font-semibold text-white underline"
                 >
-                  {/* Paper White, not Chase Gold: DESIGN.md §2 reserves gold
+                  Open wallet
+                </Link>
+              </p>
+            )}
+          </section>
+
+          {/* Quick access grid */}
+          <section className="rounded-2xl border border-white/10 bg-neutral-900 p-5">
+            <p className="text-[12px] font-semibold uppercase tracking-wide text-neutral-400">
+              Quick access
+            </p>
+            <div className="mt-4 grid grid-cols-3 gap-y-5">
+              {QUICK_ACCESS.map((item) => {
+                const Icon = item.icon;
+                // A phoneless account is refused by every money/goods path
+                // (backend requirePhoneVerified: top-up, deposit, withdraw,
+                // delivery), and nothing on this screen says so until they hit
+                // the wall. Light the tile that fixes it.
+                const highlight = needsPhone && item.href === '/settings';
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={cn(
+                      'flex flex-col items-center gap-1.5 transition-colors',
+                      highlight
+                        ? 'text-white'
+                        : 'text-neutral-300 hover:text-white',
+                    )}
+                  >
+                    {/* Paper White, not Chase Gold: DESIGN.md §2 reserves gold
                       for prize and value moments, and a collector trained on
                       gold = prize reads a gold Settings tile as "reward
                       waiting". White is this system's action color, which is
                       exactly what this tile is asking for. */}
-                  <span
-                    className={cn(
-                      'relative flex h-11 w-11 items-center justify-center rounded-2xl',
-                      highlight
-                        ? 'bg-white/10 ring-1 ring-white/40'
-                        : 'bg-neutral-800',
-                    )}
-                  >
-                    <Icon className="h-5 w-5" aria-hidden />
-                    {highlight && (
-                      <span
-                        aria-hidden
-                        className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-neutral-50"
-                      />
-                    )}
-                  </span>
-                  <span className="text-[11px] font-semibold">
-                    {item.label}
-                  </span>
-                  {/* Colour alone is invisible to a screen reader, and it is
+                    <span
+                      className={cn(
+                        'relative flex h-11 w-11 items-center justify-center rounded-2xl',
+                        highlight
+                          ? 'bg-white/10 ring-1 ring-white/40'
+                          : 'bg-neutral-800',
+                      )}
+                    >
+                      <Icon className="h-5 w-5" aria-hidden />
+                      {highlight && (
+                        <span
+                          aria-hidden
+                          className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-neutral-50"
+                        />
+                      )}
+                    </span>
+                    <span className="text-[11px] font-semibold">
+                      {item.label}
+                    </span>
+                    {/* Colour alone is invisible to a screen reader, and it is
                       the only thing separating this tile from the other
                       seven. */}
-                  {highlight && (
-                    <span className="sr-only">— add your phone number</span>
-                  )}
-                </Link>
-              );
-            })}
-          </div>
-        </section>
+                    {highlight && (
+                      <span className="sr-only">— add your phone number</span>
+                    )}
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
 
-        {/* Frames live in the Edit Profile modal (tap the avatar or name) —
+          {/* Frames live in the Edit Profile modal (tap the avatar or name) —
             Show's Me has no frames row. */}
 
-        <LogoutButton />
+          <LogoutButton />
+        </PageBody>
       </div>
     </EquippedFrameProvider>
   );
