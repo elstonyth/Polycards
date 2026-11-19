@@ -1,12 +1,12 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { rm0 } from '@/lib/format';
 import { isOptimizableImage } from '@/lib/optimizable-image';
-import { IntentLink } from '@/components/IntentLink';
 import PackCategoryTabs from '@/components/PackCategoryTabs';
 import { chipVariants } from '@/components/ui/chip';
 import {
@@ -42,8 +42,11 @@ export const FIELD_LABEL =
  * A backend that sends no tags yields one untagged shelf, so the type chips
  * disappear and this is the composition groups alone.
  *
- * Mount it with `key={pack.id}`: the open shelf and language start from the
- * pack on the page, and a new pack must restart them.
+ * It stays mounted while the page switches packs in place (PackPage), so the
+ * tile just tapped keeps focus. The open shelf and language start from the pack
+ * on the page and follow it: a pack that is not among the tiles on screen (the
+ * first pack of another category, a Back to a pack on another shelf) reopens
+ * its own shelf and language.
  */
 export function PackPicker({
   pack,
@@ -51,6 +54,10 @@ export function PackPicker({
   categoryTabs,
   qty,
   onCategory,
+  onPick,
+  onIntent,
+  pendingPack = null,
+  pendingCategory = null,
 }: {
   pack: ResolvedPack;
   siblings: Pack[];
@@ -58,6 +65,14 @@ export function PackPicker({
   categoryTabs: PackTab[];
   qty: number;
   onCategory: (id: string) => void;
+  /** A plain click on a tile switches in place; absent, a tile is just a link. */
+  onPick?: (id: string, href: string) => void;
+  /** The pointer came to rest on a tile: its pack may be fetched early. */
+  onIntent?: (id: string) => void;
+  /** The pack (or, from a tab, the category) a switch is still fetching: its
+   *  tile or tab reads as chosen at once, before the page follows. */
+  pendingPack?: string | null;
+  pendingCategory?: string | null;
 }) {
   const ticketPack = isTicketPack(pack);
   const noun = ticketPack ? 'capsule' : 'pack';
@@ -77,7 +92,17 @@ export function PackPicker({
         ? language
         : (shelf.languages[0] ?? null)
       : null;
-  const groups = shelf ? groupPacks(shelfPacks(shelf, shownLanguage)) : [];
+  const onScreen = shelf ? shelfPacks(shelf, shownLanguage) : [];
+  // Follow the page's pack when it changes to one that is not on screen.
+  const [followed, setFollowed] = useState(pack.id);
+  if (followed !== pack.id) {
+    setFollowed(pack.id);
+    if (!onScreen.some((p) => p.id === pack.id)) {
+      setType(home?.type);
+      setLanguage(pack.language ?? null);
+    }
+  }
+  const groups = groupPacks(onScreen);
 
   return (
     <div className="flex flex-col gap-3.5 px-4 pb-3 pt-4 sm:px-5">
@@ -89,7 +114,7 @@ export function PackPicker({
           // other franchises are on screen instead of inside a dropdown.
           <PackCategoryTabs
             categories={categoryTabs}
-            active={pack.categoryId}
+            active={pendingCategory ?? pack.categoryId}
             onChange={onCategory}
             compact
           />
@@ -208,7 +233,17 @@ export function PackPicker({
                     key={p.id}
                     pack={p}
                     selected={p.id === pack.id}
+                    // A tab's switch has no tile to mark: its pack is in
+                    // another category.
+                    pending={!pendingCategory && p.id === pendingPack}
+                    dimmed={
+                      !pendingCategory &&
+                      pendingPack !== null &&
+                      p.id === pack.id
+                    }
                     qty={qty}
+                    onPick={onPick}
+                    onIntent={onIntent}
                   />
                 ))}
               </div>
@@ -220,26 +255,78 @@ export function PackPicker({
   );
 }
 
+/** How long the pointer must stay on a tile before its pack is fetched. */
+const INTENT_REST_MS = 120;
+
 function PackTile({
   pack: p,
   selected,
+  pending,
+  dimmed,
   qty,
+  onPick,
+  onIntent,
 }: {
   pack: Pack;
+  /** The pack on the page. */
   selected: boolean;
+  /** Tapped, its data still on the way: it wears the selected look already. */
+  pending: boolean;
+  /** The pack on the page while another tile is pending. */
+  dimmed: boolean;
   qty: number;
+  onPick?: (id: string, href: string) => void;
+  onIntent?: (id: string) => void;
 }) {
   const soldOut = p.inStock === false;
+  const href = `/slots/${p.id}?count=${qty}`;
+  const lit = pending || (selected && !dimmed);
+  // Still a real link: a modified click (new tab, new window, download) and a
+  // middle click are the browser's. Only a plain click switches in place.
+  const switchInPlace = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (
+      !onPick ||
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey
+    ) {
+      return;
+    }
+    event.preventDefault();
+    onPick(p.id, href);
+  };
+  // A pack's data is its whole prize pool (a quarter of a megabyte on the
+  // biggest), so it is fetched early only when the pointer RESTS on the tile:
+  // not when it sweeps across the grid, not when a finger starts a scroll on
+  // it, not when Tab passes through. Those wait for the click.
+  const rest = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(rest.current), []);
+  const enter = () => {
+    if (!onIntent) return;
+    clearTimeout(rest.current);
+    rest.current = setTimeout(() => onIntent(p.id), INTENT_REST_MS);
+  };
+  const leave = () => clearTimeout(rest.current);
   return (
-    <IntentLink
-      href={`/slots/${p.id}?count=${qty}`}
+    <Link
+      href={href}
       scroll={false}
+      // The switch fetches the pack's data itself: a route prefetch would
+      // render the same page a second time for nothing.
+      prefetch={false}
+      onClick={switchInPlace}
+      onMouseEnter={enter}
+      onMouseLeave={leave}
       aria-current={selected ? 'page' : undefined}
+      aria-busy={pending || undefined}
       className={cn(
         'group relative flex min-h-14 items-center gap-2.5 rounded-[1.25rem] border px-2.5 py-1.5 text-left outline-none',
         'transition-[background-color,border-color,transform] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-white/40',
         'motion-reduce:transition-[background-color,border-color] motion-reduce:active:scale-100',
-        selected
+        lit
           ? 'border-neutral-50 bg-neutral-800'
           : 'border-white/10 bg-neutral-900 hover:border-white/25 hover:bg-neutral-800',
       )}
@@ -266,7 +353,7 @@ function PackTile({
           className={cn(
             'line-clamp-2 text-[13px] font-semibold leading-tight text-white',
             // Room for the tick in the corner.
-            selected && 'pr-4',
+            lit && 'pr-4',
           )}
         >
           {p.name.replace(' Pack', '')}
@@ -274,7 +361,7 @@ function PackTile({
         <span
           className={cn(
             'font-heading text-[13px] leading-none tabular-nums',
-            selected ? 'text-white' : 'text-neutral-400',
+            lit ? 'text-white' : 'text-neutral-400',
           )}
         >
           {rm0(p.priceMyr)}
@@ -285,7 +372,7 @@ function PackTile({
           )}
         </span>
       </span>
-      {selected && (
+      {lit && (
         <span
           aria-hidden
           className="absolute right-1.5 top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-neutral-50 text-neutral-950"
@@ -293,6 +380,6 @@ function PackTile({
           <Check className="h-2.5 w-2.5" strokeWidth={3.5} />
         </span>
       )}
-    </IntentLink>
+    </Link>
   );
 }

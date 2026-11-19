@@ -20,12 +20,13 @@ import { isPlausibleCardHandle } from '@/lib/card-handle';
 // ~270 KB body, and starved every pod into 503s. A real poll always carries
 // Sec-Fetch-Site: same-origin, or (older Safari, no Fetch Metadata) a
 // same-origin Referer under our strict-origin-when-cross-origin policy.
+// pack-page/ is the pack picker's in-place switch (three backend reads a hit).
 // cards/, free-pack, announcements and lucky-draw-status are only ever fetched by
 // our own client too (use-card-price, FreePackBadge, AnnouncementPopup, the draw
 // popup); /api/cards costs the backend 4 DB queries a hit, so it is the next
 // cheapest drain.
 const POLLED_JSON =
-  /^\/api\/(pack-detail\/|cards\/|recent-pulls$|pull-gaps$|free-pack$|announcements$|lucky-draw-status$)/;
+  /^\/api\/(pack-detail\/|pack-page\/|cards\/|recent-pulls$|pull-gaps$|free-pack$|announcements$|lucky-draw-status$)/;
 
 function sameOriginFetch(request: NextRequest): boolean {
   const site = request.headers.get('sec-fetch-site');
@@ -141,6 +142,7 @@ export const config = {
   matcher: [
     '/((?!_next/|api/|3dicons/|branding/|cdn/|coin-flip/|fonts/|images/|pack-index-icons/|seo/|social/|sounds/|videos/).*)',
     '/api/pack-detail/:path*',
+    '/api/pack-page/:path*',
     '/api/cards/:path*',
     '/api/recent-pulls',
     '/api/pull-gaps',

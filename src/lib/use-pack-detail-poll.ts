@@ -8,15 +8,16 @@ const POLL_MS = 60_000;
 // Soon, not at the next poll: browser Back can restore an old server snapshot.
 const FIRST_TICK_MS = 5_000;
 
-/** Live pack detail: fetches immediately on every pack switch (and on a mount
- *  with no server data), 5s after a mount that has it so page load stays clear,
- *  then refreshes every 60s while the tab is visible. The caller only ever
- *  passes `initial` for the matching pack (null on a sibling switch, per
- *  PackDetailClient) -- so a switch renders null (the caller's gated-empty
- *  sections) until the immediate tick lands, never the PREVIOUS pack's pool/
- *  Top Hits/odds under the new pack's name. The immediate tick still matters:
- *  without it, a sibling switch would sit empty for up to a full poll
- *  interval instead of resolving within one request. */
+/** Live pack detail. The caller passes each pack's own server detail with its
+ *  slug (a page load, or the pack page switching packs in place), so the first
+ *  refresh waits 5s after a load or a switch: page load stays clear and a
+ *  switch does not download at once what it was just handed. With no server
+ *  detail (`initial` null: the backend was down) it fetches at once. Then it
+ *  refreshes every 60s while the tab is visible.
+ *
+ *  Until a response for the current slug lands, the caller's `initial` is what
+ *  renders, never the PREVIOUS pack's pool, Top Hits or odds under the new
+ *  pack's name. */
 export function usePackDetailPoll(
   slug: string,
   initial: PackDetail | null,
@@ -28,6 +29,9 @@ export function usePackDetailPoll(
       intervalMs: POLL_MS,
       resetKey: slug,
       firstTickMs: initial === null ? 0 : FIRST_TICK_MS,
+      // The pack page hands over each pack's own detail with its slug, on a
+      // page load and on an in-place switch alike.
+      seedFollowsKey: true,
       accept: async (next) => {
         const { PackPollResponseSchema, parseOne } = await loadSchemas();
         return parseOne(PackPollResponseSchema, next)?.detail ?? null;

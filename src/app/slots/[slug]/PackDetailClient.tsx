@@ -87,6 +87,10 @@ export default function PackDetailClient({
   initialQty = 1,
   freePackEligible = true,
   freePackMissing = [],
+  onPick,
+  onIntent,
+  pendingPack = null,
+  pendingCategory = null,
 }: {
   pack: ResolvedPack;
   siblings: Pack[];
@@ -119,15 +123,28 @@ export default function PackDetailClient({
    * the reel that ends in a refusal.
    */
   freePackMissing?: FreePackRequirement[];
+  /**
+   * Switch to another pack in place (PackPage): a plain click on a pack tile or
+   * a category tab calls this instead of loading the pack's address as a new
+   * page. Absent, a tile is an ordinary link and a tab an ordinary navigation.
+   */
+  onPick?: (id: string, href: string, categoryId?: string) => void;
+  /** The pointer came to rest on a tile: its pack may be fetched early. */
+  onIntent?: (id: string) => void;
+  /** The pack (and, for a tab, the category) a switch is fetching. */
+  pendingPack?: string | null;
+  pendingCategory?: string | null;
 }) {
   const { customer } = useAuth();
   const { balance, openTopUp } = useTopUp();
   const router = useRouter();
-  // Route data owns selection so the address bar, shared links and browser
-  // history always describe the pack being shown.
+  // The address owns selection so the address bar, shared links and browser
+  // history always describe the pack being shown. PackPage switches packs in
+  // place, so ONE instance of this component lives across packs: anything it
+  // remembers about a pack has to be reset when `pack` changes (below).
   const active = pack;
   // Ads funnel (lib/pixel.ts): a pack page view. Keyed on the pack, not the
-  // mount — switching to a sibling pack can reuse this component.
+  // mount — switching to a sibling pack reuses this component.
   useEffect(() => {
     // A pack nobody can buy yet has no business in the ads funnel.
     if (active.draft) return;
@@ -166,6 +183,16 @@ export default function PackDetailClient({
   const polledDetail = usePackDetailPoll(active.id, detail);
   const liveDetail = active.draft ? detail : polledDetail;
   const [openCard, setOpenCard] = useState<CardSeed | null>(null);
+  // A new pack starts clean, as a new page used to: no message about the last
+  // pack's balance or verification, no card of it left open.
+  const [stateFor, setStateFor] = useState(pack.id);
+  if (stateFor !== pack.id) {
+    setStateFor(pack.id);
+    setOpenError(verifyPrompt);
+    setNeedsTopUp(false);
+    setNeedsVerify(verifyPrompt !== null);
+    setOpenCard(null);
+  }
   // A pool card already IS a card seed (one view) — the overlay reads the
   // fields it needs and ignores the rest.
   const toSeed = (c: PackCard): CardSeed => c;
@@ -255,7 +282,9 @@ export default function PackDetailClient({
   const switchCategory = (id: string) => {
     if (id === pack.categoryId) return;
     const first = categoryTabs.find((t) => t.id === id)?.firstPackId;
-    if (first) router.push(packHref(first, qty), { scroll: false });
+    if (!first) return;
+    if (onPick) onPick(first, packHref(first, qty), id);
+    else router.push(packHref(first, qty), { scroll: false });
   };
 
   // The admin-PUBLISHED odds — the ONLY rates players see. Null (unset) hides
@@ -540,14 +569,19 @@ export default function PackDetailClient({
               Open button below the fold. On mobile the page itself scrolls. */}
           <div className="rounded-[2rem] bg-white/[0.04] p-1.5 ring-1 ring-white/10">
             <div className="flex flex-col overflow-hidden bg-neutral-950 rounded-[calc(2rem-0.375rem)] shadow-[inset_0_1px_1px_rgba(255,255,255,0.12)] [scrollbar-color:#404040_transparent] [scrollbar-width:thin] lg:max-h-[calc(100svh-6.75rem)] lg:overflow-y-auto">
+              {/* No key: the picker stays mounted across a switch, so the
+                  tile just tapped keeps focus and nothing in it flickers. It
+                  follows the pack itself (see PackPicker). */}
               <PackPicker
-                // The open shelf and language start from the pack on the page.
-                key={pack.id}
                 pack={pack}
                 siblings={siblings}
                 categoryTabs={categoryTabs}
                 qty={qty}
                 onCategory={switchCategory}
+                onPick={onPick}
+                onIntent={onIntent}
+                pendingPack={pendingPack}
+                pendingCategory={pendingCategory}
               />
 
               <div
@@ -790,6 +824,8 @@ export default function PackDetailClient({
           {pool.length > 0 && (
             <Reveal as="section">
               <PoolByRarity
+                // A new pack's row starts at its first card, dialog closed.
+                key={active.id}
                 rail={topPool}
                 full={pool}
                 tierChances={liveDetail?.publishedOdds?.tiers ?? null}
@@ -837,9 +873,11 @@ export default function PackDetailClient({
         {!active.draft && (
           <Reveal as="section" delay={90} className="min-w-0">
             {/* THIS pack's history — seeded from the server snapshot, then
-                polled so anyone's pull shows up here without a reload. Sibling
-                links load the selected pack's route and its own history seed. */}
+                polled so anyone's pull shows up here without a reload. A
+                switch to a sibling pack brings that pack's own seed. */}
             <PullHistory
+              // A new pack's history: its own seed, the tier filter back on All.
+              key={active.id}
               variant="board"
               heading={
                 <SectionHead
