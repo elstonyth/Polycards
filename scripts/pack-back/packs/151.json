@@ -1,0 +1,50 @@
+{
+  "name": "151",
+  "_paths": "Relative paths resolve against the repo root. The finished front art lives only in the main checkout (docs/research is gitignored), so it is named absolutely.",
+  "front": "C:/Users/PC/Desktop/Projects/Polycards/docs/research/151-pack/final/151-e-n3.png",
+  "frontWebp": "C:/Users/PC/Desktop/Projects/Polycards/docs/research/151-pack/final/151-e-n3.webp",
+  "backRef": "docs/research/home-3d/pack-back/151-back-a.png",
+  "backRaw": "docs/research/home-3d/pack-back/raw-a3-nbpro.jpg",
+  "outDir": "docs/research/home-3d/pack-back",
+  "back": {
+    "_comment": "All back numbers are in backRef pixel coordinates (897x1666).",
+    "bodyTop": 131,
+    "bodyBottom": 1531,
+    "textTop": 195,
+    "textBottom": 1452,
+    "stripRight": 73,
+    "seam": [444, 526],
+    "xL": 45,
+    "xR": 860,
+    "inset": 1.5,
+    "edgeThreshold": 18
+  },
+  "seamMode": "crimp",
+  "feather": { "start": 0, "end": 7, "shadow": 0.22, "shadowLen": 12 },
+  "rim": { "solid": 5, "fade": 16 },
+  "strip": {
+    "rimBand": [4, 34],
+    "rimBlur": 18,
+    "chromaGain": 1.0,
+    "contrast": 1.8,
+    "drift": 0.35,
+    "driftBlur": 24,
+    "lift": -4,
+    "navyToNeon": [22, 62],
+    "grain": {
+      "source": "C:/Users/PC/Desktop/Projects/Polycards/docs/research/151-pack/cut/151-e-n3.png",
+      "sigma": 1.5,
+      "clamp": 6,
+      "amount": 0,
+      "_note": "0 = off; at 0.8 the front's art line edges ghost into the strip"
+    }
+  },
+  "plate": {
+    "_comment": "make-plate.cjs: how the foil under the live-text zones is rebuilt.",
+    "textThreshold": 92,
+    "residualThreshold": 7,
+    "dilate": 2,
+    "iterations": 600,
+    "grainSeed": 151
+  }
+}
