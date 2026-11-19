@@ -3,10 +3,13 @@ import { CAT_ICON } from '@/lib/packs-data';
 import { cn } from '@/lib/utils';
 
 /**
- * The Polycards mark (public/branding/polycards-logo.png) redrawn as line art
- * in the logo's own 54x75 grid. Straight strokes in one flat colour (the text
- * colour) replace the old chrome render, which went soft and skewed at icon
- * size and vanished into nothing like the logo.
+ * The Polycards mark (brand/PolycardsMark) redrawn as line art in the logo's
+ * own 54x75 grid. Straight strokes in one flat colour (the text colour) replace
+ * the old chrome render, which went soft and skewed at icon size and vanished
+ * into nothing like the logo. Kept over PolycardsMark for 16-24 px badges
+ * (compared 2026-11-19): the two read almost the same, but this one's
+ * whole-unit corners and slightly heavier stroke hold up a little better at
+ * 16 px on 1x screens.
  */
 const POLY_MARK =
   // silhouette

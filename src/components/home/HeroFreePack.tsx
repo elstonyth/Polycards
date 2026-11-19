@@ -1,9 +1,9 @@
 'use client';
 
-import Image from 'next/image';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { openAuth } from '@/components/AuthButton';
+import PolycardsMark from '@/components/brand/PolycardsMark';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { useFreePackState } from '@/components/FreePackBadge';
 import type { FreePackState } from '@/lib/data/free-pack';
@@ -37,13 +37,7 @@ export function HeroFreePack({ promo }: { promo: boolean }) {
   const body = (title: string, line: string) => (
     <>
       <span className="flex h-12 w-10 shrink-0 items-center justify-center rounded-lg bg-white/[0.04]">
-        <Image
-          src="/branding/polycards-mark.png"
-          alt=""
-          width={57}
-          height={81}
-          className="h-6 w-auto"
-        />
+        <PolycardsMark box="logo" className="h-6 w-auto text-white" />
       </span>
       <span className="min-w-0 flex-1">
         <span className="block text-sm font-semibold text-white">{title}</span>

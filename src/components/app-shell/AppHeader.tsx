@@ -8,6 +8,8 @@ import { cn } from '@/lib/utils';
 import { rm } from '@/lib/format';
 import { useCountedValue } from '@/lib/use-counted-value';
 import AuthModalLoader from '@/components/AuthModalLoader';
+import PolycardsLogo from '@/components/brand/PolycardsLogo';
+import PolycardsMark from '@/components/brand/PolycardsMark';
 import { openAuth } from '@/components/AuthButton';
 import { useAuth } from '@/components/auth/AuthProvider';
 import NotificationBell from '@/components/NotificationBell';
@@ -17,9 +19,6 @@ import { useDrawDot } from './DrawDotProvider';
 import { useVaultDot } from './VaultDotProvider';
 import { openGames } from './games';
 import { TABS, isTabActive } from './tabs';
-
-const LOGO_SRC = '/branding/polycards-logo.png';
-const MARK_SRC = '/branding/polycards-mark.png';
 
 /**
  * App header: logo left, balance chip + top-up entry right (90scard's
@@ -59,22 +58,13 @@ export default function AppHeader() {
             {/* Under 430px the wordmark, mute, bell and balance chip do not
                 fit side by side (the mute button sat on the wordmark), so
                 phones get the mark alone. */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={MARK_SRC}
-              alt=""
-              width={20}
-              height={28}
-              className="h-7 w-auto min-[430px]:hidden"
+            {/* Vector art: the mark keeps the old picture's 57x81 box so it
+                sits exactly where the PNG did. */}
+            <PolycardsMark
+              box="logo"
+              className="h-7 w-auto shrink-0 text-white min-[430px]:hidden"
             />
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={LOGO_SRC}
-              alt="Polycards"
-              width={128}
-              height={44}
-              className="hidden h-7 w-auto object-contain min-[430px]:block lg:h-8"
-            />
+            <PolycardsLogo className="hidden h-7 w-auto shrink-0 text-white min-[430px]:block lg:h-8" />
           </Link>
 
           {/* Desktop nav — same seven destinations as the mobile tab bar. */}

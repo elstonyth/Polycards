@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { openAuth } from '@/components/AuthButton';
+import PolycardsMark from '@/components/brand/PolycardsMark';
 import { useAuth } from '@/components/auth/AuthProvider';
 import type { FreePackState } from '@/lib/data/free-pack';
 import { useConsent } from '@/lib/use-consent';
@@ -57,13 +57,7 @@ export default function FreePackBadge({
   const art = (
     <>
       <span className="flex size-8 items-center justify-center rounded-full bg-white/[0.06]">
-        <Image
-          src="/branding/polycards-mark.png"
-          alt=""
-          width={57}
-          height={81}
-          className="h-4 w-auto"
-        />
+        <PolycardsMark box="logo" className="h-4 w-auto text-white" />
       </span>
       Free pack
     </>

@@ -369,10 +369,24 @@ export function CoinScene(props: CoinSceneProps) {
         emblem.width = emblem.height = 512;
         const silver = emblem.getContext('2d');
         if (!silver) return;
+        // Crops are in the logo's 360x97 grid; polycards-logo-4x.png is a
+        // sharp 4x re-make from the vector, so scale to its pixels.
+        const k = logo.naturalWidth / 360;
         for (const context of [silver, bump]) {
           if (i === 0)
-            context.drawImage(logo, 0, 0, 60, 90, 158, 108, 196, 294);
-          else context.drawImage(logo, 90, 20, 278, 70, 64, 208, 384, 97);
+            context.drawImage(logo, 0, 0, 60 * k, 90 * k, 158, 108, 196, 294);
+          else
+            context.drawImage(
+              logo,
+              90 * k,
+              20 * k,
+              278 * k,
+              70 * k,
+              64,
+              208,
+              384,
+              97,
+            );
           context.font = '600 28px sans-serif';
           context.textAlign = 'center';
           context.fillStyle = '#fff';
@@ -418,7 +432,7 @@ export function CoinScene(props: CoinSceneProps) {
     logo.onerror = () => {
       if (!disposed) setFailed(true);
     };
-    logo.src = '/branding/polycards-logo.png';
+    logo.src = '/branding/polycards-logo-4x.png';
     fetch('/coin-flip/motion.json', { signal: abort.signal })
       .then((r) => {
         if (!r.ok) throw new Error('Motion unavailable');
