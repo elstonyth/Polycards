@@ -192,7 +192,7 @@ async function render(
         pack: BRONZE,
         recentPulls: [],
         count: props.count ?? 1,
-        publishedOdds: null,
+        pullOdds: null,
         pool: POOL,
         freeRipClaimId: props.freeRipClaimId ?? null,
       }),

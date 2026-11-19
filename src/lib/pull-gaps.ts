@@ -2,8 +2,8 @@
  * Axis math for the pull-history stats chart (PullGapsChart.tsx) — pure, so
  * the scale is unit-testable without rendering.
  *
- * The reference line is the tier's expected gap (1 / published rate) when the
- * pack publishes one, else the observed mean; the axis is laid out in
+ * The reference line is the tier's expected gap (1 / Pull Odds rate) when the
+ * pack has one, else the observed mean; the axis is laid out in
  * multiples of that line (0 · avg · 2·avg · 3·avg, like the reference design)
  * and stretched further only when a bar would otherwise overflow.
  */

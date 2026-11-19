@@ -68,16 +68,17 @@ export const TicketOddsRowSchema = z.looseObject({
 
 /** GET /store/packs/:slug as data/packs.ts#getPackDetail reads it.
  *
- *  `published_odds` stays UNVALIDATED here on purpose: it is jsonb
- *  passthrough, and parsePublishedOdds sanitizes it field by field
+ *  `pull_odds` stays UNVALIDATED here on purpose: it is jsonb
+ *  passthrough, and parsePullOdds sanitizes it field by field
  *  (dropping unknown tiers and out-of-range percentages) rather than
  *  rejecting the whole response over one bad number. `odds` is a
  *  droppableArray for the same reason as the catalog: a bad row drops, a
- *  non-array response does not read as "this pack has no pool". */
+ *  non-array response does not read as "this pack has no pool".
+ *  data/packs.ts also reads an older backend's previous key. */
 export const PackDetailPageSchema = z.looseObject({
   odds: droppableArray(z.union([OddsEntrySchema, TicketOddsRowSchema])),
   prize_type: prizeType,
-  published_odds: z.unknown().optional(),
+  pull_odds: z.unknown().optional(),
 });
 
 /** GET /store/pulls/recent row — handle + name + known rarity + finite value.

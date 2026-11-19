@@ -63,7 +63,7 @@ export default async function SlotSpinPage({
       // the machine's own wins do.
       recentPulls={isTicketPack(base.pack) ? [] : recentPulls.pulls}
       count={count}
-      publishedOdds={detail?.publishedOdds ?? null}
+      pullOdds={detail?.pullOdds ?? null}
       // The reel flickers ONLY these cards' Pokémon (decoys tied to a reward),
       // never arbitrary species. Available for real spins too, not just demo.
       pool={detail?.pool ?? []}

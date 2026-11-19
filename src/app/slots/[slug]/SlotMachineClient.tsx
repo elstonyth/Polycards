@@ -54,12 +54,12 @@ import {
   type RollRequest,
 } from '@/lib/roll-batch';
 import {
-  publishedOddsRows,
+  pullOddsRows,
   poolValueRange,
   poolExpectedValue,
   ticketOddsPool,
   tierValueRanges,
-  type PublishedOdds,
+  type PullOdds,
 } from '@/lib/packs-format';
 import { rarityRgb, RARITY_ORDER } from '@/lib/rarity';
 import { columnDurationMs, SETTLE_MS, CRAWL_MS } from '@/lib/vault-reel';
@@ -159,7 +159,7 @@ export default function SlotMachineClient({
   pack,
   recentPulls,
   count,
-  publishedOdds,
+  pullOdds,
   pool = [],
   demoPool = null,
   freeRipClaimId = null,
@@ -167,8 +167,8 @@ export default function SlotMachineClient({
   pack: ResolvedPack & Pack;
   recentPulls: RecentPull[];
   count: number;
-  /** Admin-published PUBLIC odds for the OddsSheet; null = not published. */
-  publishedOdds: PublishedOdds | null;
+  /** The Pull Odds for the OddsSheet; null = not set. */
+  pullOdds: PullOdds | null;
   /** The pack's full public prize pool — the reel flickers ONLY these cards'
    *  Pokémon (decoys tied to a reward), never arbitrary species. */
   pool?: PackCard[];
@@ -296,12 +296,11 @@ export default function SlotMachineClient({
   const valueRange = useMemo(() => poolValueRange(oddsPool), [oddsPool]);
   // Per-tier ranges, so the sheet matches the pack page's odds panel row for row.
   const tierRanges = useMemo(() => tierValueRanges(oddsPool), [oddsPool]);
-  // Expected value over the published tiers — the sheet's top row, same as the
+  // Expected value over the Pull Odds tiers — the sheet's top row, same as the
   // pack page's panel.
   const expectedValue = useMemo(
-    () =>
-      publishedOdds ? poolExpectedValue(oddsPool, publishedOdds.tiers) : null,
-    [oddsPool, publishedOdds],
+    () => (pullOdds ? poolExpectedValue(oddsPool, pullOdds.tiers) : null),
+    [oddsPool, pullOdds],
   );
   // Per-reel decoy pools: strip i tiles its OWN shuffled copy of basePool, so
   // stacked reels read independently and the idle sequence is never the same
@@ -486,9 +485,9 @@ export default function SlotMachineClient({
     if (mode === 'paid' && giftsPending) return;
     play('tap');
 
-    // Which odds a demo Spin samples on: the published display odds, falling
+    // Which odds a demo Spin samples on: the pack's Pull Odds, falling
     // back to the static ODDS. Ignored by every paying route.
-    const rows = publishedOdds ? publishedOddsRows(publishedOdds) : null;
+    const rows = pullOdds ? pullOddsRows(pullOdds) : null;
     const request: RollRequest = {
       mode,
       packId: pack.id,
@@ -1020,7 +1019,7 @@ export default function SlotMachineClient({
       <OddsSheet
         open={oddsOpen}
         onClose={() => setOddsOpen(false)}
-        odds={publishedOdds ? publishedOddsRows(publishedOdds) : null}
+        odds={pullOdds ? pullOddsRows(pullOdds) : null}
         range={valueRange}
         expectedValue={expectedValue}
         tierRanges={tierRanges}
