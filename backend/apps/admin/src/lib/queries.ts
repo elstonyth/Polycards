@@ -47,6 +47,8 @@ import {
   type PackGift,
   getDeliveryOrder,
   getDeliveryOrdersStock,
+  listShipPileExits,
+  clearShipPile,
   getProfitReport,
   getPnlReport,
   type CustomerScope,
@@ -993,11 +995,13 @@ export const useUpdateDeliveryOrder = () => {
       status?: DeliveryStatus;
       tracking_number?: string | null;
       proof_images?: string[];
+      pile_checked?: true;
     }) =>
       updateDeliveryOrder(vars.id, {
         status: vars.status,
         tracking_number: vars.tracking_number,
         proof_images: vars.proof_images,
+        pile_checked: vars.pile_checked,
       }),
     // Status filters + pages vary, so drop the whole delivery-orders
     // namespace — and the Stock buckets and Procurement lists a status move
@@ -1009,11 +1013,33 @@ export const useUpdateDeliveryOrder = () => {
 export const useBulkUpdateDeliveryOrders = () => {
   const invalidateStock = useInvalidateStock();
   return useMutation({
-    mutationFn: (vars: { ids: string[]; status: DeliveryStatus }) =>
-      bulkUpdateDeliveryOrders(vars.ids, vars.status),
+    mutationFn: (vars: {
+      ids: string[];
+      status: DeliveryStatus;
+      pileCheckedIds?: string[];
+    }) => bulkUpdateDeliveryOrders(vars.ids, vars.status, vars.pileCheckedIds),
     // Partial success is the contract, so invalidate on SETTLE (not success):
     // a throw here can still leave earlier ids in the batch already moved.
     onSettled: () => invalidateStock(),
+  });
+};
+
+// Orders that left the ship pile without shipping and whose parcel is not
+// marked pulled (incident 2026-11-03). Polled, so a move made elsewhere
+// (another admin, a script) reaches a packer who keeps the Orders page open.
+export const useShipPileExits = () =>
+  useQuery({
+    queryKey: qk.shipPile,
+    queryFn: listShipPileExits,
+    refetchInterval: 60_000,
+  });
+
+export const useClearShipPile = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => clearShipPile(id),
+    // The alert and the list's "Was in the pile" badges both read it.
+    onSettled: () => qc.invalidateQueries({ queryKey: qk.deliveryOrdersKey }),
   });
 };
 

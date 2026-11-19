@@ -789,6 +789,10 @@ export async function getOnlineNow(
 
 // Shapes are the backend's (ADR 0017).
 import type {
+  ShipPileMark,
+  ShipPileResponse,
+} from '@acme/api/admin/delivery-orders/ship-pile';
+import type {
   SettlementGranularity,
   SettlementReport,
 } from '@acme/api/admin/payments/settlement';
@@ -1163,7 +1167,24 @@ export interface AdminDeliveryOrder {
   items: AdminDeliveryItem[];
   /** The shipment tracker's last carrier check (list route only). */
   tracking_snapshot?: DeliveryTrackingSnapshot | null;
+  /** A canceled or processed order's newest move out of the ship pile (list
+   *  route only): where it sat, where it went, and when its parcel was marked
+   *  pulled. */
+  ship_pile?: ShipPileMark | null;
 }
+
+// Orders that left the ship pile without shipping and whose parcel is not
+// marked pulled (GET /admin/delivery-orders/ship-pile). Shapes are the
+// backend's (ADR 0017).
+export const listShipPileExits = () =>
+  getJson<ShipPileResponse>('/admin/delivery-orders/ship-pile');
+
+// The packer marks the parcel pulled; a second press is a no-op.
+export const clearShipPile = (id: string) =>
+  postJson<{ order_id: string; cleared_at: string; already_cleared: boolean }>(
+    `/admin/delivery-orders/${encodeURIComponent(id)}/ship-pile`,
+    {},
+  );
 
 /** Mirrors the backend TrackingSnapshot (modules/packs/shipment-tracking.ts). */
 export interface DeliveryTrackingSnapshot {
@@ -1214,13 +1235,18 @@ export async function listDeliveryOrders(
 
 // Mark up to 100 orders with one status. Partial success is the contract:
 // `skipped` carries the refusal (or the benign `already <status>`) per id.
+// `pileCheckedIds`: the orders whose ship-pile parcel the admin confirmed
+// pulled. The server refuses a move out of the pile for any other id.
 export const bulkUpdateDeliveryOrders = (
   ids: string[],
   status: DeliveryStatus,
+  pileCheckedIds: string[] = [],
 ) =>
   postJson<{ updated: string[]; skipped: { id: string; reason: string }[] }>(
     '/admin/delivery-orders/bulk',
-    { ids, status },
+    pileCheckedIds.length
+      ? { ids, status, pile_checked_ids: pileCheckedIds }
+      : { ids, status },
   );
 
 // Check every shipped order with its carrier now and complete the delivered
@@ -1278,6 +1304,7 @@ export async function updateDeliveryOrder(
     status?: DeliveryStatus;
     tracking_number?: string | null;
     proof_images?: string[];
+    pile_checked?: true;
   },
 ): Promise<{ order_id: string; status: DeliveryStatus }> {
   const res = await fetch(

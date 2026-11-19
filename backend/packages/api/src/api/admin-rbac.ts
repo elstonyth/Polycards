@@ -546,6 +546,13 @@ export const ADMIN_ROUTES: readonly AdminRoute[] = [
     method: 'POST',
     limits: ACTION,
   },
+  // "Parcel pulled" for an order cancelled from the ship pile — one audit row
+  // per press; same admin budget.
+  {
+    matcher: '/admin/delivery-orders/*/ship-pile',
+    method: 'POST',
+    limits: ACTION,
+  },
   // Pack list reorder — batch rank write across the packs list; same admin
   // budget.
   { matcher: '/admin/packs/reorder', method: 'POST', limits: ACTION },

@@ -163,6 +163,9 @@ export const qk = {
   // refetches it with the list.
   deliveryOrdersStock: (ids: string[]) =>
     ['admin', 'delivery-orders', 'stock', ids.join(',')] as const,
+  // Under deliveryOrdersKey, so every status move (a cancel from the pile
+  // among them) refetches the Orders page's ship-pile alert.
+  shipPile: ['admin', 'delivery-orders', 'ship-pile'] as const,
   deliveryOrder: (id: string) => ['admin', 'delivery-order', id] as const,
   // Every cached order detail — the stock allocation moves orders to
   // processed / ready_to_ship server-side after a GRN or invoice save.

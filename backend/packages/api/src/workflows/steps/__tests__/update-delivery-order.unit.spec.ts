@@ -75,6 +75,19 @@ describe('updateDeliveryOrderInvoke', () => {
     );
   });
 
+  it('forwards the ship-pile check to the transition seam', async () => {
+    // Dropping it would make every cancel from ready_to_ship refuse, however
+    // carefully the admin checked the pile.
+    const packs = makePacks();
+    await updateDeliveryOrderInvoke(
+      { order_id: 'do_1', status: 'canceled', pile_checked: true },
+      { container: containerFor(packs) },
+    );
+    expect(packs.transitionDeliveryOrderStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ pileChecked: true }),
+    );
+  });
+
   it('marks compensation to revert covered pulls to delivering on a completed transition', async () => {
     // Guards the line-127 rename (input.status === 'delivered' -> 'completed'):
     // without it, a failed completed transition's compensation would silently

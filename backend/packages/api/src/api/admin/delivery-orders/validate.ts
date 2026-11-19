@@ -26,6 +26,17 @@ export type AdminDeliveryUpdate = {
   status?: DeliveryStatus;
   tracking_number?: string | null;
   proof_images?: string[];
+  /** The admin says the parcel was pulled from the ship pile (see
+   *  shipPileCancelRefusal). Present only when true. */
+  pile_checked?: true;
+};
+
+// `pile_checked` on the single-order body: absent or false means "not
+// checked"; anything that is not a boolean is a client bug, not a silent no.
+const coercePileChecked = (raw: unknown): { pile_checked?: true } => {
+  if (raw === undefined || raw === false) return {};
+  if (raw !== true) bad('`pile_checked` must be a boolean.');
+  return { pile_checked: true };
 };
 
 // Validate the status query filter (?status=). Returns undefined when absent.
@@ -66,7 +77,15 @@ export function coerceCustomerId(raw: unknown): string | undefined {
   return trimmed;
 }
 
-export type BulkStatusBody = { ids: string[]; status: DeliveryStatus };
+export type BulkStatusBody = {
+  ids: string[];
+  status: DeliveryStatus;
+  /** The ids whose ship-pile parcel the admin confirmed pulled: exactly the
+   *  orders the bulk bar's confirm named, so an order that entered the pile
+   *  after the page loaded is still refused (shipPileExitRefusal). Present
+   *  only when non-empty. */
+  pile_checked_ids?: string[];
+};
 
 // Body of POST /admin/delivery-orders/bulk. The 100-id cap is the contract the
 // route's sequential loop is sized for (one advisory-locked transaction per
@@ -90,7 +109,20 @@ export function coerceBulkStatusBody(raw: unknown): BulkStatusBody {
   ) {
     bad(`Invalid status '${String(b.status)}'.`);
   }
-  return { ids: b.ids as string[], status: b.status as DeliveryStatus };
+  const ids = b.ids as string[];
+  const checked = b.pile_checked_ids ?? [];
+  if (
+    !Array.isArray(checked) ||
+    checked.some((v) => typeof v !== 'string' || !ids.includes(v))
+  ) {
+    bad('`pile_checked_ids` must list ids from `ids`.');
+  }
+  const confirmed = checked as string[];
+  return {
+    ids,
+    status: b.status as DeliveryStatus,
+    ...(confirmed.length ? { pile_checked_ids: confirmed } : {}),
+  };
 }
 
 export function coerceDeliveryUpdateBody(raw: unknown): AdminDeliveryUpdate {
@@ -127,6 +159,7 @@ export function coerceDeliveryUpdateBody(raw: unknown): AdminDeliveryUpdate {
     }
     out.proof_images = (b.proof_images as string[]).map((u) => u.trim());
   }
+  Object.assign(out, coercePileChecked(b.pile_checked));
   if (
     out.status === undefined &&
     out.tracking_number === undefined &&
