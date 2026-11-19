@@ -211,6 +211,14 @@ export function newMerchantTransactionId(): string {
   return `PC-${randomUUID().replace(/-/g, '')}`;
 }
 
+/**
+ * The refusal when a rail that declares the paying account (GMpay) finds no
+ * saved account at a bank it serves. The storefront passes it through
+ * verbatim (vault-errors.ts matches "save the bank account you pay from").
+ */
+export const PAYER_BANK_REQUIRED_MESSAGE =
+  'Save the bank account you pay from first, on the Withdraw page. Singapore top-ups are matched to it.';
+
 export type StartDepositInput = {
   /** From the verified token — NEVER the request body. */
   customerId: string;
@@ -223,6 +231,9 @@ export type StartDepositInput = {
   customer?: TgpayCustomer;
   /** Name on the paying bank account — regional gateways (A3Pay) only. */
   payerName?: string;
+  /** The paying account's bank and number, from the customer's saved
+   *  accounts — only a rail that declares the payer's account (GMpay). */
+  payerBank?: { bankCode: string; accountNumber: string };
   /** The deposit rate (RM per unit) the customer was shown; regional only. */
   quotedRate?: number;
   /**
@@ -392,6 +403,20 @@ export async function startDeposit(
     );
   }
 
+  // The paying account itself (GMpay declares it on every pay-in). Refused
+  // here, before any row, for the same reason as the name above.
+  const needsPayerBank = GATEWAYS[gateway].needsPayerBank === true;
+  const payerBank = input.payerBank;
+  if (
+    needsPayerBank &&
+    !(payerBank?.bankCode.trim() && payerBank.accountNumber.trim())
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      PAYER_BANK_REQUIRED_MESSAGE,
+    );
+  }
+
   const config = gatewayConfigFor(gateway);
 
   const merchantTransactionId = newMerchantTransactionId();
@@ -449,6 +474,7 @@ export async function startDeposit(
         customer: input.customer,
         ...(fx ? { gatewayAmount: fx.gatewayAmount } : {}),
         ...(needsPayerName ? { payerName } : {}),
+        ...(needsPayerBank && payerBank ? { payerBank } : {}),
       },
       config,
     );
@@ -561,6 +587,36 @@ export async function startDeposit(
           GATEWAYS[gateway].payinNudgeCents,
         )
       : null;
+  // The gateway will ask the customer for a sum outside the nudge window
+  // (GMpay allows none; e.g. it rounded S$100.50): the callback and the sweep
+  // would refuse what they pay. Keep their token so the row can be followed,
+  // and never hand out that cashier.
+  const asked = fx !== null ? Number(result.depositActualAmount) : NaN;
+  if (
+    fx !== null &&
+    nudged === null &&
+    Number.isFinite(asked) &&
+    asked > 0 &&
+    Math.round(asked * 100) !== Math.round(fx.gatewayAmount * 100)
+  ) {
+    await packs.updateGatewayDeposits({
+      id: row.id,
+      gateway_transaction_id: result.transactionId,
+    });
+    try {
+      scope
+        .resolve<{ error: (msg: string) => void }>('logger')
+        .error(
+          `[payments] deposit ${merchantTransactionId}: ${gateway} asks ${fx.currency} ${asked} for a ${fx.currency} ${fx.gatewayAmount} lock — cashier withheld, row left pending`,
+        );
+    } catch {
+      // The row is already safe; a failed log line changes nothing.
+    }
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      `${fx.currency} top-ups are temporarily unavailable on our side for this amount. Try a round amount, like ${fx.currency === 'SGD' ? 'S$' : `${fx.currency} `}100.`,
+    );
+  }
   const relock =
     nudged !== null &&
     nudged.credit <= GATEWAYS[gateway].limits.depositMax &&
@@ -889,6 +945,7 @@ export async function creditDepositByAdmin(
       row.merchant_transaction_id,
       config,
       rowFx(row),
+      row.gateway_transaction_id,
     );
   } catch {
     throw refused(

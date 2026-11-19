@@ -8,6 +8,8 @@ import {
   getWithdrawalDetail,
   resolveActiveGateway,
   rowGatewayConfigs,
+  rowGateway,
+  GATEWAYS,
   RETIRED_GATEWAYS,
 } from '../modules/packs/gateway';
 import { classifyRequeryError } from '../modules/packs/gateway-reconcile';
@@ -142,6 +144,26 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
   let findings = 0;
   let skipped = 0;
 
+  /**
+   * A row of a gateway that can be asked only by its own id (GMpay), which
+   * never got one: its create was refused or never answered, so nothing
+   * exists at the gateway to compare. Unstamped, it would be skipped as
+   * unclear every run and hold a never-checked slot for the whole window.
+   * Stamped clean, except a settled one: money credited or paid that the
+   * gateway can never confirm is a finding.
+   */
+  const unaskable = (row: {
+    gateway?: string | null;
+    gateway_transaction_id?: string | null;
+  }): boolean => {
+    const id = rowGateway(row);
+    return Boolean(
+      id && GATEWAYS[id].lookupNeedsGatewayId && !row.gateway_transaction_id,
+    );
+  };
+  const UNASKABLE_SETTLED =
+    'settled without the gateway id — the gateway can be asked by that id only, so it cannot confirm this';
+
   const deposits = await queue(
     (f, o) => packs.listGatewayDeposits(f as never, o),
     ['settled', 'failed', 'expired'],
@@ -165,11 +187,23 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
       findings += 1;
       continue;
     }
+    if (unaskable(row)) {
+      const note = row.status === 'settled' ? UNASKABLE_SETTLED : null;
+      await packs.updateGatewayDeposits({
+        id: row.id,
+        audited_at: now,
+        ...stampNote(row, note),
+      });
+      checked += 1;
+      if (note) findings += 1;
+      continue;
+    }
     try {
       const d = await getDepositDetail(
         row.merchant_transaction_id,
         config,
         rowFx(row),
+        row.gateway_transaction_id,
       );
       answer = { kind: 'detail', state: d.state, amount: Number(d.amount) };
       netAmount = Number.isFinite(Number(d.netAmount))
@@ -195,7 +229,20 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
     };
     let note: string | null;
     const entryRef = row.gateway_adjustment_ref;
+    const entryCheckable =
+      !GATEWAYS[rowGateway(row) ?? 'tgpay']?.lookupNeedsGatewayId;
     if (
+      entryRef &&
+      !entryCheckable &&
+      row.status === 'settled' &&
+      answer.kind === 'detail' &&
+      answer.state === 'failed'
+    ) {
+      // GMpay answers by its own token only, and a linked manual entry is
+      // not one we hold: a person checks it in their back office. Stamped as
+      // a finding rather than skipped as unclear on every run.
+      note = `manual entry ${entryRef} cannot be checked automatically on this gateway — confirm it in their back office`;
+    } else if (
       entryRef &&
       row.status === 'settled' &&
       answer.kind === 'detail' &&
@@ -283,11 +330,22 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
       findings += 1;
       continue;
     }
+    if (unaskable(row)) {
+      const note = row.status === 'settled' ? UNASKABLE_SETTLED : null;
+      await stampWithdrawalAudit(packs, row.id, {
+        audited_at: now,
+        ...stampNote(row, note),
+      });
+      checked += 1;
+      if (note) findings += 1;
+      continue;
+    }
     try {
       const d = await getWithdrawalDetail(
         row.merchant_transaction_id,
         config,
         rowFx(row),
+        row.gateway_transaction_id,
       );
       answer = { kind: 'detail', state: d.state, amount: Number(d.amount) };
       netAmount = Number.isFinite(Number(d.netAmount))

@@ -116,6 +116,7 @@ export async function linkAdjustmentEntry(
       row.merchant_transaction_id,
       config,
       rowFx(row),
+      row.gateway_transaction_id,
     );
   } catch {
     throw refused(
