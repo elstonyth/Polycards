@@ -42,7 +42,7 @@ export type RegionalRailUi = {
 };
 
 export const REGIONAL_RAILS: Readonly<Record<string, RegionalRailUi>> = {
-  // Singapore (A3Pay): rungs sized for S$, and the two channels labelled the
+  // Singapore (GMpay since 2026-11-19, A3Pay before): rungs sized for S$, and the two channels labelled the
   // way a Singapore payer knows them — the codes are the BQR / OB the backend
   // allow-lists for that gateway.
   SGD: {
@@ -69,7 +69,7 @@ export const REGIONAL_RAILS: Readonly<Record<string, RegionalRailUi>> = {
     payee: 'Your bank',
     paidTo: 'bank',
     exactAmountNote:
-      'Transfer the exact amount the next page shows, cents included. It can be a few cents more than this (for example S$100.01). A rounded amount can’t be matched to your top-up.',
+      'Pay the exact amount the next page shows, cents included. A different amount can’t be matched to your top-up.',
   },
   // USDT (GlobePay365): the chain it takes, in the code the backend
   // allow-lists for that gateway (UTRC). ERC20 (UERC) is withdrawn until

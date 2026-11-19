@@ -707,9 +707,8 @@ export default function TopUpSheet({
                   {rail.ui.unit} = RM {rail.rate.deposit.toFixed(4)}
                 </p>
               )}
-              {/* The A3Pay platform matches a transfer ONLY by its exact
-                  amount, and may ask for a few cents more than this to keep
-                  it unique. */}
+              {/* The S$ rail (GMpay) matches a payment by its exact amount;
+                  any other sum cannot be credited to this top-up. */}
               {rail && (
                 <p className="mt-2 text-[12px] leading-snug text-neutral-300">
                   {rail.ui.exactAmountNote}

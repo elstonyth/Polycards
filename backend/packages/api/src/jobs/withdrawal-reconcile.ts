@@ -120,6 +120,7 @@ export default async function withdrawalReconcileJob(
           withdrawal.merchant_transaction_id,
           config,
           rowFx(withdrawal),
+          withdrawal.gateway_transaction_id,
         );
         gatewayStatus = detail.statusId;
         action = withdrawalReconcileAction(detail.state);

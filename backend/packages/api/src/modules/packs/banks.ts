@@ -147,6 +147,14 @@ export const MY_BANKS: readonly Bank[] = [
  * and POSB are one bank with one SWIFT but two A3Pay codes, so POSB gets its
  * own slug.
  */
+/**
+ * GMpay's code for each Singapore bank, keyed by canonical id, from their
+ * live SGD /v3/banklist. Their API answers only whitelisted IPs, so the list
+ * can only be read from the production server. Until it is filled, no
+ * Singapore bank has a GMpay code, so GMpay top-ups and payouts refuse.
+ */
+const GMPAY_SG_CODES: Partial<Record<string, GatewayBankCode>> = {};
+
 const sgBank = (
   id: string,
   name: string,
@@ -156,7 +164,10 @@ const sgBank = (
 ): Bank => ({
   id,
   name,
-  codes: { a3pay: { code, name: a3payName } },
+  codes: {
+    a3pay: { code, name: a3payName },
+    ...(GMPAY_SG_CODES[id] ? { gmpay: GMPAY_SG_CODES[id] } : {}),
+  },
   legacyAliases: [],
   ...(accountLengths ? { accountLengths } : {}),
 });
