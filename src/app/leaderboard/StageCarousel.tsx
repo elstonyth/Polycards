@@ -194,6 +194,19 @@ function StageCard({
   );
 }
 
+// The page column is up to 863px wide (max-w-4xl), so a neighbour card showed
+// ~230px and the rail's edge sliced its heading and figures ("E 3"). The drag
+// layer (GalleryRail's first child inside its overflow-hidden window) is
+// masked to the active card plus about 9px of each neighbour's edge, faded out
+// by 30px from the active card: a neighbour's text starts ~30px in (its p-4,
+// scaled 0.9), so none of it shows, cut or whole. That edge, the pills, the
+// chevrons and "n of N" still say more stages exist, and a phone looks as it
+// did (its rail already left only the edge). The mask sits on the drag layer,
+// not the window, so the chevrons stay visible; the selector follows
+// GalleryRail's markup (root > window > drag layer).
+const PEEK_EDGE_ONLY =
+  '[&>div:last-child>div:first-child>div:first-child]:[mask-image:linear-gradient(to_right,transparent_calc(50%_-_var(--slab-w)/2_-_30px),black_calc(50%_-_var(--slab-w)/2_-_24px),black_calc(50%_+_var(--slab-w)/2_+_24px),transparent_calc(50%_+_var(--slab-w)/2_+_30px))]';
+
 export function StageCarousel({
   stages,
   pooled,
@@ -215,7 +228,7 @@ export function StageCarousel({
     // for a single slab image). The 2×2 prize grid needs more room on phones —
     // 82vw keeps a neighbor-peek sliver while the tiles stay comfortable from
     // 320px (SE) up; 360px caps desktop. VIP/reveal rails are untouched.
-    <div className="mt-2 [--slab-w:min(82vw,360px)]">
+    <div className={cn('mt-2 [--slab-w:min(82vw,360px)]', PEEK_EDGE_ONLY)}>
       {/* Stage pills (the VIP-reference tab row): the always-visible map of
           every stage + its state. On phones the dimmed neighbor peek reads as
           background and the chevrons are sm+-only, so without this row nothing

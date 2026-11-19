@@ -5,11 +5,14 @@
 //
 // Shaped like the page with the Weekly Challenge on: the RANKS title (real
 // text, same place, not animated), the challenge hero (emblem, the heading,
-// the reset line) and the community pool panel, then the standings head
-// (LEADERBOARD, the period pill, the note) and six rows. Sizes measured on a
-// production build (2026-11-19): the heading is two 40px lines below md and
-// one from md (three at 320px), the pool panel 186px on a phone and 214px
-// from sm, so the pool lands where the page puts it from 375px up.
+// the reset line), the community pool panel and the weekly reward stages,
+// then the standings head (LEADERBOARD, the period pill, the note) and six
+// rows. Sizes measured on a
+// production build (2026-11-19/20): the heading is two 40px lines below md and
+// one from md (three at 320px), the pool panel 186-218px on a phone and 214px
+// from sm, the stage rail 492.5px (500.5px from sm, p-5 cards), so the pool
+// and the stages block land where the page puts them from 375px up. The
+// data-bone attributes are hooks for the tab-flow measuring script.
 import { SkeletonExit } from '@/components/PageTransition';
 import {
   BONE,
@@ -46,12 +49,58 @@ export default function LeaderboardLoading() {
             </div>
 
             {/* Community pool: p-6, label, readout, checkpoint bar, the sm+
-                label row, next-stage line. */}
-            <div className="mt-8 h-[186px] rounded-2xl border border-white/10 bg-neutral-900 sm:h-[214px]" />
+                label row, next-stage line. On a phone two of its lines wrap:
+                the label below ~385px, and the next-stage line ("Stage N
+                unlocks at RM 7,000,000 — RM 3,114,163 to go") below 430px
+                while both figures run to seven digits (+16px each). */}
+            <div className="mt-8 h-[202px] rounded-2xl border border-white/10 bg-neutral-900 max-[384px]:h-[218px] min-[430px]:h-[186px] sm:h-[214px]" />
 
-            {/* Standings head: LEADERBOARD (text-3xl, 36px line) at pt-6. */}
+            {/* Weekly reward stages: the h3, the stage pills (flex-wrap, so
+                four of them wrap onto two rows on a narrow phone as the real
+                ones do), the stage card at the rail's height and width, and
+                the "n of N" line under it. */}
+            <div
+              data-bone="stages-heading"
+              className="mt-8 flex h-7 items-center"
+            >
+              <div className={cn(BONE.bar, 'h-5 w-52')} />
+            </div>
+            <div
+              data-bone="stage-pills"
+              className="mt-2 mb-3 flex flex-wrap items-center justify-center gap-2"
+            >
+              {/* Three passed stages carry an icon; the selected one does not. */}
+              {['w-[89px]', 'w-[89px]', 'w-[89px]', 'w-[71px]'].map((w, i) => (
+                <div
+                  key={i}
+                  className={cn('h-11 rounded-full bg-neutral-900', w)}
+                />
+              ))}
+            </div>
+            <div
+              data-bone="stage-card"
+              className="flex h-[492.5px] justify-center [--slab-w:min(82vw,360px)] sm:h-[500.5px]"
+            >
+              <div
+                className={cn(
+                  BONE.panel,
+                  'h-full w-[var(--slab-w)] max-w-full',
+                )}
+              />
+            </div>
+            <div
+              data-bone="stage-counter"
+              className="mt-3 flex h-[18px] items-center justify-center"
+            >
+              <div className={cn(BONE.line, 'h-3 w-12')} />
+            </div>
+
+            {/* Standings head: LEADERBOARD (text-3xl, 36px line) at pt-6.
+                The rewards summary between the stages and here is left out:
+                its height follows the week's unlocked prizes (about 100px to
+                700px), so the standings start higher than on the page. */}
             <div className="pt-6">
-              <div className="flex h-9 items-center">
+              <div data-bone="standings-head" className="flex h-9 items-center">
                 <div className={cn(BONE.bar, 'h-7 w-48')} />
               </div>
             </div>

@@ -11,6 +11,13 @@ import { cn } from '@/lib/utils';
  *  wrapper with `pt-6`, the layout's top spacing. */
 export const PAGE_COLUMN = 'mx-auto w-full max-w-2xl px-fluid lg:max-w-4xl';
 
+/** For a page whose loading.tsx and loaded content can differ in height (Task:
+ *  a visitor's page is short, its skeleton is not). A cold load streams the
+ *  skeleton first, and a footer that then jumps up into view counted as a
+ *  0.048 layout shift (measured 2026-11-20). Holding the column to the screen
+ *  below the 69px header keeps the footer under the fold in both states. */
+export const PAGE_FILL = 'min-h-[calc(100svh-69px)]';
+
 /** The page title: Draw's no-wrap clamp (equal to text-3xl from 375px up),
  *  uppercase Nekst. `leading-none` so the title box is exactly the type size
  *  and a skeleton can put the same text in the same place. */

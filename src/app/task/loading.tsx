@@ -11,6 +11,7 @@ import { SkeletonExit } from '@/components/PageTransition';
 import {
   BONE,
   PAGE_COLUMN,
+  PAGE_FILL,
   PageTitle,
   SkeletonReveal,
 } from '@/components/ui/page-frame';
@@ -22,7 +23,7 @@ export default function TaskLoading() {
       <div
         role="status"
         aria-live="polite"
-        className={cn(PAGE_COLUMN, 'pt-6 pb-6')}
+        className={cn(PAGE_COLUMN, PAGE_FILL, 'pt-6 pb-6')}
       >
         <PageTitle as="p">TASK</PageTitle>
         <span className="sr-only">Loading</span>

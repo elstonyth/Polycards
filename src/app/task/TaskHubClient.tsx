@@ -20,7 +20,12 @@ import {
 } from 'lucide-react';
 import { checkInToday } from '@/lib/actions/tasks';
 import { Pill, pillVariants } from '@/components/ui/pill';
-import { PAGE_COLUMN, PageBody, PageTitle } from '@/components/ui/page-frame';
+import {
+  PAGE_COLUMN,
+  PAGE_FILL,
+  PageBody,
+  PageTitle,
+} from '@/components/ui/page-frame';
 import { HelpTip } from '@/components/ui/help-tip';
 import { TicketArt } from '@/components/TicketArt';
 import {
@@ -538,7 +543,7 @@ export function TaskHubClient({
   const claimProps: Claim = { onClaim: claim, claimingId: pendingId };
 
   return (
-    <div className={cn(PAGE_COLUMN, 'pt-6 pb-6')}>
+    <div className={cn(PAGE_COLUMN, PAGE_FILL, 'pt-6 pb-6')}>
       <PageTitle>TASK</PageTitle>
 
       <PageBody>
