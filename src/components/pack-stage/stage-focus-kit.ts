@@ -372,26 +372,25 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
     leave(fromHistory = false) {
       if (!on || leaving) return;
       if (fromHistory) entry = null; // the address already moved
-      const k = Math.round(pager.focusAt(window.scrollY));
-      if (pager.busy() || k <= 1) {
-        // from Front (or mid-move): straight back to the row
-        if (!pager.busy()) pager.goTo(0, window.scrollY, now());
-        else
-          setTimeout(() => {
-            if (on) run.leave(fromHistory);
-          }, 50);
+      if (pager.busy()) {
+        // mid-move: leave once it lands
+        setTimeout(() => {
+          if (on) run.leave(fromHistory);
+        }, 50);
         d.loop();
         return;
       }
+      const k = Math.round(pager.focusAt(window.scrollY));
+      // The text goes first, from any stop; `leaving` holds every block hidden
+      // until the focus ends, so no block (Front's included) shows on the way.
       leaving = true;
       render();
       setTimeout(() => {
         if (!on) return;
-        // unseen: the active block has faded; jump to Front, then return
-        window.scrollTo(0, stops[1] ?? 0);
-        leaving = false;
-        render();
-        pager.goTo(0, stops[1] ?? 0, now());
+        // the active block has faded: from a later stop, jump to Front first
+        const from = k > 1 ? (stops[1] ?? 0) : window.scrollY;
+        if (k > 1) window.scrollTo(0, from);
+        pager.goTo(0, from, now());
         d.loop();
       }, LEAVE_FADE_MS);
     },

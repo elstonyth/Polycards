@@ -160,9 +160,18 @@ describe('focus keys (focus-poses.json)', () => {
     expect(spotAt(3, ctx).on).toBe(0);
   });
 
-  it('neighbours fade out by 0.6 and slide off', () => {
-    expect(focusOpacity(0.6, false)).toBe(0);
-    expect(focusOpacity(0.6, true)).toBe(1);
+  it('neighbours are gone before the focused pack grows, and come back only as it arrives', () => {
+    // the first and last tenth of the zoom: never beside a pack that has
+    // left its row place (owner, 2026-11-20)
+    for (let f = 0.1; f <= 6; f += 0.05) {
+      expect(focusOpacity(f, false), `f=${f}`).toBe(0);
+      expect(focusOpacity(f, true)).toBe(1);
+    }
+    expect(focusOpacity(0, false)).toBe(1);
+    expect(focusOpacity(0.05, false)).toBeGreaterThan(0);
+  });
+
+  it('neighbours slide off', () => {
     const ctx = ctxFor('151', false);
     const l = LAYOUT.phone;
     const p = focusPose(

@@ -156,7 +156,7 @@ export default function StageTrack({
   // The provider's shared animation state: the float-in, the category swap
   // and the pointer lean (it listens for the pointer itself). Flat or 3D, both
   // layers pose from these same values.
-  const { values, attach } = stage3d;
+  const { values, attach, state: live } = stage3d;
   const hostRef = host;
 
   // Every frame of a move: the row slides by whole steps, each tile re-poses.
@@ -172,14 +172,18 @@ export default function StageTrack({
       pointerY: values.pointerY.get(),
       spin: values.spin.get(),
       exit: values.exit.get(),
+      // the focused view's own values: a repaint mid-focus keeps its poses
+      focus: live.focus,
+      turn: live.turn,
+      focusOn: live.focusOn,
     };
     row.style.setProperty('--track', String(Math.round(t * 10000) / 10000));
-    // The spin row (Ciao's packshot) is posed by the lazily loaded chunk:
-    // the same pose the canvas draws, so a tile without a 3D pack stands in
-    // place. At rest (or before the chunk) the step 1 poses.
+    // The spin row (Ciao's packshot) and the focused view are posed by the
+    // lazily loaded chunk: the same pose the canvas draws, so a tile without
+    // a 3D pack stands in place. At rest (or before the chunk) step 1's.
     const host = hostRef.current;
     if (
-      (state.spin > 0 || state.exit > 0) &&
+      (state.spin > 0 || state.exit > 0 || state.focus > 0) &&
       host &&
       spinKit()?.paintTiles(row, host, packs, state, cyArtRef.current)
     )
@@ -195,7 +199,7 @@ export default function StageTrack({
       );
       for (const key in vars) tile.style.setProperty(key, vars[key] ?? '');
     }
-  }, [track, packs, values, hostRef]);
+  }, [track, packs, values, hostRef, live]);
 
   // Only the visible category follows the shared values. Layout effects, here
   // and below: a changed row (React re-renders the tiles' rest pose into their

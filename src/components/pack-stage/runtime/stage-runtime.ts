@@ -208,6 +208,8 @@ export type StageRuntimeDebug = {
   failed: StageRuntimeFailReason | null;
   /** Spin row repeats drawn in the last frame, and whether the band covers the host. */
   copies: number;
+  /** The packs drawn in the last frame (copies left out). */
+  drawn: { id: string; index: number; opacity: number; z: number }[];
   spinBand: boolean;
   bandH: number;
   /** The spotlight last set on the focused pack. */
@@ -288,6 +290,9 @@ export function createStageRuntime(
   let spinBand = false;
   /** Repeats (clones) drawn in the last frame. */
   let lastCopies = 0;
+  /** QA: the packs drawn in the last frame, with their opacity and depth. */
+  let lastDrawn: { id: string; index: number; opacity: number; z: number }[] =
+    [];
   /** The focused pack's back (one at a time). */
   let focusBack: FocusBack | null = null;
   let backW = 0;
@@ -1111,6 +1116,7 @@ export function createStageRuntime(
         };
         const rise = 1 - stageSpring(clamp01(s.swap));
         let copiesDrawn = 0;
+        const drawnNow: typeof lastDrawn = [];
         for (const slot of slots) {
           const shown = drawnVariant(slot);
           for (const v of [slot.half, slot.full]) {
@@ -1221,6 +1227,12 @@ export function createStageRuntime(
           }
           const pose = poseAt(s, slot.index, l, desktop, slot.soldOut, ctx);
           paint(model, pose, opacity);
+          drawnNow.push({
+            id: slot.id,
+            index: slot.index,
+            opacity,
+            z: model.position.z,
+          });
           const sleeve = shown.model;
           if (focused && fo && fctx && sleeve) {
             const sp = fo.spot(s.focus, fctx);
@@ -1239,6 +1251,7 @@ export function createStageRuntime(
           if (bounds && frustum.intersectsObject(bounds)) live.push(slot.id);
         }
         lastCopies = copiesDrawn;
+        lastDrawn = drawnNow;
         st.renderer.render(st.scene, st.camera);
         if (seenShared.size === 0) sharedTextures(st);
         counters.draws++;
@@ -1329,6 +1342,7 @@ export function createStageRuntime(
       triangles: stage?.renderer.info.render.triangles ?? 0,
       failed,
       copies: lastCopies,
+      drawn: lastDrawn,
       spinBand,
       bandH: band.h,
       spot: lastSpot,

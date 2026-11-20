@@ -62,11 +62,16 @@
 .line {
   display: inline-block;
   transform: translateY(110%);
+  /* leaving, the heading holds until its block has faded (0.5 s), so the
+     block fades as one piece */
+  transition: transform 0s linear 0.5s;
 }
 
+/* arriving, the heading rises over its block's own fade (same delay and
+   length), so heading and body come in together */
 .over .block[data-on] .line {
   transform: none;
-  transition: transform 0.7s cubic-bezier(0.215, 0.61, 0.355, 1) 0.35s;
+  transition: transform 0.5s cubic-bezier(0.215, 0.61, 0.355, 1) 0.35s;
 }
 
 .tag {
