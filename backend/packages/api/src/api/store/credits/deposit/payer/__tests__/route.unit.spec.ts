@@ -57,6 +57,8 @@ describe('GET /store/credits/deposit/payer', () => {
       currency: 'SGD',
       saved_name: 'TAN AH KOW',
       real_name: 'Tan Ah Kow',
+      fixed_name: false,
+      blocked_reason: null,
     });
     expect(packs.savedBankAccountsFor).toHaveBeenCalledWith('cus_1');
   });
@@ -82,5 +84,54 @@ describe('GET /store/credits/deposit/payer', () => {
     await expect(run([], null, 'MYR')).rejects.toThrow(
       /MYR top-ups need no payer name/,
     );
+  });
+});
+
+describe('GET /store/credits/deposit/payer — GMpay', () => {
+  const GMPAY_ENV = {
+    GATEWAY_ENABLED: 'true',
+    GMPAY_ENABLED: 'true',
+    GMPAY_API_BASE: 'https://xapi.example.test/v3',
+    GMPAY_CLIENT_ID: 'client-1',
+    GMPAY_SECRET_KEY: 'secret',
+  };
+  beforeEach(() => {
+    process.env = { ...ORIGINAL, ...GMPAY_ENV };
+  });
+  const acct = (holder: string) => [
+    {
+      bankCode: 'DBSSSGSG',
+      accountHolderName: holder,
+      accountNumber: '0123456789',
+    },
+  ];
+
+  it('a full name on file: fixed, nothing in the way', async () => {
+    const { res } = await run(acct('TAN AH KOW'), 'TAN AH KOW');
+    expect(res.body).toEqual({
+      currency: 'SGD',
+      saved_name: 'TAN AH KOW',
+      real_name: 'TAN AH KOW',
+      fixed_name: true,
+      blocked_reason: null,
+    });
+  });
+
+  it('initials on file: says support must correct the name before paying', async () => {
+    const { res } = await run(acct('lkm'), 'lkm');
+    expect(res.body).toMatchObject({
+      saved_name: 'lkm',
+      fixed_name: true,
+      blocked_reason: "Singapore top-ups are matched to the full name on your bank account, and the name on your Polycards account is incomplete. Contact support to update it to your full name exactly as your bank shows it.",
+    });
+  });
+
+  it('no Singapore account: says to save the paying account first', async () => {
+    const { res } = await run([], 'TAN AH KOW');
+    expect(res.body).toMatchObject({
+      saved_name: null,
+      fixed_name: true,
+      blocked_reason: "Save the bank account you pay from first, on the Withdraw page. Singapore top-ups are matched to it.",
+    });
   });
 });

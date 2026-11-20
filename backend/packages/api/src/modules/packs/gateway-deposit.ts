@@ -414,9 +414,25 @@ export async function startDeposit(
     );
   }
 
-  // The name on the PAYING account (A3Pay matches it against the transfer).
-  // Refused here, before any row, rather than as the adapter's definite
-  // refusal after one.
+  // The paying account itself (GMpay declares it on every pay-in). Refused
+  // here, before any row. Checked BEFORE the name: on such a rail the name is
+  // the saved account's holder, so with no account there is no name either,
+  // and "save the account" is the one step that helps.
+  const needsPayerBank = GATEWAYS[gateway].needsPayerBank === true;
+  const payerBank = input.payerBank;
+  if (
+    needsPayerBank &&
+    !(payerBank?.bankCode.trim() && payerBank.accountNumber.trim())
+  ) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      PAYER_BANK_REQUIRED_MESSAGE,
+    );
+  }
+
+  // The name on the PAYING account (A3Pay and GMpay match it against the
+  // transfer). Refused here, before any row, rather than as the adapter's
+  // definite refusal after one.
   const payerName =
     typeof input.payerName === 'string' ? input.payerName.trim() : '';
   const needsPayerName = GATEWAYS[gateway].needsPayerName === true;
@@ -430,20 +446,6 @@ export async function startDeposit(
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       PAYER_NAME_INCOMPLETE_MESSAGE,
-    );
-  }
-
-  // The paying account itself (GMpay declares it on every pay-in). Refused
-  // here, before any row, for the same reason as the name above.
-  const needsPayerBank = GATEWAYS[gateway].needsPayerBank === true;
-  const payerBank = input.payerBank;
-  if (
-    needsPayerBank &&
-    !(payerBank?.bankCode.trim() && payerBank.accountNumber.trim())
-  ) {
-    throw new MedusaError(
-      MedusaError.Types.NOT_ALLOWED,
-      PAYER_BANK_REQUIRED_MESSAGE,
     );
   }
 

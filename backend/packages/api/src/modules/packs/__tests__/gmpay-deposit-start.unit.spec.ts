@@ -158,6 +158,14 @@ describe('a GMpay top-up and the paying account', () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
+  it('with no saved account and no name on file it still says to save the account first', async () => {
+    const packs = depositPacks();
+    await expect(pay(packs, undefined, '')).rejects.toThrow(
+      PAYER_BANK_REQUIRED_MESSAGE,
+    );
+    expect(packs.createDepositCapped).not.toHaveBeenCalled();
+  });
+
   it('a blank account number is no account', async () => {
     const packs = depositPacks();
     await expect(

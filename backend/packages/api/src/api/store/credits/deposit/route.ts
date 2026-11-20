@@ -98,19 +98,19 @@ export async function POST(
     customerId,
     'payment',
   );
-  // The name the sheet sent wins: it shows the one on file with "Change", or
-  // asks when none is saved. Otherwise (an API caller, or a page from before
-  // the field) the saved account's holder. Only a rail that matches the
-  // payer's name (A3Pay, GMpay: SGD) needs one.
-  // A rail that declares the paying account (GMpay) gets both name and
-  // account from one read of the saved accounts, never the account from the
-  // request body.
+  // A3Pay: the name the sheet sent wins (it shows the one on file with
+  // "Change", or asks when none is saved); otherwise the saved account's
+  // holder. Only a rail that matches the payer's name (SGD) needs one.
+  // A rail that declares the paying account (GMpay) takes name AND account
+  // from the saved accounts only, never from the request body: GMpay matches
+  // the KYC name (2026-11-20), and a saved account's holder is always the
+  // real name, so a typed name could only ever be refused.
   const typedName =
     typeof body.payer_name === 'string' && body.payer_name.trim()
       ? body.payer_name
       : undefined;
   const payer = GATEWAYS[gateway].needsPayerBank
-    ? await payerOnFile(req.scope, customerId, gateway, typedName)
+    ? await payerOnFile(req.scope, customerId, gateway, undefined)
     : {
         name:
           typedName ??

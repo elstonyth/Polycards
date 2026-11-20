@@ -10,6 +10,7 @@ import {
   getRegionalPayer,
   startDeposit,
   topUpCredits,
+  type RegionalPayer,
 } from '@/lib/actions/vault';
 import {
   DEFAULT_PAYMENT_LIMITS,
@@ -107,11 +108,9 @@ export default function TopUpSheet({
   // The paying account's name (A3Pay rails): what the sheet will send, the
   // lookup it was pre-filled from, and whether the customer opened it to edit.
   const [payerName, setPayerName] = useState('');
-  const [payer, setPayer] = useState<{
-    currency: string;
-    savedName: string | null;
-    realName: string | null;
-  } | null>(null);
+  const [payer, setPayer] = useState<
+    ({ currency: string } & RegionalPayer) | null
+  >(null);
   const [editingName, setEditingName] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -192,20 +191,25 @@ export default function TopUpSheet({
   useEffect(() => {
     if (!askFor) return;
     let live = true;
-    const settle = (answer: {
-      savedName: string | null;
-      realName: string | null;
-    }) => {
+    const settle = (answer: RegionalPayer) => {
       if (!live) return;
       setPayer({ currency: askFor, ...answer });
-      setPayerName(
-        (typed) => typed || answer.savedName || answer.realName || '',
+      // A fixed name (GMpay) is the saved holder, whatever was typed before.
+      setPayerName((typed) =>
+        answer.fixedName
+          ? (answer.savedName ?? '')
+          : typed || answer.savedName || answer.realName || '',
       );
     };
     // A failed lookup reads as nothing saved: the field shows, never a stuck
     // button.
     getRegionalPayer(askFor).then(settle, () =>
-      settle({ savedName: null, realName: null }),
+      settle({
+        savedName: null,
+        realName: null,
+        fixedName: false,
+        blockedReason: null,
+      }),
     );
     return () => {
       live = false;
@@ -213,9 +217,18 @@ export default function TopUpSheet({
   }, [askFor]);
   const payerInfo = askFor && payer?.currency === askFor ? payer : null;
   const payerLoading = askFor !== null && payerInfo === null;
-  const nameField = payerInfo !== null && (!payerInfo.savedName || editingName);
+  // GMpay takes the name from the saved account only (the backend ignores a
+  // typed one), so it is shown without "Change", and what would stop the
+  // top-up shows here, before Pay, instead of as a refusal after it.
+  const fixedName = payerInfo?.fixedName === true;
+  const blockedReason = fixedName ? payerInfo.blockedReason : null;
+  const nameField =
+    payerInfo !== null && !fixedName && (!payerInfo.savedName || editingName);
   const payerValid =
-    !askFor || (payerName.trim().length >= 2 && payerName.trim().length <= 120);
+    !askFor ||
+    (fixedName
+      ? blockedReason === null
+      : payerName.trim().length >= 2 && payerName.trim().length <= 120);
   const canPay = amountValid && !depositsClosed && !payerLoading && payerValid;
   const presets = rail ? rail.ui.presets : PRESETS;
 
@@ -570,12 +583,45 @@ export default function TopUpSheet({
                 : `Enter ${money(minAmount)}–${money(maxAmount)}, with up to 2 decimal places.`}
             </p>
 
+            {/* GMpay matches the transfer to the saved account's holder
+                (the real name) and nothing else: shown as is, no Change,
+                with what would stop the top-up said here, before Pay. */}
+            {payerInfo !== null && fixedName && (
+              <div className="mt-3 rounded-xl bg-neutral-800/60 px-4 py-3">
+                {payerInfo.savedName && (
+                  <>
+                    <span className="block text-[12px] font-semibold text-neutral-400">
+                      Paying from your own account, in the name of
+                    </span>
+                    <span className="block truncate text-[15px] text-white">
+                      {payerInfo.savedName}
+                    </span>
+                  </>
+                )}
+                {blockedReason ? (
+                  <p
+                    className={cn(
+                      'text-[13px] leading-snug text-amber-200',
+                      payerInfo.savedName && 'mt-2',
+                    )}
+                  >
+                    {blockedReason}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-[11px] leading-snug text-neutral-500">
+                    Pay from a bank account in this name, or the payment
+                    can&apos;t be matched.
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* The name A3Pay matches against the incoming transfer: it
                 must be the name on the PAYING bank account, which a nickname
                 is not. A saved account's holder shows as a line with Change
                 (the customer may pay from another account); with none saved,
                 a field pre-filled with the real name. */}
-            {payerInfo !== null && !nameField && (
+            {payerInfo !== null && !fixedName && !nameField && (
               <div className="mt-3 flex items-center justify-between gap-3 rounded-xl bg-neutral-800/60 px-4 py-3">
                 <div className="min-w-0">
                   <span className="block text-[12px] font-semibold text-neutral-400">
@@ -764,7 +810,9 @@ export default function TopUpSheet({
                   : amountValid && payerLoading
                     ? 'Checking…'
                     : amountValid && !payerValid
-                      ? 'Enter the account name'
+                      ? fixedName
+                        ? 'Top-up not available yet'
+                        : 'Enter the account name'
                       : 'Enter a valid amount'}
             </Pill>
 

@@ -288,3 +288,62 @@ describe('TopUpSheet — choose a currency first', () => {
     expect(button('Enter a valid amount')).toBeUndefined();
   });
 });
+
+describe('TopUpSheet — S$ on a rail that takes the name from the saved account (GMpay)', () => {
+  const fixed = (savedName: string | null, blockedReason: string | null) =>
+    getRegionalPayer.mockResolvedValue({
+      savedName,
+      realName: savedName,
+      fixedName: true,
+      blockedReason,
+    });
+  const changeName = () =>
+    container.querySelector(
+      'button[aria-label="Change the name on the paying account"]',
+    );
+
+  it('shows the name as fixed, says to pay from an account in it, and pays', async () => {
+    fixed('TAN AH KOW', null);
+    await mount(WITH_SGD);
+    await act(async () => button('Singapore Dollar')!.click());
+    expect(container.textContent).toContain('TAN AH KOW');
+    expect(container.textContent).toContain(
+      'Pay from a bank account in this name',
+    );
+    expect(changeName()).toBeNull();
+    expect(nameInput()).toBeNull();
+    await act(async () => button('Pay')!.click());
+    expect(startDeposit).toHaveBeenCalled();
+  });
+
+  it('a name support must correct: the reason shows before paying, and Pay is held', async () => {
+    fixed(
+      'lkm',
+      'Singapore top-ups are matched to the full name on your bank account, and the name on your Polycards account is incomplete. Contact support to update it to your full name exactly as your bank shows it.',
+    );
+    await mount(WITH_SGD);
+    await act(async () => button('Singapore Dollar')!.click());
+    expect(container.textContent).toContain(
+      'the name on your Polycards account is incomplete',
+    );
+    expect(changeName()).toBeNull();
+    expect(nameInput()).toBeNull();
+    expect(button('Pay')).toBeUndefined();
+    expect(button('Top-up not available yet')?.disabled).toBe(true);
+    expect(startDeposit).not.toHaveBeenCalled();
+  });
+
+  it('no saved account: says to save it first, with no name field, and Pay is held', async () => {
+    fixed(
+      null,
+      'Save the bank account you pay from first, on the Withdraw page. Singapore top-ups are matched to it.',
+    );
+    await mount(WITH_SGD);
+    await act(async () => button('Singapore Dollar')!.click());
+    expect(container.textContent).toContain(
+      'Save the bank account you pay from first',
+    );
+    expect(nameInput()).toBeNull();
+    expect(button('Top-up not available yet')?.disabled).toBe(true);
+  });
+});
