@@ -87,6 +87,42 @@ describe('claimTaskReward', () => {
       claimed: false,
       reason: 'window_closed',
       missing: [],
+      topup: null,
+    });
+  });
+
+  it('carries the week\u2019s top-up figures on a needs_topup refusal', async () => {
+    backend({
+      'POST /store/tasks/:id/claim': {
+        body: {
+          claimed: false,
+          reason: 'needs_topup',
+          topup: { required_myr: 50, topped_up_myr: 20, unlocked: false },
+        },
+      },
+    });
+    expect(await claimTaskReward('task_1')).toEqual({
+      ok: true,
+      claimed: false,
+      reason: 'needs_topup',
+      missing: [],
+      topup: { required_myr: 50, topped_up_myr: 20 },
+    });
+  });
+
+  it('drops unreadable top-up figures instead of showing them', async () => {
+    backend({
+      'POST /store/tasks/:id/claim': {
+        body: {
+          claimed: false,
+          reason: 'needs_topup',
+          topup: { required_myr: '50', topped_up_myr: null },
+        },
+      },
+    });
+    expect(await claimTaskReward('task_1')).toMatchObject({
+      reason: 'needs_topup',
+      topup: null,
     });
   });
 
@@ -120,6 +156,7 @@ describe('claimTaskReward', () => {
       claimed: false,
       reason: 'needs_verification',
       missing: ['phone', 'bank'],
+      topup: null,
     });
   });
 });

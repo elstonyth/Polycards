@@ -137,6 +137,10 @@ export const TaskEntrySchema = z.looseObject({
     completed: z.boolean(),
   }),
   claimed: z.boolean(),
+  // A check-in reward still waiting for this week's top-up (owner 2026-11-20):
+  // it can be complete yet not claimable. A backend that predates the field
+  // omits it, which reads as not locked — that backend has no such bar.
+  locked: z.boolean().catch(false),
   // Lucky Draw tickets this task also pays. A backend that predates the
   // column omits it; an unreadable value reads as none — never a dropped row.
   tickets: finite.catch(0),
@@ -161,6 +165,16 @@ export const TaskHubSchema = z.looseObject({
   // renders, the strip falling back to what the tasks themselves say.
   day_key: z.string().optional(),
   checkins_this_week: finite.optional(),
+  // This week's top-ups against the bar check-in rewards wait for. Optional
+  // and caught (deploy-skew rule): absent or malformed, the track shows no bar.
+  checkin_unlock: z
+    .looseObject({
+      required_myr: finite,
+      topped_up_myr: finite,
+      unlocked: z.boolean(),
+    })
+    .optional()
+    .catch(undefined),
   vip_level: finite,
   checked_in_today: z.boolean(),
   // `.catch([])` is the deploy-skew guard: a backend that predates the field

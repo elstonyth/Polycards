@@ -1,4 +1,7 @@
 import {
+  CHECKIN_CLAIM_MIN_TOPUP_MYR,
+  checkinClaimLocked,
+  checkinUnlock,
   taskIsLive,
   taskPeriodKey,
   taskProgress,
@@ -408,5 +411,51 @@ describe('topup_myr (2026-10-19)', () => {
         facts({ week: period({ topupMyr: 99.99 }) }),
       ).completed,
     ).toBe(false);
+  });
+});
+
+describe('check-in reward top-up bar', () => {
+  const checkin = { type: 'checkin_days', days: 3 } as const;
+
+  it('is RM 50 a task week', () => {
+    expect(CHECKIN_CLAIM_MIN_TOPUP_MYR).toBe(50);
+  });
+
+  it('locks every check-in reward, daily or weekly, until the week reaches RM 50', () => {
+    expect(checkinClaimLocked(checkin, 0)).toBe(true);
+    expect(checkinClaimLocked({ type: 'checkin_days', days: 1 }, 20)).toBe(
+      true,
+    );
+    expect(checkinClaimLocked(checkin, 49.99)).toBe(true);
+    expect(checkinClaimLocked(checkin, 50)).toBe(false);
+    expect(checkinClaimLocked(checkin, 250)).toBe(false);
+  });
+
+  it('never locks a goal that is not a check-in', () => {
+    for (const q of [
+      { type: 'rip_count', count: 1, pack_id: null },
+      { type: 'topup_myr', amount_myr: 10 },
+      { type: 'reach_level', level: 2 },
+      { type: 'vault_count', count: 1 },
+      { type: 'vault_pixel_count', count: 1, pixel_pokemon_id: null },
+    ] as const) {
+      expect(checkinClaimLocked(q, 0)).toBe(false);
+    }
+  });
+
+  it('reports where the week stands, in whole sen', () => {
+    expect(checkinUnlock(0)).toEqual({
+      required_myr: 50,
+      topped_up_myr: 0,
+      unlocked: false,
+    });
+    expect(checkinUnlock(30.5)).toEqual({
+      required_myr: 50,
+      topped_up_myr: 30.5,
+      unlocked: false,
+    });
+    // Two top-ups that sum to RM 50 in float noise still unlock.
+    expect(checkinUnlock(20.1 + 29.9).unlocked).toBe(true);
+    expect(checkinUnlock(49.99).unlocked).toBe(false);
   });
 });

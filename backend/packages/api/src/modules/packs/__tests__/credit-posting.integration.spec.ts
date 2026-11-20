@@ -264,9 +264,16 @@ moduleIntegrationTestRunner<PacksModuleService>({
         reward: { type: 'credit', amount_myr: 2.5 },
         active: true, sort: 0, adminId: 'admin_g', reason: 'seed',
       });
+      // A check-in reward waits for RM 50 of top-ups this task week
+      // (2026-11-20). That top-up meets the bar and is removed again, so the
+      // golden pins the task posting alone.
+      const [topup] = await service.createCreditTransactions([
+        { customer_id: c, amount: 50, reason: 'topup' },
+      ]);
       await service.checkInDaily({ customerId: c });
       const [task] = await service.listTaskDefinitions({});
       expect(await service.claimTask({ customerId: c, taskId: task.id })).toMatchObject({ claimed: true });
+      await sql().execute('DELETE FROM credit_transaction WHERE id = ?', [topup.id]);
       const [claim] = await service.listTaskClaims({ customer_id: c });
       expect(await golden([c], [[`:${claim.period_key}`, ':<period>']])).toEqual(GOLDEN.task);
     });

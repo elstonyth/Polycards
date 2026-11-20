@@ -402,7 +402,11 @@ Those and the welcome pack's `source='free'` pull are the only locked pulls.
 
 **Check-in**:
 The explicit once-per-MYT-day button on /task (`daily_checkin`), counted by
-weekly check-in tasks.
+weekly check-in tasks. Checking in is free, but a check-in reward can only be
+claimed once the customer's settled gateway top-ups in the same Task Week reach
+RM 50 (`CHECKIN_CLAIM_MIN_TOPUP_MYR`, owner 2026-11-20). Meeting it unlocks
+every check-in reward of that week, the days already checked in included; it
+resets with the week. Admin credit, bonus and rewards never count toward it.
 
 **Weekly Settlement**:
 One `weekly_settlement` run per closed week: draft (Tuesday close) → approved

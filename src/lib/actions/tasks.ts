@@ -76,10 +76,15 @@ export type ClaimFailure =
   | 'already_claimed'
   | 'window_closed'
   // A verified phone and a saved bank come first (owner 2026-11-03).
-  | 'needs_verification';
+  | 'needs_verification'
+  // A check-in reward waits for this week's top-up (owner 2026-11-20).
+  | 'needs_topup';
 
 /** What a `needs_verification` refusal says is still missing. */
 export type ClaimRequirement = 'phone' | 'bank';
+
+/** Where this week's top-ups stand, on a `needs_topup` refusal. */
+export type ClaimTopUp = { required_myr: number; topped_up_myr: number };
 
 export type ClaimResult =
   | {
@@ -97,6 +102,8 @@ export type ClaimResult =
       reason: ClaimFailure;
       /** Filled for `needs_verification`; empty otherwise. */
       missing: ClaimRequirement[];
+      /** Filled for `needs_topup` when the backend sent the figures. */
+      topup: ClaimTopUp | null;
     }
   | { ok: false; error: string };
 
@@ -109,7 +116,12 @@ type RawClaim =
       reward: { type: string; pack_id?: string };
       claimId?: string;
     }
-  | { claimed: false; reason: ClaimFailure; missing?: unknown };
+  | {
+      claimed: false;
+      reason: ClaimFailure;
+      missing?: unknown;
+      topup?: unknown;
+    };
 
 export async function claimTaskReward(taskId: string): Promise<ClaimResult> {
   const r = await store.post(
@@ -141,7 +153,19 @@ export async function claimTaskReward(taskId: string): Promise<ClaimResult> {
           (m): m is ClaimRequirement => m === 'phone' || m === 'bank',
         )
       : [];
-    return { ok: true, claimed: false, reason: raw.reason, missing };
+    const rawTopUp = raw.topup as Partial<ClaimTopUp> | null | undefined;
+    const topup =
+      rawTopUp &&
+      typeof rawTopUp.required_myr === 'number' &&
+      Number.isFinite(rawTopUp.required_myr) &&
+      typeof rawTopUp.topped_up_myr === 'number' &&
+      Number.isFinite(rawTopUp.topped_up_myr)
+        ? {
+            required_myr: rawTopUp.required_myr,
+            topped_up_myr: rawTopUp.topped_up_myr,
+          }
+        : null;
+    return { ok: true, claimed: false, reason: raw.reason, missing, topup };
   } catch (error) {
     logger.error('[tasks] response projection failed:', error);
     return { ok: false, error: 'Could not claim. Please try again.' };

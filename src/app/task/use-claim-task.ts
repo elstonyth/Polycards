@@ -4,7 +4,12 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { claimTaskReward } from '@/lib/actions/tasks';
 import type { TaskEntry } from '@/lib/data/schemas';
-import { claimNotice, verificationNotice, type NoticeLink } from './task-hub';
+import {
+  claimNotice,
+  topUpAsk,
+  verificationNotice,
+  type NoticeLink,
+} from './task-hub';
 
 // Every way a claim can decline, in the customer's words.
 const CLAIM_FAILURE_COPY: Record<string, string> = {
@@ -47,6 +52,9 @@ export function useClaimTask(
       ) {
         const { text, link } = verificationNotice(res.missing);
         onDone(text, link);
+      } else if (res.ok && !res.claimed && res.reason === 'needs_topup') {
+        // The figures the claim just read, not the page's older ones.
+        onDone(`${topUpAsk(res.topup)} to claim check-in rewards.`);
       } else if (res.ok && !res.claimed) {
         onDone(CLAIM_FAILURE_COPY[res.reason] ?? CLAIM_FALLBACK);
       } else if (!res.ok) {
