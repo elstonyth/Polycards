@@ -30,6 +30,7 @@ export function OddsBoard({
   expectedValue,
   tierRanges,
   tickets = false,
+  tierCounts,
 }: {
   /** The section's heading, set at the top of the board's first column. */
   heading: ReactNode;
@@ -42,8 +43,12 @@ export function OddsBoard({
   tierRanges?: Partial<Record<Rarity, PoolValueRange>>;
   /** A ticket pack: the same rows in ticket amounts, not money. */
   tickets?: boolean;
+  /** Cards (prizes on a capsule) per tier, printed beside the tier's name.
+   *  Opt-in: the homepage flow's summary rows; the pack page passes none. */
+  tierCounts?: Partial<Record<Rarity, number>>;
 }) {
   if (!hasPublishedOddsContent(odds, range)) return null;
+  const noun = tickets ? 'prize' : 'card';
 
   // "0.2%" → 0.2, for the bars only. A chance that isn't a number draws no bar.
   const shares = odds.map((o) => {
@@ -135,6 +140,12 @@ export function OddsBoard({
                         style={{ background: `rgb(${rgb})` }}
                       />
                       {o.rarity}
+                      {typeof tierCounts?.[o.rarity] === 'number' && (
+                        <span className="text-xs font-normal tabular-nums text-neutral-400">
+                          {tierCounts[o.rarity]}{' '}
+                          {tierCounts[o.rarity] === 1 ? noun : `${noun}s`}
+                        </span>
+                      )}
                     </span>
                     <span className="col-start-2 row-span-2 row-start-1 font-heading text-[1.75rem] font-bold leading-none tracking-[-0.02em] tabular-nums text-white @[28rem]:col-start-1 @[28rem]:row-span-1 @[28rem]:row-start-2 @[28rem]:text-[2rem]">
                       {o.chance}

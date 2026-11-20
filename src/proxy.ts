@@ -21,12 +21,13 @@ import { isPlausibleCardHandle } from '@/lib/card-handle';
 // Sec-Fetch-Site: same-origin, or (older Safari, no Fetch Metadata) a
 // same-origin Referer under our strict-origin-when-cross-origin policy.
 // pack-page/ is the pack picker's in-place switch (three backend reads a hit).
+// pack-tiers/ is the homepage flow's per-pack tier view (one pool read a hit).
 // cards/, free-pack, announcements and lucky-draw-status are only ever fetched by
 // our own client too (use-card-price, FreePackBadge, AnnouncementPopup, the draw
 // popup); /api/cards costs the backend 4 DB queries a hit, so it is the next
 // cheapest drain.
 const POLLED_JSON =
-  /^\/api\/(pack-detail\/|pack-page\/|cards\/|recent-pulls$|pull-gaps$|free-pack$|announcements$|lucky-draw-status$)/;
+  /^\/api\/(pack-detail\/|pack-page\/|pack-tiers\/|cards\/|recent-pulls$|pull-gaps$|free-pack$|announcements$|lucky-draw-status$)/;
 
 function sameOriginFetch(request: NextRequest): boolean {
   const site = request.headers.get('sec-fetch-site');
@@ -70,6 +71,9 @@ const KNOWN_ROUTE = [
   /^\/(card|profile|r)\/[^/]+\/?$/,
   /^\/(card|slots)\/[^/]+\/share\.jpg$/,
   /^\/slots\/[^/]+(\/spin)?\/?$/,
+  // TEMPORARY: the flow groundwork's preview (src/app/flow-preview); remove
+  // with that route at integration.
+  /^\/flow-preview\/[^/]+\/?$/,
   /^\/(robots\.txt|sitemap\.xml|manifest\.webmanifest|favicon\.ico|icon\.png|apple-icon\.png)$/,
 ];
 export const isKnownRoute = (pathname: string): boolean =>
@@ -143,6 +147,7 @@ export const config = {
     '/((?!_next/|api/|3dicons/|branding/|cdn/|coin-flip/|fonts/|images/|pack-3d/|pack-index-icons/|seo/|social/|sounds/|videos/).*)',
     '/api/pack-detail/:path*',
     '/api/pack-page/:path*',
+    '/api/pack-tiers/:path*',
     '/api/cards/:path*',
     '/api/recent-pulls',
     '/api/pull-gaps',

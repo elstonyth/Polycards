@@ -5,7 +5,7 @@
 //   price        rm(pack.priceMyr)                  the page's price ("RM 40.00")
 //   productLine  pack.name + packFacts(pack) values the page header's facts
 //   odds         publishedOddsRows(publishedOdds)   the Pull Odds board's rows
-//   buyback      the header badge and the explainer under it (PackDetailClient)
+//   buyback      the header badge (PackDetailClient) and the explainer under it (PackBuyControls)
 //
 // No fetch here: the caller passes what it already holds. The homepage's
 // pack projection (getPackHighlights) does not carry published odds today, so
@@ -22,9 +22,9 @@ import { publishedOddsRows, type PublishedOdds } from '@/lib/packs-format';
 import type { PackBackDetails } from './pack-print';
 
 /** The pack page's explainer under the buyback badge, word for word
- *  (PackDetailClient.tsx, "The pack rate applies during the reveal
- *  countdown…"). It names the FLAT vault rate, which a Lossless window never
- *  changes. pack-back-details.test.ts fails if the page's sentence drifts. */
+ *  (the buy panel in PackBuyControls.tsx, "The pack rate applies during the
+ *  reveal countdown…"). It names the FLAT vault rate, which a Lossless window
+ *  never changes. pack-print.test.ts fails if the page's sentence drifts. */
 export const BUYBACK_RULE = `The pack rate applies during the reveal countdown. Leaving the reveal or letting the timer expire changes buyback to ${FLAT_BUYBACK_PERCENT}% of card value in your vault.`;
 
 /** The header badge's wording: the pack's INSTANT rate, which the backend

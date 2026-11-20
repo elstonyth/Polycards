@@ -302,17 +302,20 @@ describe('pack back details (from the pack page data)', () => {
   });
 
   it("matches the pack page's own buyback wording (drift guard)", () => {
-    const src = readFileSync(
-      fileURLToPath(
-        new URL('../../app/slots/[slug]/PackDetailClient.tsx', import.meta.url),
-      ),
-      'utf8',
-    )
-      .replace(/\{' '\}/g, ' ')
-      .replace(/\{FLAT_BUYBACK_PERCENT\}/g, '90')
-      .replace(/\s+/g, ' ');
-    expect(src).toContain(BUYBACK_RULE);
-    expect(src).toContain(
+    const page = (file: string) =>
+      readFileSync(
+        fileURLToPath(
+          new URL(`../../app/slots/[slug]/${file}`, import.meta.url),
+        ),
+        'utf8',
+      )
+        .replace(/\{' '\}/g, ' ')
+        .replace(/\{FLAT_BUYBACK_PERCENT\}/g, '90')
+        .replace(/\s+/g, ' ');
+    // The explainer sits in the shared buy controls' panel; the badge stays in
+    // the page header.
+    expect(page('PackBuyControls.tsx')).toContain(BUYBACK_RULE);
+    expect(page('PackDetailClient.tsx')).toContain(
       '{active.buybackPercent ?? FLAT_BUYBACK_PERCENT}% instant buyback',
     );
   });

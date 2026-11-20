@@ -28,6 +28,12 @@ import { cached } from '@/lib/ttl-cache';
 import { store } from '@/lib/store';
 import { logger } from '@/lib/logger';
 import { isRarity, type PublishedOdds } from '@/lib/packs-format';
+import {
+  packLiveOf,
+  packTierRows,
+  type PackTierRows,
+  type PackTiers,
+} from '@/lib/pack-tiers';
 import { avatarForSeed } from '@/lib/profile-view';
 import { relativeTime } from '@/lib/format';
 import { toCardView } from '@/lib/card-view';
@@ -490,25 +496,85 @@ function toPackDetail(
   };
 }
 
+/** A pack's staff-entered pull odds, per tier in percent: exactly what
+ *  `packBackDetails` (pack-3d/pack-back-details) and `publishedOddsRows` read,
+ *  so the 3D back prints the pack page's Pull Odds rows. */
+export type PackPullOdds = { tiers: Partial<Record<Rarity, number>> };
+
+export type PackHighlights = {
+  chase: PackCard | null;
+  slabs: PackCard[];
+  /** The staff-entered odds, read ONLY from the backend's own odds field
+   *  through the page's parser (the same value the pack page's odds board
+   *  shows). Never derived from the pool, counts or values: a pack with
+   *  nothing entered carries null. */
+  pullOdds: PackPullOdds | null;
+};
+
 /**
- * Small homepage projection: shelf chase plus the three highest-value slabs.
- * One pool read per pack per 60s, shared by hero and shelf. Cache the projection
- * rather than the large pool. An unavailable/empty pool stays empty for the TTL.
+ * Small homepage projection: shelf chase, the three highest-value slabs and the
+ * pack's pull odds. One pool read per pack per 60s, shared by hero and shelf:
+ * the odds arrive in that same response, so they cost no extra request. Cache
+ * the projection rather than the large pool. An unavailable/empty pool stays
+ * empty for the TTL.
  */
 export const getPackHighlights = unstable_cache(
-  async (
-    slug: string,
-  ): Promise<{ chase: PackCard | null; slabs: PackCard[] }> => {
+  async (slug: string): Promise<PackHighlights> => {
     const detail = await getPackDetail(slug);
     const priced = detail?.pool.filter((card) => card.priceMyr !== null) ?? [];
+    // `publishedOdds` is the existing in-app name of the staff-entered field
+    // (parsePublishedOdds on `published_odds`); handed on as `pullOdds`.
+    const entered = detail?.publishedOdds ?? null;
     return {
       chase: priced[0] ?? null,
       slabs: priced.filter((card) => card.slabImage && card.handle).slice(0, 3),
+      pullOdds: entered ? { tiers: { ...entered.tiers } } : null,
     };
   },
-  ['pack-highlights'],
+  // A new key part: entries cached before `pullOdds` existed are never read.
+  ['pack-highlights', 'pull-odds'],
   { revalidate: 60 },
 );
+
+/** Thrown inside the tier cache on a miss, so the miss is never stored. */
+const TIERS_MISS = 'pack tiers miss';
+
+// The tier rows of one pack, from the same pool read as the pack page. Cached
+// per slug and kind for 60s; a miss THROWS so it is not held for the window.
+const packTierRowsCached = unstable_cache(
+  async (slug: string, tickets: boolean): Promise<PackTierRows> => {
+    const detail = await getPackDetail(slug);
+    if (!detail) throw new Error(`${TIERS_MISS}: ${slug}`);
+    return packTierRows(detail, tickets);
+  },
+  ['pack-tiers'],
+  { revalidate: 60 },
+);
+
+/**
+ * The slim per-tier view of a CATALOGUED pack (lib/pack-tiers), for the
+ * homepage flow's `/api/pack-tiers/<slug>`. Null for anything the public
+ * catalog does not list: an unknown slug, a Draft, the free welcome pack (its
+ * page states no price or buyback), or a pack whose pool can't be read.
+ *
+ * The slug is checked against the catalog BEFORE the cache, so a made-up slug
+ * never gets a cache entry. The live figures (price, buyback, stock) come from
+ * the catalog read itself, outside the 60s tier cache.
+ */
+export async function getPackTiers(slug: string): Promise<PackTiers | null> {
+  const categories = await getPackCategories();
+  const pack = categories
+    .flatMap((c) => c.packs)
+    .find((p) => p.id === slug && !p.draft);
+  if (!pack) return null;
+  try {
+    const rows = await packTierRowsCached(slug, pack.prizeType === 'tickets');
+    return { ...rows, pack: packLiveOf(pack) };
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith(TIERS_MISS)) return null;
+    throw err;
+  }
+}
 
 // --- Recent Pulls: the live ledger feed (GET /store/pulls/recent) -----------
 

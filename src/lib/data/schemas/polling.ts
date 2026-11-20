@@ -38,6 +38,40 @@ export const PackPollResponseSchema = z.object({
     publishedOdds: pollOdds,
   }),
 });
+/** GET /api/pack-tiers/<slug> — the slim per-tier view (lib/pack-tiers). */
+const pollRange = z.object({ min: finite, max: finite }).nullable();
+export const PackTiersResponseSchema = z.object({
+  tiers: z.array(
+    z.object({
+      rarity,
+      chance: finite.nullable(),
+      count,
+      range: pollRange,
+      cards: z
+        .array(
+          z.object({
+            handle: z.string(),
+            name: z.string(),
+            image: z.string(),
+            slabImage: z.string().nullable(),
+            rarity,
+            priceMyr: finite.nullable(),
+            pokemonDex: finite.nullable(),
+            spriteImage: z.string().nullable(),
+            tickets: finite.optional(),
+          }),
+        )
+        .optional(),
+    }),
+  ),
+  ev: finite.nullable(),
+  range: pollRange,
+  pack: z.object({
+    priceMyr: finite,
+    buybackPercent: finite.nullable(),
+    inStock: z.boolean(),
+  }),
+});
 export const RecentPollResponseSchema = z.object({
   pulls: z.array(
     pollCard.extend({
