@@ -27,7 +27,16 @@ const row = (over: Record<string, unknown> = {}) =>
 const service = {
   packPoolComposition: async () => new Map(),
   listTicketPrizes: async () => [],
+  listPackOdds: async () => [],
+  listCards: async () => [],
+  listFxRates: async () => [],
 } as never;
+
+const ODDS = {
+  overall: 100,
+  tiers: { Immortal: 0.1, Common: 99.9 },
+  decimals: 2,
+};
 
 describe('catalogRows', () => {
   it('sends a pack’s type and language', async () => {
@@ -61,5 +70,23 @@ describe('packDetailBody', () => {
     );
     expect(body.pack.pack_type).toBe('classic');
     expect(body.pack.language).toBeNull();
+  });
+
+  // The store pack responses name the odds `pull_odds`.
+  it.each([['cards'], ['tickets']])(
+    'sends a %s pack’s odds as pull_odds',
+    async (prize_type) => {
+      const body = await packDetailBody(
+        service,
+        row({ prize_type, published_odds: ODDS }),
+      );
+      expect(body.pull_odds).toEqual(ODDS);
+      expect(JSON.stringify(body)).not.toMatch(/publish/i);
+    },
+  );
+
+  it('sends pull_odds null when no odds are set', async () => {
+    const body = await packDetailBody(service, row());
+    expect(body.pull_odds).toBeNull();
   });
 });
