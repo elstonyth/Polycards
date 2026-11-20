@@ -213,6 +213,15 @@ describe('errors', () => {
     expect((error as GmpayError).result).toBe('creates-nothing');
   });
 
+  it('a payout refused for its amount created nothing (definite)', async () => {
+    // Prod 2026-11-20: S$31.20 and S$50 refused this way; GMpay's back office
+    // showed no payout for either, and none returned a token.
+    answer({ status_code: -1, status_msg: 'AMOUNT_NOT_IN_RANGE' });
+    const error = await submitPayout(payout, CONFIG).catch((e: unknown) => e);
+    expect((error as GmpayError).definite).toBe(true);
+    expect((error as GmpayError).result).toBe('creates-nothing');
+  });
+
   it('an unrecognised payout refusal stays unclear: it may have been created', async () => {
     answer({ status_code: -1, status_msg: 'SOMETHING_NEW' });
     const error = await submitPayout(payout, CONFIG).catch((e: unknown) => e);

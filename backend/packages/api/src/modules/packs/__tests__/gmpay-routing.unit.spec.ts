@@ -250,3 +250,16 @@ describe("GMpay's Singapore bank codes", () => {
     expect(gatewayBankCode('DBSSSGSG', 'a3pay', {})?.code).toBe('SDBS');
   });
 });
+
+describe("GMpay's S$ limits sit inside its channel limits", () => {
+  // GMpay back office "Payment channel limit" (2026-11-20): IN S$20–20,000,
+  // OUT S$50–200,000. A S$50 payout was still refused (AMOUNT_NOT_IN_RANGE),
+  // so the floor sits above 50 until GMpay says whether 50 itself is allowed.
+  it('never asks GMpay for a payout at or below S$50, or a top-up below S$20', () => {
+    const l = GATEWAYS.gmpay.currencyLimits!;
+    expect(l.withdrawalMin).toBeGreaterThan(50);
+    expect(l.withdrawalMax).toBeLessThanOrEqual(200000);
+    expect(l.depositMin).toBeGreaterThanOrEqual(20);
+    expect(l.depositMax).toBeLessThanOrEqual(20000);
+  });
+});

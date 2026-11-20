@@ -287,10 +287,14 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
       withdrawalMin: 50,
       withdrawalMax: 30000,
     },
+    // In S$, inside GMpay's own channel limits (back office "Payment channel
+    // limit", 2026-11-20: IN S$20–20,000, OUT S$50–200,000). A S$50 payout
+    // was still refused AMOUNT_NOT_IN_RANGE, so the payout floor sits above
+    // 50 until GMpay confirms whether 50 itself is allowed.
     currencyLimits: {
       depositMin: 30,
       depositMax: 5000,
-      withdrawalMin: 30,
+      withdrawalMin: 51,
       withdrawalMax: 10000,
     },
   },
