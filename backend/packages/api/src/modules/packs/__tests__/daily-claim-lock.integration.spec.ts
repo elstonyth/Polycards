@@ -222,6 +222,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
       kind: Kind,
       reward: Record<string, unknown>,
     ) => {
+      // A check-in reward waits for RM 50 of top-ups this task week
+      // (2026-11-20). Not a paid open, so the daily-card lock is untouched.
+      await service.createCreditTransactions([
+        { customer_id: customerId, amount: 50, reason: 'topup' },
+      ]);
       await service.checkInDaily({ customerId });
       const [task] = await service.createTaskDefinitions([
         {

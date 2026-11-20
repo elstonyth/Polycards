@@ -14,9 +14,13 @@ import {
   orderForDisplay,
   rewardArt,
   rewardLabel,
+  isClaimable,
+  isWaitingOnTopUp,
   splitHub,
   stubName,
   ticketCountLabel,
+  topUpAsk,
+  topUpGap,
   verificationNotice,
 } from '../task-hub';
 
@@ -40,6 +44,7 @@ const task = (
     reward: { type: 'credit', amount_myr: 5 },
     progress: { current: done ? 3 : 1, target: 3, completed: Boolean(done) },
     claimed: false,
+    locked: false,
     tickets: 0,
     ...rest,
   };
@@ -541,5 +546,66 @@ describe('challenge side of a row', () => {
         task('c', { progress: { current: 3, target: 3, completed: false } }),
       ),
     ).toBe('Almost there');
+  });
+});
+
+describe('check-in rewards waiting for the week\u2019s top-up (2026-11-20)', () => {
+  const checkin = (over: Partial<TaskEntry> = {}) =>
+    task('c', {
+      req: { type: 'checkin_days', days: 2 },
+      done: true,
+      ...over,
+    });
+
+  it('a locked reward is complete but not claimable, and says why', () => {
+    const t = checkin({ locked: true });
+    expect(isClaimable(t)).toBe(false);
+    expect(isWaitingOnTopUp(t)).toBe(true);
+    expect(challengeStatus(t)).toBe(
+      'Complete \u2014 top up this week to claim',
+    );
+  });
+
+  it('unlocks into an ordinary claimable reward', () => {
+    const t = checkin({ locked: false });
+    expect(isClaimable(t)).toBe(true);
+    expect(isWaitingOnTopUp(t)).toBe(false);
+    expect(challengeStatus(t)).toBe('Complete \u2014 your prize is ready');
+  });
+
+  it('is neither once claimed, and not waiting before it is complete', () => {
+    expect(isWaitingOnTopUp(checkin({ locked: true, claimed: true }))).toBe(
+      false,
+    );
+    expect(isWaitingOnTopUp(checkin({ locked: true, done: false }))).toBe(
+      false,
+    );
+  });
+
+  it('a locked milestone lights no gold dot on the tab', () => {
+    const tabs = splitHub([
+      checkin({ locked: true }),
+      task('c2', {
+        req: { type: 'checkin_days', days: 1 },
+        done: true,
+        locked: false,
+      }),
+    ]);
+    expect(claimableCounts(tabs).daily).toBe(1);
+  });
+
+  it('asks for the whole bar, then only what is left, in whole sen', () => {
+    const bar = (topped_up_myr: number) => ({
+      required_myr: 50,
+      topped_up_myr,
+      unlocked: topped_up_myr >= 50,
+    });
+    const nb = (s: string) => s.replace(/\u00a0/g, ' ');
+    expect(nb(topUpAsk(bar(0)))).toBe('Top up RM 50 this week');
+    expect(nb(topUpAsk(bar(20)))).toBe('Top up RM 30 more this week');
+    expect(nb(topUpAsk(bar(30.5)))).toBe('Top up RM 19.50 more this week');
+    expect(topUpGap(bar(20.1 + 9.9))).toBe(20);
+    expect(topUpGap(bar(80))).toBe(0);
+    expect(topUpAsk(undefined)).toBe('Top up this week');
   });
 });

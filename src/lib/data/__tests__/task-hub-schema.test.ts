@@ -94,3 +94,42 @@ describe('TaskHubSchema (task hub v2)', () => {
     expect(tickets({ tickets: 'x' })).toBe(0);
   });
 });
+
+describe('TaskHubSchema: the check-in top-up bar (2026-11-20)', () => {
+  it('reads the bar and a locked row', () => {
+    const parsed = TaskHubSchema.parse(
+      hub({
+        checkin_unlock: {
+          required_myr: 50,
+          topped_up_myr: 20,
+          unlocked: false,
+        },
+        tasks: [task({ locked: true })],
+      }),
+    );
+    expect(parsed.checkin_unlock).toEqual({
+      required_myr: 50,
+      topped_up_myr: 20,
+      unlocked: false,
+    });
+    expect(parsed.tasks[0]?.locked).toBe(true);
+  });
+
+  it('a backend that predates the bar reads as no bar and nothing locked', () => {
+    const parsed = TaskHubSchema.parse(hub());
+    expect(parsed.checkin_unlock).toBeUndefined();
+    expect(parsed.tasks[0]?.locked).toBe(false);
+  });
+
+  it('a malformed bar is dropped, never the hub', () => {
+    const parsed = TaskHubSchema.parse(
+      hub({
+        checkin_unlock: { required_myr: 'fifty' },
+        tasks: [task({ locked: 'yes' })],
+      }),
+    );
+    expect(parsed.checkin_unlock).toBeUndefined();
+    expect(parsed.tasks).toHaveLength(1);
+    expect(parsed.tasks[0]?.locked).toBe(false);
+  });
+});

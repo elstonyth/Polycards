@@ -2,8 +2,9 @@
 // check-in track, and the row order. Split out of TaskHubClient so the rules
 // that decide WHAT a player sees (and in which order) are unit-tested without
 // rendering anything.
-import { rm, rmAuto, rmNbsp } from '@/lib/format';
+import { rm, rmAuto, rmAutoNbsp, rmNbsp } from '@/lib/format';
 import type { TaskEntry, TaskHub } from '@/lib/data/schemas';
+import type { ClaimTopUp } from '@/lib/actions/tasks';
 
 export const CREDIT_ART = '/images/task/credits-coins.webp';
 export const TICKET_ART = '/images/lucky-draw/ticket.webp';
@@ -181,7 +182,32 @@ export function rewardArt(reward: TaskEntry['reward']): string | null {
 }
 
 export const isClaimable = (t: TaskEntry): boolean =>
-  t.progress.completed && !t.claimed;
+  t.progress.completed && !t.claimed && !t.locked;
+
+/** Complete and unclaimed, but a check-in reward still waiting for this
+ *  week's top-up (owner 2026-11-20): not claimable until the bar is met. */
+export const isWaitingOnTopUp = (t: TaskEntry): boolean =>
+  t.progress.completed && !t.claimed && t.locked;
+
+/** The bar check-in rewards wait for (GET /store/tasks `checkin_unlock`). */
+export type CheckinUnlock = NonNullable<TaskHub['checkin_unlock']>;
+
+/** RM still to top up this week before check-in rewards unlock, in whole
+ *  sen; 0 once the bar is met. */
+export function topUpGap(unlock: ClaimTopUp): number {
+  const gap =
+    Math.round((unlock.required_myr - unlock.topped_up_myr) * 100) / 100;
+  return Math.max(0, gap);
+}
+
+/** "Top up RM 50 this week", or "Top up RM 30 more this week" once some is
+ *  in. A backend that sent no figures still gets a sentence, just no RM. */
+export function topUpAsk(unlock: ClaimTopUp | null | undefined): string {
+  if (!unlock) return 'Top up this week';
+  return unlock.topped_up_myr > 0
+    ? `Top up ${rmAutoNbsp(topUpGap(unlock))} more this week`
+    : `Top up ${rmAutoNbsp(unlock.required_myr)} this week`;
+}
 
 export type ChallengeKind =
   'rip' | 'pull' | 'vault' | 'level' | 'checkin' | 'topup' | 'other';
@@ -287,6 +313,8 @@ export function progressOf(t: TaskEntry): {
 /** The line under a challenge's progress: what is left, or that it is done. */
 export function challengeStatus(t: TaskEntry): string {
   if (t.claimed) return 'Prize claimed';
+  if (t.progress.completed && t.locked)
+    return 'Complete — top up this week to claim';
   if (t.progress.completed) return 'Complete — your prize is ready';
   // A goal of 0 is one the backend could not read (an unknown type fails
   // closed) — it can never complete, so it must not look nearly done.
@@ -295,8 +323,7 @@ export function challengeStatus(t: TaskEntry): string {
   const gap = t.progress.target - t.progress.current;
   // Target met but not yet flagged complete by the backend.
   if (!(gap > 0)) return 'Almost there';
-  if (g?.kind === 'topup')
-    return `Top up ${rmAuto(gap).replace(' ', NBSP)} more`;
+  if (g?.kind === 'topup') return `Top up ${rmAutoNbsp(gap)} more`;
   const left = Math.ceil(gap);
   return g
     ? `${left} more ${left === 1 ? g.one : g.many} to go`

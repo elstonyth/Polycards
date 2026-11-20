@@ -49,6 +49,33 @@ moduleIntegrationTestRunner<PacksModuleService>({
     LuckyDrawTicket,
   ],
   testSuite: ({ service }) => {
+    // A credit row for the customer, landing at `at` when given (created_at
+    // is a framework column the update type does not expose).
+    const credit = async (
+      customerId: string,
+      amount: number,
+      at?: Date,
+      reason: 'topup' | 'adjustment' = 'topup',
+    ) => {
+      const [row] = await service.createCreditTransactions([
+        { customer_id: customerId, amount, reason },
+      ]);
+      if (at) {
+        await service.updateCreditTransactions({
+          selector: { id: row.id },
+          data: { created_at: at } as never,
+        });
+      }
+    };
+
+    // Check-in rewards wait for RM 50 of top-ups in the task week (owner
+    // 2026-11-20). A test that claims one to prove something else checks in
+    // AND meets that bar, the top-up landing at the check-in's instant.
+    const checkInPaid = async (input: { customerId: string; now?: Date }) => {
+      await credit(input.customerId, 50, input.now);
+      return service.checkInDaily(input);
+    };
+
     it('check-in is once per MYT day', async () => {
       const first = await service.checkInDaily({ customerId: 'cus_t1' });
       expect(first.checked).toBe(true);
@@ -81,7 +108,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         await service.claimTask({ customerId: 'cus_t2', taskId: id }),
       ).toEqual({ claimed: false, reason: 'not_completed' });
 
-      await service.checkInDaily({ customerId: 'cus_t2' });
+      await checkInPaid({ customerId: 'cus_t2' });
       hub = await service.taskHubFor({ customerId: 'cus_t2' });
       expect(hub.tasks[0].progress.completed).toBe(true);
 
@@ -103,9 +130,11 @@ moduleIntegrationTestRunner<PacksModuleService>({
       // it sits in the balance but never in what may be withdrawn.
       expect(Number(txns[0].bonus_cents)).toBe(250);
       const wallet = await service.walletSummary('cus_t2');
-      expect(wallet.balance).toBe(2.5);
+      // RM 50 of the balance is the top-up that met the check-in bar.
+      expect(wallet.balance).toBe(52.5);
       expect(wallet.bonus).toBe(2.5);
-      expect(wallet.withdrawable).toBe(0);
+      // Only the top-up is withdrawable, never the prize.
+      expect(wallet.withdrawable).toBe(50);
       // The finance reports count the bonus prize whole, not its RM 0 normal part.
       const totals = await service.ledgerReasonTotals();
       expect(totals.find((r) => r.reason === 'reward_credit')?.amount).toBe(
@@ -269,7 +298,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
       it('claiming records an unspent entitlement and vaults NOTHING', async () => {
         await seedPackAndCard();
-        await service.checkInDaily({ customerId: 'cus_t4' });
+        await checkInPaid({ customerId: 'cus_t4' });
         const id = await makeTask('Check in for a free rip', 2);
 
         const claim = await service.claimTask({
@@ -305,7 +334,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
       it('spinning rolls exactly once, however many times it is retried', async () => {
         await seedPackAndCard();
-        await service.checkInDaily({ customerId: 'cus_t5' });
+        await checkInPaid({ customerId: 'cus_t5' });
         const id = await makeTask('Free rip retry', 3);
         const claimed = await service.claimTask({
           customerId: 'cus_t5',
@@ -377,7 +406,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       // player can never re-earn that week's task.
       it('an unspent free rip survives the week rollover', async () => {
         await seedPackAndCard();
-        await service.checkInDaily({ customerId: 'cus_t7' });
+        await checkInPaid({ customerId: 'cus_t7' });
         const id = await makeTask('Free rip rollover', 5);
         const claimed = await service.claimTask({
           customerId: 'cus_t7',
@@ -412,7 +441,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
       it("refuses to spend someone else's entitlement", async () => {
         await seedPackAndCard();
-        await service.checkInDaily({ customerId: 'cus_t6' });
+        await checkInPaid({ customerId: 'cus_t6' });
         const id = await makeTask('Free rip theft', 4);
         const claimed = await service.claimTask({
           customerId: 'cus_t6',
@@ -480,7 +509,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     });
 
     it('a retired task stays claimable for someone who completed it', async () => {
-      await service.checkInDaily({ customerId: 'cus_ret' });
+      await checkInPaid({ customerId: 'cus_ret' });
       const { id } = await service.saveTaskDefinition({
         kind: 'weekly',
         title: 'Check in once',
@@ -690,7 +719,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
     });
 
     it('taskClaimCounts counts live claims per task', async () => {
-      await service.checkInDaily({ customerId: 'cus_count' });
+      await checkInPaid({ customerId: 'cus_count' });
       const { id } = await service.saveTaskDefinition({
         kind: 'weekly',
         title: 'Check in once',
@@ -794,7 +823,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
         )!;
 
       expect((await row(day1)).progress.completed).toBe(false);
-      await service.checkInDaily({ customerId: cus, now: day1 });
+      await checkInPaid({ customerId: cus, now: day1 });
       const hub1 = await service.taskHubFor({ customerId: cus, now: day1 });
       expect(hub1.day_key).toBe('2026-10-07');
       expect(hub1.checkins_this_week).toBe(1);
@@ -866,7 +895,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       // contains it is honoured, the next day is not.
       const sameDay = new Date(retiredAt.getTime() + 60_000);
       const nextDay = new Date(retiredAt.getTime() + 24 * 3600 * 1000);
-      await service.checkInDaily({ customerId: cus, now: sameDay });
+      await checkInPaid({ customerId: cus, now: sameDay });
       await service.checkInDaily({ customerId: cus, now: nextDay });
       // (sameDay may cross MYT midnight in the minute after the retire; if so
       // it is a LATER day and must be refused too.)
@@ -1278,6 +1307,127 @@ moduleIntegrationTestRunner<PacksModuleService>({
       );
     });
 
+    it('check-in rewards wait for RM 50 of top-ups in the task week, then every checked-in day unlocks (owner 2026-11-20)', async () => {
+      const cus = 'cus_checkin_bar';
+      const mon = new Date('2026-10-05T04:00:00Z'); // Mon 12:00 MYT
+      const tue = new Date('2026-10-06T04:00:00Z');
+      const wed = new Date('2026-10-07T04:00:00Z');
+      const nextMon = new Date('2026-10-12T04:00:00Z');
+      const topUp = (
+        amount: number,
+        when: string,
+        reason: 'topup' | 'adjustment' = 'topup',
+      ) => credit(cus, amount, new Date(when), reason);
+      const day = async (days: number) =>
+        (
+          await service.saveTaskDefinition({
+            kind: 'weekly',
+            title: `Check in ${days} days`,
+            requirement: { type: 'checkin_days', days },
+            reward: { type: 'credit', amount_myr: days },
+            active: true,
+            sort: days,
+            adminId: 'admin_1',
+            reason: 'seed',
+          })
+        ).id;
+      const day1 = await day(1);
+      const day2 = await day(2);
+      const day3 = await day(3);
+      // A goal that is not a check-in never waits for the bar.
+      const { id: topupGoal } = await service.saveTaskDefinition({
+        kind: 'weekly',
+        title: 'Top up RM 10',
+        requirement: { type: 'topup_myr', amount_myr: 10 },
+        reward: { type: 'credit', amount_myr: 1 },
+        active: true,
+        sort: 9,
+        adminId: 'admin_1',
+        reason: 'seed',
+      });
+      const claim = (taskId: string, now: Date) =>
+        service.claimTask({ customerId: cus, taskId, now });
+
+      // Checking in is free and counts as ever.
+      expect(
+        (await service.checkInDaily({ customerId: cus, now: mon })).checked,
+      ).toBe(true);
+      expect(
+        (await service.checkInDaily({ customerId: cus, now: tue })).checked,
+      ).toBe(true);
+
+      // Day 1 and Day 2 are complete, but their rewards wait.
+      let hub = await service.taskHubFor({ customerId: cus, now: tue });
+      const row = (id: string) => hub.tasks.find((t) => t.id === id)!;
+      expect(hub.checkins_this_week).toBe(2);
+      expect(hub.checkin_unlock).toEqual({
+        required_myr: 50,
+        topped_up_myr: 0,
+        unlocked: false,
+      });
+      expect(row(day1)).toMatchObject({
+        progress: { completed: true },
+        locked: true,
+        claimed: false,
+      });
+      expect(row(day2)).toMatchObject({
+        progress: { completed: true },
+        locked: true,
+      });
+      expect(row(topupGoal).locked).toBe(false);
+      expect(await claim(day1, tue)).toEqual({
+        claimed: false,
+        reason: 'needs_topup',
+        topup: { required_myr: 50, topped_up_myr: 0, unlocked: false },
+      });
+
+      // Last week's top-up and admin credit never count; RM 30 is short.
+      await topUp(500, '2026-10-03T02:00:00Z');
+      await topUp(999, '2026-10-07T02:00:00Z', 'adjustment');
+      await topUp(30, '2026-10-07T02:00:00Z'); // Wed 10:00 MYT
+      expect(await claim(day1, wed)).toMatchObject({
+        reason: 'needs_topup',
+        topup: { topped_up_myr: 30, unlocked: false },
+      });
+
+      // Another RM 20 the same week reaches the bar: Day 1, 2 and 3 all pay.
+      await topUp(20, '2026-10-07T03:00:00Z');
+      await service.checkInDaily({ customerId: cus, now: wed });
+      hub = await service.taskHubFor({ customerId: cus, now: wed });
+      expect(hub.checkin_unlock).toEqual({
+        required_myr: 50,
+        topped_up_myr: 50,
+        unlocked: true,
+      });
+      expect(hub.tasks.every((t) => !t.locked)).toBe(true);
+      for (const id of [day1, day2, day3]) {
+        expect(await claim(id, wed)).toMatchObject({ claimed: true });
+      }
+      expect(await claim(day1, wed)).toEqual({
+        claimed: false,
+        reason: 'already_claimed',
+      });
+      const paid = await service.listCreditTransactions({
+        customer_id: cus,
+        reason: 'reward_credit',
+      });
+      expect(paid.map((t) => Number(t.amount)).sort()).toEqual([1, 2, 3]);
+
+      // The bar resets with the task week: next Monday starts at RM 0 again.
+      await service.checkInDaily({ customerId: cus, now: nextMon });
+      hub = await service.taskHubFor({ customerId: cus, now: nextMon });
+      expect(hub.checkin_unlock.topped_up_myr).toBe(0);
+      expect(hub.tasks.find((t) => t.id === day1)!).toMatchObject({
+        progress: { completed: true },
+        locked: true,
+        claimed: false,
+      });
+      expect(await claim(day1, nextMon)).toMatchObject({
+        claimed: false,
+        reason: 'needs_topup',
+      });
+    });
+
     describe('Lucky Draw tickets on tasks (2026-10-24)', () => {
       const valid = {
         kind: 'weekly' as const,
@@ -1295,7 +1445,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           ...valid,
           tickets: 50,
         });
-        await service.checkInDaily({ customerId: 'cus_t1' });
+        await checkInPaid({ customerId: 'cus_t1' });
         const hub = await service.taskHubFor({ customerId: 'cus_t1' });
         expect(hub.tasks[0].tickets).toBe(50);
         expect(await service.luckyDrawBalance('cus_t1')).toBe(0);
@@ -1329,7 +1479,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           reward: { type: 'tickets' },
           tickets: 50,
         });
-        await service.checkInDaily({ customerId: 'cus_tr1' });
+        await checkInPaid({ customerId: 'cus_tr1' });
         const hub = await service.taskHubFor({ customerId: 'cus_tr1' });
         expect(hub.tasks[0].reward).toEqual({ type: 'tickets', tickets: 50 });
 
@@ -1360,9 +1510,12 @@ moduleIntegrationTestRunner<PacksModuleService>({
           reason: 'task_claim',
           ref: (first as { claimId: string }).claimId,
         });
+        // Nothing but the top-up that met the check-in bar.
         expect(
-          await service.listCreditTransactions({ customer_id: 'cus_tr1' }),
-        ).toHaveLength(0);
+          (
+            await service.listCreditTransactions({ customer_id: 'cus_tr1' })
+          ).map((t) => t.reason),
+        ).toEqual(['topup']);
         expect(
           await service.listPulls({ customer_id: 'cus_tr1' }),
         ).toHaveLength(0);
@@ -1396,7 +1549,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           selector: { id: taskId },
           data: { reward: { type: 'mystery' } },
         });
-        await service.checkInDaily({ customerId: 'cus_tr2' });
+        await checkInPaid({ customerId: 'cus_tr2' });
         await expect(
           service.claimTask({ customerId: 'cus_tr2', taskId }),
         ).rejects.toThrow(/mystery/);
@@ -1410,7 +1563,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
           ...valid,
           tickets: 50,
         });
-        await service.checkInDaily({ customerId: 'cus_t2' });
+        await checkInPaid({ customerId: 'cus_t2' });
         await service.claimTask({ customerId: 'cus_t2', taskId });
         await service.saveTaskDefinition({ ...valid, id: taskId, tickets: 5 });
 
@@ -1428,7 +1581,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
 
       it('a task with tickets 0 writes no ticket row', async () => {
         const { id: taskId } = await service.saveTaskDefinition(valid);
-        await service.checkInDaily({ customerId: 'cus_t3' });
+        await checkInPaid({ customerId: 'cus_t3' });
         const result = await service.claimTask({
           customerId: 'cus_t3',
           taskId,

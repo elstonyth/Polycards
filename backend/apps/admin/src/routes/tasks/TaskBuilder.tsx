@@ -797,6 +797,10 @@ export const TaskBuilder = ({
                   );
                 })}
               </div>
+              <Text size="xsmall" className="text-ui-fg-muted mt-2">
+                Players can claim a check-in reward only once they have topped
+                up RM 50 in the same week. Checking in itself stays free.
+              </Text>
             </>
           );
         }

@@ -19,6 +19,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { checkInToday } from '@/lib/actions/tasks';
+import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { Pill, pillVariants } from '@/components/ui/pill';
 import {
   PAGE_COLUMN,
@@ -398,6 +399,7 @@ function DailyTab({
 } & Claim) {
   const [checkingIn, startTransition] = useTransition();
   const router = useRouter();
+  const { openTopUp } = useTopUp();
   const checkIn = () =>
     startTransition(async () => {
       const res = await checkInToday();
@@ -421,6 +423,8 @@ function DailyTab({
         onClaim={claim.onClaim}
         claimingId={claim.claimingId}
         onNotice={onNotice}
+        unlock={hub.checkin_unlock}
+        onTopUp={openTopUp}
       />
       <TaskList
         heading="Today"

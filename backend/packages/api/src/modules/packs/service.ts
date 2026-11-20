@@ -219,11 +219,14 @@ import {
   type LuckyDrawResultRow,
 } from './lucky-draw-operations';
 import {
+  checkinClaimLocked,
+  checkinUnlock,
   taskIsLive,
   taskPeriodKey,
   taskProgress,
   validateTaskRequirement,
   validateTaskReward,
+  type CheckinUnlock,
   type PeriodFacts,
   type TaskFacts,
   type TaskKind,
@@ -3093,6 +3096,9 @@ class PacksModuleService extends MedusaService({
     /** Check-ins this task week: the /task strip's filled slots, and exactly
      *  what weekly checkin_days tasks measure. */
     checkins_this_week: number;
+    /** This task week's top-ups against the bar every check-in reward waits
+     *  for (CHECKIN_CLAIM_MIN_TOPUP_MYR). Checking in never waits for it. */
+    checkin_unlock: CheckinUnlock;
     vip_level: number;
     /** Free rips this customer has claimed but not yet spun. Listed at the top
      *  level rather than on the task row on purpose: the task that granted it
@@ -3118,6 +3124,10 @@ class PacksModuleService extends MedusaService({
       tickets: number;
       progress: { current: number; target: number; completed: boolean };
       claimed: boolean;
+      /** A check-in reward still waiting for this week's top-up: it can be
+       *  complete, but the claim is refused until the bar is met. Progress
+       *  is NOT bent to say so — the track still counts every check-in. */
+      locked: boolean;
     }[];
   }> {
     // ONE clock read: the day must sit inside the week it is measured with,
@@ -3325,6 +3335,7 @@ class PacksModuleService extends MedusaService({
       week_start: week.weekStartIso,
       day_key: day.dayIso,
       checkins_this_week: facts.week.checkinDays,
+      checkin_unlock: checkinUnlock(facts.week.topupMyr),
       // The Achievements & VIP tab shows the rung the reach_level tasks are
       // measured against; taskFactsFor already loaded it.
       vip_level: facts.vipLevel,
@@ -3345,6 +3356,7 @@ class PacksModuleService extends MedusaService({
           tickets: d.tickets ?? 0,
           progress: taskProgress(kind, requirement, facts),
           claimed: claimed.has(`${d.id}:${taskPeriodKey(kind, period)}`),
+          locked: checkinClaimLocked(requirement, facts.week.topupMyr),
         };
       }),
     };
@@ -3384,6 +3396,12 @@ class PacksModuleService extends MedusaService({
         claimed: false;
         reason:
           'not_found' | 'not_completed' | 'already_claimed' | 'window_closed';
+      }
+    | {
+        claimed: false;
+        /** A check-in reward, complete, but this week's top-ups are short. */
+        reason: 'needs_topup';
+        topup: CheckinUnlock;
       }
   > {
     // Deliberately NOT filtered on active: retiring a task must never strand
@@ -3456,6 +3474,16 @@ class PacksModuleService extends MedusaService({
       sharedContext,
     );
     if (prior) return { claimed: false, reason: 'already_claimed' };
+    // The check-in reward bar (CHECKIN_CLAIM_MIN_TOPUP_MYR): checked here, in
+    // the claim transaction, so no client can skip it. After already_claimed,
+    // so a reward claimed before the bar existed still reads as claimed.
+    if (checkinClaimLocked(requirement, facts.week.topupMyr)) {
+      return {
+        claimed: false,
+        reason: 'needs_topup',
+        topup: checkinUnlock(facts.week.topupMyr),
+      };
+    }
     let claimId: string;
     try {
       const [claim] = await this.createTaskClaims(

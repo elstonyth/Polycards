@@ -113,6 +113,44 @@ export function taskPeriodKey(
   return '';
 }
 
+/** Check-in rewards wait for a top-up (owner 2026-11-20, against fraud:
+ *  check-ins cost nothing, so fresh accounts farmed the track). Checking in
+ *  stays free and counts as before; only the CLAIM of a check-in reward waits
+ *  until the customer's settled gateway top-ups this task week reach this
+ *  much — the same rows a weekly topup_myr goal counts, so admin credit,
+ *  bonus and rewards never unlock it. The bar resets with the task week
+ *  (Monday 00:00 MYT), and meeting it unlocks every check-in reward of that
+ *  week at once, the days already checked in included. */
+export const CHECKIN_CLAIM_MIN_TOPUP_MYR = 50;
+
+/** Where this week's top-ups stand against the check-in bar. */
+export interface CheckinUnlock {
+  required_myr: number;
+  topped_up_myr: number;
+  unlocked: boolean;
+}
+
+export function checkinUnlock(weekTopupMyr: number): CheckinUnlock {
+  // Whole sen, so float noise in the RM figure can never read RM 50.00 as short.
+  const toppedUp = Math.round(weekTopupMyr * 100) / 100;
+  return {
+    required_myr: CHECKIN_CLAIM_MIN_TOPUP_MYR,
+    topped_up_myr: toppedUp,
+    unlocked: toppedUp >= CHECKIN_CLAIM_MIN_TOPUP_MYR,
+  };
+}
+
+/** Does this task's reward wait for the week's top-up? Check-in goals only —
+ *  daily or weekly — and only while the week's top-ups are short of the bar. */
+export function checkinClaimLocked(
+  requirement: TaskRequirement,
+  weekTopupMyr: number,
+): boolean {
+  return (
+    requirement.type === 'checkin_days' && !checkinUnlock(weekTopupMyr).unlocked
+  );
+}
+
 // Sanity ceiling on a single task's credit reward — same defensive stance as
 // the reward-box MAX_BOX_CREDIT_MYR cap.
 export const MAX_TASK_CREDIT_MYR = 10_000;
