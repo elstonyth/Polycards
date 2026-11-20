@@ -3189,8 +3189,15 @@ async function checkSpinWebkit(label, profile) {
   await waitLive(page, 1).catch(() => {});
   await waitSpinReady(page);
   const r = (await spinInfo(page)).range;
-  await page.mouse.move(profile.context.viewport.width / 2, 400);
-  await page.mouse.wheel(0, 100);
+  // Mobile WebKit takes no wheel and Playwright has no touch there: the
+  // page is put at the pin end by scrollTo and the spin follows it.
+  const mobile = profile.kind === 'phone';
+  if (mobile)
+    await page.evaluate((y) => window.scrollTo(0, y), r.start + r.length);
+  else {
+    await page.mouse.move(profile.context.viewport.width / 2, 400);
+    await page.mouse.wheel(0, 100);
+  }
   await sleep(PAGED_MS + 800);
   const s = await spinInfo(page);
   if (profile.kind === 'phone' && WANT_SHOTS) {
@@ -3202,7 +3209,7 @@ async function checkSpinWebkit(label, profile) {
     s.y === r.start + r.length &&
       s.spin === 1 &&
       (s.stats?.gpuBytesEstimate ?? 0) <= CAPS[profile.kind],
-    `WebKit: a wheel notch paged to ${s.y} (end ${r.start + r.length}), spin ${s.spin}; mode ${(await stageInfo(page))?.mode}; ${((s.stats?.gpuBytesEstimate ?? 0) / 1e6).toFixed(1)} MB; touch paging not run (WebKit has no CDP touch)`,
+    `WebKit: ${mobile ? 'scrollTo the pin end (no wheel or touch input in mobile WebKit)' : 'a wheel notch paged'} to ${s.y} (end ${r.start + r.length}), spin ${s.spin}; mode ${(await stageInfo(page))?.mode}; ${((s.stats?.gpuBytesEstimate ?? 0) / 1e6).toFixed(1)} MB; touch paging not run (WebKit has no CDP touch)`,
   );
   await ctx.close();
 }
