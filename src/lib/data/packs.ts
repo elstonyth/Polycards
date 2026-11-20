@@ -27,7 +27,7 @@ import { unstable_cache } from 'next/cache';
 import { cached } from '@/lib/ttl-cache';
 import { store } from '@/lib/store';
 import { logger } from '@/lib/logger';
-import { isRarity, type PublishedOdds } from '@/lib/packs-format';
+import { isRarity, type PullOdds } from '@/lib/packs-format';
 import { avatarForSeed } from '@/lib/profile-view';
 import { relativeTime } from '@/lib/format';
 import { toCardView } from '@/lib/card-view';
@@ -386,9 +386,10 @@ async function getUncatalogedPack(slug: string): Promise<PackBase | null> {
 //
 // 🔒 SECRET ODDS: the per-card `weight` is the real, admin-tuned win rate and
 // is NOT exposed by the backend route, so it is absent here by design. The
-// customer-facing Pull Odds are the SEPARATE, admin-PUBLISHED `published_odds`
-// on the pack (see PackDetail.publishedOdds) — never derived from these
-// weights. Only non-secret card fields (incl. market_value → Top Hits) arrive.
+// customer-facing Pull Odds are the SEPARATE, staff-entered display odds the
+// route sends as `pull_odds` (see PackDetail.pullOdds) — never derived from
+// these weights. Only non-secret card fields (incl. market_value → Top Hits)
+// arrive.
 // `marketPriceMyr` absent on an older backend → the card renders "—" instead
 // of the raw USD number behind an "RM" prefix. `market_value` is raw USD FMV,
 // kept for SORTING only. `rarity` is a known tier: OddsEntrySchema drops the
@@ -403,19 +404,26 @@ export interface PackDetail {
   /** The full public prize pool (display fields only, weights stay secret) —
    *  feeds the guest demo spin's client-side weighted sample. */
   pool: PackCard[];
-  /** Admin-published PUBLIC odds; null = not set (the odds panel is hidden).
+  /** The Pull Odds; null = not set (the odds panel is hidden).
    *  Also what the guest demo spin samples on. */
-  publishedOdds: PublishedOdds | null;
+  pullOdds: PullOdds | null;
 }
 
-// Sanitize the backend's published_odds json (jsonb passthrough — validate at
-// the trust boundary so a malformed value can't render NaN or unknown tiers).
-const parsePublishedOdds = (raw: unknown): PublishedOdds | null => {
+// The backend's Pull Odds json (jsonb passthrough — validate at the trust
+// boundary so a malformed value can't render NaN or unknown tiers).
+//
+// An older backend sends this key under its previous name; read both until it
+// is updated. The previous name is not declared in PackDetailPageSchema
+// (looseObject passes the undeclared key through).
+const rawPullOdds = (row: Record<string, unknown>): unknown =>
+  row.pull_odds ?? row.published_odds;
+
+const parsePullOdds = (raw: unknown): PullOdds | null => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const o = raw as { tiers?: unknown };
   const okPct = (v: unknown): v is number =>
     typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 100;
-  const tiers: PublishedOdds['tiers'] = {};
+  const tiers: PullOdds['tiers'] = {};
   if (o.tiers && typeof o.tiers === 'object' && !Array.isArray(o.tiers)) {
     for (const [k, v] of Object.entries(o.tiers as Record<string, unknown>)) {
       if (isRarity(k) && okPct(v)) tiers[k] = v;
@@ -431,8 +439,8 @@ const parsePublishedOdds = (raw: unknown): PublishedOdds | null => {
  * state (the backend is the source of truth — no mock fallback).
  *
  * The customer-facing Pull Odds are intentionally NOT computed here — they are
- * decoupled from the secret per-card weights and rendered from the static
- * published `ODDS` display in packs-data.ts (see PackDetailClient).
+ * the staff-entered `pull_odds` the route sends, decoupled from the secret
+ * per-card weights (see PackDetailClient).
  */
 export async function getPackDetail(slug: string): Promise<PackDetail | null> {
   // Every no-pool answer is the same null the page's empty gacha state reads:
@@ -446,7 +454,7 @@ export async function getPackDetail(slug: string): Promise<PackDetail | null> {
 function toPackDetail(
   row: ReturnType<typeof PackDetailPageSchema.parse>,
 ): PackDetail | null {
-  const { published_odds } = row;
+  const pullOdds = parsePullOdds(rawPullOdds(row));
   if (row.prize_type === 'tickets') {
     const pool = parseList(TicketOddsRowSchema, row.odds).map((o) =>
       ticketCard(o.tickets, o.rarity),
@@ -456,7 +464,7 @@ function toPackDetail(
       : {
           topHits: [],
           pool,
-          publishedOdds: parsePublishedOdds(published_odds),
+          pullOdds,
         };
   }
   const valid = row.odds as BackendOddsEntry[];
@@ -486,7 +494,7 @@ function toPackDetail(
   return {
     topHits,
     pool,
-    publishedOdds: parsePublishedOdds(published_odds),
+    pullOdds,
   };
 }
 
@@ -699,7 +707,7 @@ export interface PullGapHit {
 
 export interface PullGaps {
   rarity: Rarity;
-  /** The pack's published rate for the tier (%); null on the global feed. */
+  /** The pack's Pull Odds rate for the tier (%); null on the global feed. */
   pct: number | null;
   /** 1 / pct in draws — where the reference line sits; null without a rate. */
   expected: number | null;

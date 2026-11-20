@@ -1,5 +1,6 @@
 import {
   createA3payCallbackAllowlist,
+  createGmpayCallbackAllowlist,
   createTgpayCallbackAllowlist,
 } from './utils/payer-ip';
 import {
@@ -160,6 +161,8 @@ const gp365CallbackAllowlist = createA3payCallbackAllowlist(
   process.env,
   'gp365',
 );
+// GMpay's (SGD, A3Pay's replacement) — its own platform and address list.
+const gmpayCallbackAllowlist = createGmpayCallbackAllowlist();
 // Open the phone-OTP send budget's Redis connection at boot, like the
 // limiters above, not on the first code request: that store fails CLOSED in
 // production, so a connection still opening refused every fresh instance's
@@ -553,6 +556,15 @@ export default defineMiddlewares({
       matcher: '/hooks/gp365/*',
       method: 'POST',
       middlewares: [gatewayHookRateLimit, gp365CallbackAllowlist],
+    },
+    {
+      // GMpay (SGD) callbacks (src/api/hooks/gmpay/*). preserveRawBody: their
+      // SHA-256 signature is over the fields as SENT (`100.00`), which a
+      // re-serialised req.body would not reproduce.
+      matcher: '/hooks/gmpay/*',
+      method: 'POST',
+      bodyParser: { preserveRawBody: true },
+      middlewares: [gatewayHookRateLimit, gmpayCallbackAllowlist],
     },
     {
       // Desk reports (spec 2026-09-29-desk-reports-design.md): read-only

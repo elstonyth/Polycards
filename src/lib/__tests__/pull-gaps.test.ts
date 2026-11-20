@@ -26,7 +26,7 @@ describe('gapScale — the stats chart axis', () => {
     expect(gapScale(0.4, null, [1]).ticks).toEqual([0, 1, 2, 3]);
   });
 
-  it('falls back to the observed mean when the pack publishes no rate', () => {
+  it('falls back to the observed mean when the pack has no Pull Odds rate', () => {
     expect(gapScale(null, 40, [10, 70])).toEqual({
       max: 120,
       ticks: [0, 40, 80, 120],

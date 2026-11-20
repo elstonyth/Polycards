@@ -11,7 +11,7 @@ import { PrizeCard } from './PrizeCard';
 
 /** The per-rank prize rows themselves — one row per CONFIGURED rank, with its
  *  card and/or credits. Split out of the sheet (same reason as OddsSheet's
- *  PublishedOddsList) so the same rows can render inline elsewhere — an admin
+ *  PullOddsList) so the same rows can render inline elsewhere — an admin
  *  preview, a wider stage panel — without the two drifting apart.
  *
  *  Rows arrive pre-filtered by the data seam: a rank with neither a resolvable

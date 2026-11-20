@@ -2,7 +2,7 @@
  * Shared gacha-rarity helpers + the pool value maths.
  *
  * Single source for the rarity tier list, the runtime rarity guard, and the
- * published-odds/pool-value derivations the pack page renders. Money in and
+ * Pull Odds/pool-value derivations the pack page renders. Money in and
  * money out are NUMBERS (`priceMyr`, null = unpriced); the components format
  * with `rm()`. Pure + isomorphic (no server-only imports), safe to import
  * anywhere.
@@ -19,15 +19,15 @@ const RARITY_SET = new Set<string>(RARITIES);
 /** Runtime guard: is an arbitrary string one of the known rarity tiers? */
 export const isRarity = (r: string): r is Rarity => RARITY_SET.has(r);
 
-/** Admin-PUBLISHED odds (per-tier %) — the only odds data the storefront ever
+/** The Pull Odds (per-tier %) — the only odds data the storefront ever
  *  shows; fully decoupled from the secret draw weights. */
-export interface PublishedOdds {
+export interface PullOdds {
   tiers: Partial<Record<Rarity, number>>;
 }
 
-/** Published odds → display rows, rarest-first; only tiers given a value. */
-export const publishedOddsRows = (
-  po: PublishedOdds,
+/** Pull Odds → display rows, rarest-first; only tiers given a value. */
+export const pullOddsRows = (
+  po: PullOdds,
 ): { rarity: Rarity; chance: string }[] =>
   RARITIES.filter((r) => typeof po.tiers[r] === 'number').map((r) => ({
     rarity: r,
@@ -83,17 +83,18 @@ export function tierValueRanges(
 }
 
 /**
- * Expected value of one pull, from the PUBLISHED tier percentages: Σ over
- * published tiers of (average priced card in that tier) × (percent / 100).
- * Null when no published tier has a priced card, or when the published
- * odds don't form a coherent distribution (see SUM_TOLERANCE below) — the
+ * Expected value of one pull, from the Pull Odds tier percentages: Σ over
+ * those tiers of (average priced card in that tier) × (percent / 100).
+ * Null when no Pull Odds tier has a priced card, or when the Pull Odds
+ * don't form a coherent distribution (see SUM_TOLERANCE below) — the
  * caller then falls back to the value range.
  *
- * Mirrors the backend's `publishedEv`, but folds over DISPLAY prices (FX ×
- * markup, like every other figure on this panel) and skips unpriced cards the
- * same way `poolValueRange` does, so the storefront figure reads slightly
- * higher than the admin's raw-market "Published EV". Deliberate: one panel,
- * one price basis.
+ * Mirrors the admin-side EV over the same staff-entered odds
+ * (backend/packages/api/src/modules/packs/economy.ts), but folds over DISPLAY
+ * prices (FX × markup, like every other figure on this panel) and skips
+ * unpriced cards the same way `poolValueRange` does, so the storefront figure
+ * reads slightly higher than the admin's raw-market figure. Deliberate: one
+ * panel, one price basis.
  */
 export function poolExpectedValue(
   pool: readonly { rarity: string; priceMyr: number | null }[],
@@ -109,27 +110,27 @@ export function poolExpectedValue(
   }
   let ev = 0;
   let any = false;
-  let publishedPct = 0;
+  let oddsPct = 0;
   let contributingPct = 0;
   for (const rarity of RARITIES) {
     const pct = tiers[rarity];
     if (typeof pct !== 'number' || !Number.isFinite(pct)) continue;
-    publishedPct += pct;
+    oddsPct += pct;
     const t = sums.get(rarity);
     if (!t) continue;
     any = true;
     contributingPct += pct;
     ev += (t.sum / t.n) * (pct / 100);
   }
-  // The figure is only the promised EV when (a) the published tiers form a
-  // full distribution and (b) every published tier contributed priced
+  // The figure is only the promised EV when (a) the Pull Odds tiers form a
+  // full distribution and (b) every Pull Odds tier contributed priced
   // cards — a tier skipped for having no prices silently deletes its
   // probability mass. Tolerance covers admin rounding (33.3+33.3+33.4).
   const SUM_TOLERANCE = 0.5;
   if (
     !any ||
-    Math.abs(publishedPct - 100) > SUM_TOLERANCE ||
-    publishedPct - contributingPct > SUM_TOLERANCE
+    Math.abs(oddsPct - 100) > SUM_TOLERANCE ||
+    oddsPct - contributingPct > SUM_TOLERANCE
   ) {
     return null;
   }
@@ -138,7 +139,7 @@ export function poolExpectedValue(
 
 /** A ticket pool as the odds maths reads it: the amount stands in for the price,
  *  so a tier's range and the average per pull are the card pack's own sums, over
- *  the PUBLISHED tiers only. Explicit on purpose: a ticket row has no price of its
+ *  the Pull Odds tiers only. Explicit on purpose: a ticket row has no price of its
  *  own (see ticketCard), so no other value sum can mistake tickets for money. */
 export const ticketOddsPool = (
   pool: readonly { rarity: string; tickets?: number }[],

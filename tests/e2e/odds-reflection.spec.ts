@@ -1,18 +1,19 @@
 // THE headline: an admin win-rate adjustment must take effect on the real
 // storefront pull, even though the storefront's *displayed* Pull Odds are the
-// admin-PUBLISHED rates (pack.published_odds — a display-only setting) that are
-// decoupled from the secret per-card weights by design.
+// staff-entered rates (pack.published_odds, sent as `pull_odds` — a
+// display-only setting) that are decoupled from the secret per-card weights by
+// design.
 //
 // Proof (per the operator's spec): set ONE card to 100% win rate, open the pack
 // a few times — every pull must be that same card. Repeat on a DIFFERENT pack
 // with a DIFFERENT card so it's not a one-pack fluke. Pack A is adjusted through
 // the admin UI; pack B through the odds API (the same mutation the UI performs).
-// Throughout, assert the published Pull Odds panel never moves.
+// Throughout, assert the Pull Odds panel never moves.
 //
 // Re-authored 2026-07-12 against the /slots storefront (plan 023): the old
 // hardcoded-ODDS <li> assertion is gone — the panel now renders the backend's
-// published_odds, so the invariant is checked as a before/after snapshot of the
-// panel itself (win-rate writes must never leak into the published display).
+// Pull Odds, so the invariant is checked as a before/after snapshot of the
+// panel itself (win-rate writes must never leak into the Pull Odds display).
 import { test, expect } from '@playwright/test';
 import { BASE } from './helpers/constants';
 import {
@@ -58,10 +59,10 @@ function pickTarget(odds: OddsRow[]): OddsRow {
   return target;
 }
 
-// Snapshot the player-facing Pull Odds panel on /slots/<slug> (the admin-
-// published rates), or its absence when the pack has none published. Comparing
-// before/after proves a win-rate adjustment never moves the published display.
-async function publishedOddsSnapshot(
+// Snapshot the player-facing Pull Odds panel on /slots/<slug> (the staff-
+// entered rates), or its absence when the pack has none set. Comparing
+// before/after proves a win-rate adjustment never moves the Pull Odds display.
+async function pullOddsSnapshot(
   page: import('@playwright/test').Page,
   slug: string,
 ): Promise<string> {
@@ -70,14 +71,14 @@ async function publishedOddsSnapshot(
   // match `hasText` and the SAME list resolves twice — strict mode then throws
   // before the panel is ever read. Narrow to the INNERMOST match (`.last()`,
   // which is the Reveal wrapper) rather than `.first()` on the lists: that one
-  // section holds exactly one <ul> (PublishedOddsList renders a single list),
+  // section holds exactly one <ul> (OddsBoard renders a single list),
   // so strict mode still catches a genuinely duplicated panel.
   const panel = page
     .locator('section', { hasText: 'Pull Odds (by rarity)' })
     .last()
     .locator('ul');
   const panelCount = await panel.count();
-  if (panelCount === 0) return 'no published odds panel';
+  if (panelCount === 0) return 'no Pull Odds panel';
   // Fail LOUDLY on a second panel rather than letting innerText() throw a bare
   // strict-mode error: this helper exists to resolve exactly one list, so a
   // layout change that reintroduces the ambiguity should say so by name.
@@ -106,7 +107,7 @@ test('pack A (entry pack): 100% via admin UI → every pull is that card', async
 }) => {
   const slug = packA.slug;
   const original = snapshotOdds((await getOdds(admin, slug)).odds);
-  const publishedBefore = await publishedOddsSnapshot(page, slug);
+  const oddsBefore = await pullOddsSnapshot(page, slug);
   try {
     const target = pickTarget((await getOdds(admin, slug)).odds);
 
@@ -120,8 +121,8 @@ test('pack A (entry pack): 100% via admin UI → every pull is that card', async
     );
     expect(after?.pct).toBe(100);
 
-    // The published Pull Odds display did NOT move.
-    expect(await publishedOddsSnapshot(page, slug)).toBe(publishedBefore);
+    // The Pull Odds display did NOT move.
+    expect(await pullOddsSnapshot(page, slug)).toBe(oddsBefore);
 
     // The REAL pull behavior did: every open returns the forced card.
     await assertEveryPullIs(customer.token, slug, target.name);
@@ -136,7 +137,7 @@ test('pack B (second pack): 100% via odds API → every pull is that card', asyn
   const slug = packB.slug;
   const before = (await getOdds(admin, slug)).odds;
   const original = snapshotOdds(before);
-  const publishedBefore = await publishedOddsSnapshot(page, slug);
+  const oddsBefore = await pullOddsSnapshot(page, slug);
   try {
     const target = pickTarget(before);
 
@@ -157,7 +158,7 @@ test('pack B (second pack): 100% via odds API → every pull is that card', asyn
     );
     expect(after?.pct).toBe(100);
 
-    expect(await publishedOddsSnapshot(page, slug)).toBe(publishedBefore);
+    expect(await pullOddsSnapshot(page, slug)).toBe(oddsBefore);
     await assertEveryPullIs(customer.token, slug, target.name);
   } finally {
     await setOdds(admin, slug, original);

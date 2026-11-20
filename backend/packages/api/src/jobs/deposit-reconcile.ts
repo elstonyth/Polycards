@@ -201,6 +201,7 @@ export default async function depositReconcileJob(container: MedusaContainer) {
           deposit.merchant_transaction_id,
           config,
           rowFx(deposit),
+          deposit.gateway_transaction_id,
         );
         if (sweepAlertsVerifyFail(deposit, detail.statusId)) {
           alertPayinVerifyFail(container, deposit);

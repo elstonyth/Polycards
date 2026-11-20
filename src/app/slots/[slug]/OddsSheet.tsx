@@ -10,12 +10,12 @@ import { rm } from '@/lib/format';
 import { useModalA11y } from '@/lib/use-modal-a11y';
 import { useLiquidGlass, GLASS_SUBTLE } from '@/lib/use-liquid-glass';
 
-/** True when there is at least one row to render — a pack can publish odds with
- *  no per-tier percentages AND have nothing priced (a backend without
+/** True when there is at least one row to render — a pack can carry Pull Odds
+ *  with no per-tier percentages AND have nothing priced (a backend without
  *  `marketPriceMyr` leaves every card's priceMyr null, so poolValueRange
  *  returns null), which would otherwise paint an empty bordered box. Callers
- *  gate on this so they can fall back to their own "not published yet" copy. */
-export const hasPublishedOddsContent = (
+ *  gate on this so they can fall back to their own "not available yet" copy. */
+export const hasPullOddsContent = (
   odds: { rarity: Rarity; chance: string }[] | null,
   range: PoolValueRange | null,
 ): odds is { rarity: Rarity; chance: string }[] =>
@@ -31,10 +31,10 @@ export const rangeLabel = (r: PoolValueRange, tickets: boolean): string => {
     : `${r.min.toLocaleString('en-US')} – ${ticketCount(r.max)}`;
 };
 
-/** The published-odds list itself — value-range row + per-rarity rows + caption.
+/** The Pull Odds list itself — value-range row + per-rarity rows + caption.
  *  Shared between this sheet and the pack page's odds panel so the two can't
  *  drift (they did during the Epic→Mythical rename). */
-export function PublishedOddsList({
+export function PullOddsList({
   odds,
   range,
   expectedValue,
@@ -42,14 +42,14 @@ export function PublishedOddsList({
   rounded = 'xl',
   tickets = false,
 }: {
-  /** Published rows (rarest-first). */
+  /** Pull Odds rows (rarest-first). */
   odds: { rarity: Rarity; chance: string }[];
   /** Pack card-value range (display prices, markup included); null hides the row.
-   *  Still the content gate (see hasPublishedOddsContent) even when the row
+   *  Still the content gate (see hasPullOddsContent) even when the row
    *  itself renders the expected value instead. */
   range: PoolValueRange | null;
-  /** Expected value of one pull over the published tiers (RM); when present it
-   *  REPLACES the range in the top row. Null (no published tier has a priced
+  /** Expected value of one pull over the Pull Odds tiers (RM); when present it
+   *  REPLACES the range in the top row. Null (no Pull Odds tier has a priced
    *  card) falls back to the range, so a pack with a priced pool but no
    *  per-tier rows still has something in that row. */
   expectedValue?: number | null;
@@ -61,8 +61,8 @@ export function PublishedOddsList({
   tickets?: boolean;
 }) {
   // Nothing to show: render nothing rather than an empty bordered <ul> + a
-  // "Published rates for this pack." caption over zero rates.
-  if (!hasPublishedOddsContent(odds, range)) return null;
+  // "Rates for this pack." caption over zero rates.
+  if (!hasPullOddsContent(odds, range)) return null;
 
   return (
     <>
@@ -134,9 +134,9 @@ export function PublishedOddsList({
           );
         })}
       </ul>
-      {/* Customer-facing copy never says "published". It implies a second,
-          UNPUBLISHED set of odds — which invites exactly the question we do not
-          want a player asking. These are simply "the rates for this pack". */}
+      {/* Customer-facing copy never hints at a second, hidden set of odds —
+          that invites exactly the question we do not want a player asking.
+          These are simply "the rates for this pack". */}
       <p className="mt-2 px-1 text-[11px] text-white/60">
         Rates for this {tickets ? 'capsule' : 'pack'}.
       </p>
@@ -144,7 +144,7 @@ export function PublishedOddsList({
   );
 }
 
-/** Published rarity-odds list (admin-authored, from the backend). Never
+/** Pull Odds by rarity (staff-entered in the admin, from the backend). Never
  *  exposes the win-rate lock (PRD §3.7/§8). */
 export function OddsSheet({
   open,
@@ -157,7 +157,7 @@ export function OddsSheet({
 }: {
   open: boolean;
   onClose: () => void;
-  /** Published rows (rarest-first); null = this pack has no published odds. */
+  /** Pull Odds rows (rarest-first); null = this pack has no Pull Odds. */
   odds: { rarity: Rarity; chance: string }[] | null;
   range: PoolValueRange | null;
   expectedValue?: number | null;
@@ -199,12 +199,12 @@ export function OddsSheet({
             <X className="h-5 w-5" aria-hidden />
           </button>
         </div>
-        {/* Published AND non-empty ⇢ render. Odds can be published with no
+        {/* Set AND non-empty ⇢ render. Pull Odds can be set with no
             per-tier rows; if nothing in the pool is priced either, the range row
             is gone too and the list would be an empty box — so fall through to
-            the not-published copy. Same gate as the pack page's odds panel. */}
-        {hasPublishedOddsContent(odds, range) ? (
-          <PublishedOddsList
+            the not-available copy. Same gate as the pack page's odds panel. */}
+        {hasPullOddsContent(odds, range) ? (
+          <PullOddsList
             odds={odds}
             range={range}
             expectedValue={expectedValue}

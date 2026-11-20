@@ -145,6 +145,10 @@ export const PRIVATE_FIELDS_MESSAGE =
  * wildcards (`*`, `*customer`, `customer.*`) stop at scalar columns. Pinned by
  * integration-tests/http/store-group-fields.spec.ts.
  *
+ * Also inventory and stock relations (2026-11-20). The storefront never
+ * requests them through fields; staff use the admin for stock. Every path into
+ * them names inventory_items / inventory / location_levels / stock_locations.
+ *
  * JSON.stringify because a repeated `fields` parses to an array or an object.
  */
 export function refusePrivateFields(
@@ -152,7 +156,11 @@ export function refusePrivateFields(
   _res: MedusaResponse,
   next: MedusaNextFunction,
 ): void {
-  if (/group|seller/i.test(JSON.stringify(req.query.fields))) {
+  if (
+    /group|seller|inventory|stock|location_level/i.test(
+      JSON.stringify(req.query.fields),
+    )
+  ) {
     next(
       new MedusaError(MedusaError.Types.INVALID_DATA, PRIVATE_FIELDS_MESSAGE),
     );

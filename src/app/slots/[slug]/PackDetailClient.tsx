@@ -29,12 +29,12 @@ import {
 import { AmbientVideo } from '@/components/AmbientVideo';
 import { Pill } from '@/components/ui/pill';
 import { ArrowDisc, SPRING, SectionHead } from '@/components/ui/soft';
-import { hasPublishedOddsContent } from './OddsSheet';
+import { hasPullOddsContent } from './OddsSheet';
 import { OddsBoard } from './OddsBoard';
 import { PoolByRarity } from './PoolByRarity';
 import { FIELD_LABEL, PackPicker } from './PackPicker';
 import {
-  publishedOddsRows,
+  pullOddsRows,
   ticketOddsPool,
   ticketTopHits,
   poolValueRange,
@@ -264,9 +264,9 @@ export default function PackDetailClient({
 
   // Top Hits come from the backend prize pool (highest market_value) — the
   // backend is the source of truth, so a missing/empty pool renders an empty
-  // state (no mock fallback). Pull Odds are the SECRET-decoupled, statically-
-  // published `ODDS` — they never reflect the admin-tuned win rates (see
-  // packs.ts / route.ts).
+  // state (no mock fallback). Pull Odds are the staff-entered display odds,
+  // decoupled from the SECRET weights — they never reflect the admin-tuned win
+  // rates (see packs.ts / route.ts).
 
   const setQ = (n: number) => {
     const count = Math.min(maxQty, Math.max(1, n));
@@ -288,10 +288,10 @@ export default function PackDetailClient({
     else router.push(packHref(first, qty), { scroll: false });
   };
 
-  // The admin-PUBLISHED odds — the ONLY rates players see. Null (unset) hides
+  // The Pull Odds staff entered — the ONLY rates players see. Null (unset) hides
   // the whole Pull Odds panel.
-  const publishedRows = liveDetail?.publishedOdds
-    ? publishedOddsRows(liveDetail.publishedOdds)
+  const oddsRows = liveDetail?.pullOdds
+    ? pullOddsRows(liveDetail.pullOdds)
     : null;
 
   // The full public prize pool (value-sorted) — feeds the odds panel's
@@ -325,21 +325,20 @@ export default function PackDetailClient({
   // both the odds-panel gate and its range row.
   const valueRange = useMemo(() => poolValueRange(oddsPool), [oddsPool]);
 
-  // Same derivation per rarity, so each published tier row can state what a
+  // Same derivation per rarity, so each Pull Odds tier row can state what a
   // card of THAT tier is worth here. The pack-wide range above spans Common to
   // Immortal and so describes no tier in particular.
   const tierRanges = useMemo(() => tierValueRanges(oddsPool), [oddsPool]);
 
-  // Expected value of one pull over the PUBLISHED tiers — what the top row of
+  // Expected value of one pull over the Pull Odds tiers — what the top row of
   // the odds panel states now (the range only ever described the pool's span).
-  // The odds are read into a local first: with `liveDetail?.publishedOdds` as a
+  // The odds are read into a local first: with `liveDetail?.pullOdds` as a
   // dependency, the React Compiler infers `liveDetail` (a less specific
   // property than the source) and refuses to preserve the memo.
-  const publishedOdds = liveDetail?.publishedOdds ?? null;
+  const pullOdds = liveDetail?.pullOdds ?? null;
   const expectedValue = useMemo(
-    () =>
-      publishedOdds ? poolExpectedValue(oddsPool, publishedOdds.tiers) : null,
-    [oddsPool, publishedOdds],
+    () => (pullOdds ? poolExpectedValue(oddsPool, pullOdds.tiers) : null),
+    [oddsPool, pullOdds],
   );
 
   // What the header states about this pack: franchise, type, language, grading.
@@ -807,7 +806,8 @@ export default function PackDetailClient({
 
           {/* Top Hits — Immortal/Legendary/Mythical only, as a swipeable
               rail whose expand button opens a dialog of the SAME top-tier
-              subset (rarest first, per-tier pull chance when published) —
+              subset (rarest first, per-tier pull chance when the pack has
+              Pull Odds) —
               operator decision 2026-08-08; lower tiers are catalogue noise
               in the expanded view too. The odds panel below still quotes
               value ranges over the FULL pool — a deliberate,
@@ -826,7 +826,7 @@ export default function PackDetailClient({
                 key={active.id}
                 rail={topPool}
                 full={pool}
-                tierChances={liveDetail?.publishedOdds?.tiers ?? null}
+                tierChances={liveDetail?.pullOdds?.tiers ?? null}
                 onOpen={(card) => setOpenCard(toSeed(card))}
                 pokemon={pokemonPack}
               />
@@ -838,25 +838,25 @@ export default function PackDetailClient({
       {/* ===== Pull Odds, then Recent Pulls (below the fold) =====
           Two full-width boards, each a side column (its heading and headline
           figures) beside its content; on a phone the side column simply comes
-          first. The odds board renders ONLY the admin-published rates from the
-          backend; a pack with no published odds shows no board at all. Nor does
-          a pack whose published odds carry no per-tier rows AND nothing priced:
+          first. The odds board renders ONLY the staff-entered Pull Odds from the
+          backend; a pack with no Pull Odds shows no board at all. Nor does
+          a pack whose Pull Odds carry no per-tier rows AND nothing priced:
           that would be a bare heading over an empty box. */}
       <div className="mb-10 mt-14 flex flex-col gap-14 lg:mt-24 lg:gap-24">
-        {hasPublishedOddsContent(publishedRows, valueRange) && (
+        {hasPullOddsContent(oddsRows, valueRange) && (
           <Reveal as="section" className="min-w-0">
             <OddsBoard
               heading={
                 <SectionHead
                   eyebrow={
-                    publishedRows.length > 0
-                      ? `${publishedRows.length} ${publishedRows.length === 1 ? 'tier' : 'tiers'}`
+                    oddsRows.length > 0
+                      ? `${oddsRows.length} ${oddsRows.length === 1 ? 'tier' : 'tiers'}`
                       : undefined
                   }
                   title="Pull Odds (by rarity)"
                 />
               }
-              odds={publishedRows}
+              odds={oddsRows}
               range={valueRange}
               expectedValue={expectedValue}
               tierRanges={tierRanges}

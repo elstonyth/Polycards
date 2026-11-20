@@ -169,7 +169,7 @@ describe('GET /admin/payments/audit', () => {
     );
   });
 
-  it('?currency=SGD is the A3Pay rail alone: its totals, its findings, no RM history', async () => {
+  it('?currency=SGD is the S$ rail: the active gateway totals, findings over every S$ gateway, no RM history', async () => {
     const h = harness('fake', { currency: 'sgd' });
     await GET(h.req as never, h.res as never);
     const body = h.res.body as Body;
@@ -177,7 +177,10 @@ describe('GET /admin/payments/audit', () => {
     expect(body.gateway).toBe('a3pay');
     expect(h.packs.gatewayAuditTotals).toHaveBeenCalledWith('a3pay');
     expect(body.history).toEqual([]);
-    expect(body.findings_total).toBe(1);
+    // A3Pay and GMpay both settle S$ (1 finding each in the fake): the list
+    // covers every gateway in the currency, so the count does too.
+    expect(body.findings_total).toBe(2);
+    expect(h.packs.gatewayAuditTotals).toHaveBeenCalledWith('gmpay');
     expect(h.packs.listGatewayWithdrawals).toHaveBeenCalledWith(
       expect.objectContaining({ currency: 'SGD' }),
       expect.anything(),

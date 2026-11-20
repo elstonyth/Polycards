@@ -286,9 +286,7 @@ async function judgeRefusal(
           }))),
     unconfirmed: false,
   };
-  // Taken at their word, without asking: payouts switched off, and a refusal
-  // raised before anything reached the provider (owner, 2026-11-16).
-  if (payoutDisabled || error.result === 'not-sent') {
+  if (refundsWithoutLookup(error, input.gateway)) {
     return { ...kind, refund: true, heldId: null };
   }
   try {
@@ -310,6 +308,28 @@ async function judgeRefusal(
       unconfirmed: notFound && !proven,
     };
   }
+}
+
+/**
+ * Refusals refunded without asking the gateway first. Taken at their word:
+ * payouts switched off, and a refusal raised before anything reached the
+ * provider (owner, 2026-11-16). And on a gateway that can be asked only by
+ * its own id (GMpay), which a refused submit never returned: no lookup can
+ * ever confirm there, so the proof is the refusal itself — one known to
+ * create nothing, or a wallet our own balance read found short.
+ */
+export function refundsWithoutLookup(
+  error: GatewayError,
+  gateway: PaymentGateway,
+): boolean {
+  if (error.result === 'payouts-off' || error.result === 'not-sent') {
+    return true;
+  }
+  if (!GATEWAYS[gateway]?.lookupNeedsGatewayId) return false;
+  return (
+    error.result === 'creates-nothing' ||
+    (error.result === 'wallet-empty' && error.available !== undefined)
+  );
 }
 
 function refundReason(error: GatewayError): RefundReason {

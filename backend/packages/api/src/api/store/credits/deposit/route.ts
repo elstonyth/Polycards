@@ -20,7 +20,7 @@ import {
   gatewayUrls,
   resolveActiveGateway,
 } from '../../../../modules/packs/gateway';
-import { payerNameOnFile } from '../../../utils/payer-name';
+import { payerNameOnFile, payerOnFile } from '../../../utils/payer-name';
 
 // POST /store/credits/deposit — start a real gateway top-up. Returns a
 // cashier URL; NO credit is issued here. The customer pays on their page, and
@@ -98,6 +98,27 @@ export async function POST(
     customerId,
     'payment',
   );
+  // The name the sheet sent wins: it shows the one on file with "Change", or
+  // asks when none is saved. Otherwise (an API caller, or a page from before
+  // the field) the saved account's holder. Only a rail that matches the
+  // payer's name (A3Pay, GMpay: SGD) needs one.
+  // A rail that declares the paying account (GMpay) gets both name and
+  // account from one read of the saved accounts, never the account from the
+  // request body.
+  const typedName =
+    typeof body.payer_name === 'string' && body.payer_name.trim()
+      ? body.payer_name
+      : undefined;
+  const payer = GATEWAYS[gateway].needsPayerBank
+    ? await payerOnFile(req.scope, customerId, gateway, typedName)
+    : {
+        name:
+          typedName ??
+          (GATEWAYS[gateway].needsPayerName
+            ? (await payerNameOnFile(req.scope, customerId, gateway)).onFile
+            : undefined),
+        account: undefined,
+      };
   const result = await startDeposit(
     req.scope,
     {
@@ -107,16 +128,8 @@ export async function POST(
       paymentMethodCode: method,
       customer,
       gateway,
-      // The name the sheet sent wins: it shows the one on file with
-      // "Change", or asks when none is saved. Otherwise (an API caller, or a
-      // page from before the field) the saved account's holder. Only a rail
-      // that matches the payer's name (A3Pay, SGD) needs one.
-      payerName:
-        typeof body.payer_name === 'string' && body.payer_name.trim()
-          ? body.payer_name
-          : GATEWAYS[gateway].needsPayerName
-            ? (await payerNameOnFile(req.scope, customerId, gateway)).onFile
-            : undefined,
+      payerName: payer.name,
+      payerBank: payer.account,
       quotedRate: quotedRateOf(body.quoted_rate),
     },
     notifyUrl,

@@ -8,7 +8,7 @@
  *          writes a Pull. THREE routes reach it: the batch open, the one-time
  *          free welcome pack, and a task's free rip.
  *   Spin — client-side demo theater for a logged-out visitor. Samples the
- *          published odds and shows a card. No Open, no Pull, no credit, no
+ *          Pull Odds and shows a card. No Open, no Pull, no credit, no
  *          stock, no server call at all.
  *   Pull — the record of one prize acquisition.
  *
@@ -36,7 +36,7 @@
  *     the instant-window close on unmount, and the auto-conclude guard — all
  *     of which key off a non-null offer.
  */
-import { demoDraw, type PublishedOdd } from '@/lib/demo-spin';
+import { demoDraw, type PullOdd } from '@/lib/demo-spin';
 import { FLAT_BUYBACK_PERCENT } from '@/lib/packs-data';
 import { SELL_COUNTDOWN_SECS } from '@/lib/sell-countdown';
 import { logger } from '@/lib/logger';
@@ -107,9 +107,9 @@ export interface RollRequest {
   freeRipClaimId: string | null;
   /** The public pool a demo Spin samples. Empty for every other mode. */
   demoPool: PackCard[];
-  /** Odds a demo Spin samples on — the caller resolves the published → static
+  /** Odds a demo Spin samples on — the caller resolves the Pull Odds → static
    *  fallback. Ignored by every other mode. */
-  demoOdds: PublishedOdd[];
+  demoOdds: PullOdd[];
   /** Customer this roll is charged to. Null for a guest demo, which is bound
    *  to no account at all — see `RolledBatch.forId`. */
   forId: string | null;

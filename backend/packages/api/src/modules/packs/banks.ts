@@ -147,6 +147,34 @@ export const MY_BANKS: readonly Bank[] = [
  * and POSB are one bank with one SWIFT but two A3Pay codes, so POSB gets its
  * own slug.
  */
+/**
+ * GMpay's code for each Singapore bank, keyed by canonical id, from their
+ * live SGD /v3/banklist (read from the production server 2026-11-20, 25
+ * entries; their API answers only whitelisted IPs). Alliance is not on it, so
+ * it has no GMpay code. Their PAYNOW is the mobile-number proxy, the only
+ * PayNow we save; PAYNOWNRIC, PAYNOWUEN, PAYNOWVPA, ABN, BOS, BNP, MATCHMOVE
+ * and WISE are banks we do not offer.
+ */
+const GMPAY_SG_CODES: Partial<Record<string, GatewayBankCode>> = {
+  DBSSSGSG: { code: 'DBS', name: 'DBS Bank Limited' },
+  POSBSG: { code: 'POSB', name: 'Post Office Savings Bank' },
+  OCBCSGSG: { code: 'OCBC', name: 'Oversea-Chinese Banking Corporation Limited' },
+  UOVBSGSG: { code: 'UOB', name: 'United Overseas Bank Limited' },
+  SCBLSGSG: { code: 'SCB', name: 'Standard Chartered Bank' },
+  CITISGSG: { code: 'CITI', name: 'Citibank' },
+  HSBCSGSG: { code: 'HSBC', name: 'HSBC Bank' },
+  MBBESGSG: { code: 'MAYBANK', name: 'Malayan Banking Berhad' },
+  CIBBSGSG: { code: 'CIMB', name: 'CIMB Bank' },
+  RHBBSGSG: { code: 'RHB', name: 'RHB' },
+  HLBBSGSG: { code: 'HLBBSG', name: 'Hong Leong Bank' },
+  BKCHSGSG: { code: 'BOC', name: 'Bank of China' },
+  TRUSTBANKSG: { code: 'TRUST', name: 'Trust Bank' },
+  GXSSG: { code: 'GXS', name: 'GXS Bank' },
+  MARIBANKSG: { code: 'MARIBANK', name: 'MariBank' },
+  ANEXTSG: { code: 'ANEXT', name: 'ANEXT' },
+  PAYNOWSG: { code: 'PAYNOW', name: 'PayNow' },
+};
+
 const sgBank = (
   id: string,
   name: string,
@@ -156,7 +184,10 @@ const sgBank = (
 ): Bank => ({
   id,
   name,
-  codes: { a3pay: { code, name: a3payName } },
+  codes: {
+    a3pay: { code, name: a3payName },
+    ...(GMPAY_SG_CODES[id] ? { gmpay: GMPAY_SG_CODES[id] } : {}),
+  },
   legacyAliases: [],
   ...(accountLengths ? { accountLengths } : {}),
 });

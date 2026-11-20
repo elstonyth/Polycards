@@ -166,6 +166,35 @@ export const A3PAY_DEFAULT_CALLBACK_IPS = '13.192.222.226';
  */
 export const GP365_DEFAULT_CALLBACK_IPS = '13.159.14.239';
 
+/**
+ * GMpay's callback source (onboarding email, 2026-11-19). GMPAY_CALLBACK_IPS
+ * overrides it (IPv4 / CIDR, comma separated) — locally the mock's 127.0.0.1.
+ */
+export const GMPAY_DEFAULT_CALLBACK_IPS = '149.104.77.131';
+
+/**
+ * `/hooks/gmpay/*`. Defence in depth only: the SHA-256 signature over the raw
+ * body is the real gate, checked inside each handler. A list that is set but
+ * parses to nothing refuses everything rather than quietly disabling it.
+ */
+export function createGmpayCallbackAllowlist(
+  env: Partial<Record<string, string>> = process.env,
+): CallbackAllowlist {
+  return callbackAllowlist('gmpay', (sourceIp) => {
+    const entries = parseCallbackAllowlist(
+      env.GMPAY_CALLBACK_IPS?.trim() || GMPAY_DEFAULT_CALLBACK_IPS,
+    );
+    if (entries.length === 0)
+      return {
+        allowed: false,
+        reason: 'unparseable — GMPAY_CALLBACK_IPS has no valid entries',
+      };
+    return callbackIpAllowed(sourceIp, entries)
+      ? { allowed: true }
+      : { allowed: false, reason: 'not-listed' };
+  });
+}
+
 const A3PAY_FAMILY_CALLBACK_IPS: Record<A3payKind, string> = {
   a3pay: A3PAY_DEFAULT_CALLBACK_IPS,
   gp365: GP365_DEFAULT_CALLBACK_IPS,

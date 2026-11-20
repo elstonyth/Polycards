@@ -572,6 +572,36 @@ envs:
   - key: A3PAY_CALLBACK_IPS
     scope: RUN_TIME
     value: 13.192.222.226
+  # GMpay (PayFlowXZ v3) — the Singapore (SGD) rail that replaced A3Pay on
+  # 2026-11-19 (docs/payments/gmpay-setup.md). Production merchant
+  # GM_POLYCARDS; Client ID + Secret Key from its back office (OTP-gated,
+  # Admin > My Profile > API Information). Staging and production share ONE
+  # host, so only the keys tell them apart. GMpay allow-lists our egress
+  # 188.166.181.61 / .204 per merchant. GMPAY_CALLBACK_IPS is their documented
+  # callback source (also the code's default). GMPAY_ENABLED opens S$ top-ups
+  # and payouts to every customer whose saved bank GMpay serves. Switched on
+  # 2026-11-20, once GMpay whitelisted both egress IPs and the bank codes
+  # from their live SGD list were in banks.ts.
+  - key: GMPAY_ENABLED
+    scope: RUN_TIME
+    value: "true"
+  - key: GMPAY_API_BASE
+    scope: RUN_TIME
+    value: https://xapi.payflowxz.com/v3
+  - key: GMPAY_CURRENCY
+    scope: RUN_TIME
+    value: SGD
+  - key: GMPAY_CLIENT_ID
+    scope: RUN_TIME
+    type: SECRET
+    value: "__SECRET__GMPAY_CLIENT_ID__"
+  - key: GMPAY_SECRET_KEY
+    scope: RUN_TIME
+    type: SECRET
+    value: "__SECRET__GMPAY_SECRET_KEY__"
+  - key: GMPAY_CALLBACK_IPS
+    scope: RUN_TIME
+    value: 149.104.77.131
   # GlobePay365 USDT rail (docs/payments/gp365-setup.md). USDT is a channel on
   # the existing Polycard merchant (2026-10-21), so the keys are that merchant's
   # old pair under GP365_* names. Never re-add GLOBEPAY_*: gateway-env.ts still
