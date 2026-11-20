@@ -39,6 +39,14 @@
     visibility 0s linear 0s;
 }
 
+/* a layer that mounts mid-move with a block already on (its first render
+   lands in a later frame) still fades it in, after the same delay */
+@starting-style {
+  .over .block[data-on] {
+    opacity: 0;
+  }
+}
+
 .over[data-leaving] .block[data-on] {
   opacity: 0;
   transition: opacity 0.25s ease-out;
@@ -73,6 +81,12 @@
 .over .block[data-on] .line {
   transform: none;
   transition: transform 0.5s cubic-bezier(0.215, 0.61, 0.355, 1) 0.6s;
+}
+
+@starting-style {
+  .over .block[data-on] .line {
+    transform: translateY(110%);
+  }
 }
 
 .tag {
@@ -317,6 +331,12 @@
   transition: opacity 0.5s;
 }
 
+@starting-style {
+  .over .icons[data-on] {
+    opacity: 0;
+  }
+}
+
 .icon {
   display: grid;
   width: 44px;
@@ -450,6 +470,12 @@
   opacity: 1;
   visibility: visible;
   transition: opacity 0.5s;
+}
+
+@starting-style {
+  .backTop[data-on] {
+    opacity: 0;
+  }
 }
 
 .backTop {

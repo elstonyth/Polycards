@@ -31,11 +31,19 @@ export const LEAVE_FADE_MS = 250;
 export const BACK_TURN_MS = 650;
 /**
  * The neighbours leave WITH the tap, over this share of its time (sliding
- * out, sinking and setting back as they fade), and come back over this last
- * share of the leave's time, as the pack arrives.
+ * out, sinking and setting back as they fade).
  */
 export const NEIGHBOUR_OUT_SHARE = 0.4;
-export const NEIGHBOUR_BACK_SHARE = 0.45;
+/**
+ * On the leave they come back between these fractions of its time. The
+ * pack's pose follows power1InOut of the focus, so it has made 90% of its
+ * change of size by about 0.39 of the leave's time and lands (99%) by about
+ * 0.59. They start once the first 250 ms have passed (a stop's text may
+ * still be fading then) and are fully back just after the pack lands; their
+ * slide leads their fade (focusPose), so they are on screen by the 90% pose.
+ */
+export const NEIGHBOUR_BACK_FROM = 1 / 6;
+export const NEIGHBOUR_BACK_TO = 0.64;
 
 /**
  * The neighbours' progress at focus f: 0 in the row, 1 gone. The tap and the
@@ -45,7 +53,11 @@ export const NEIGHBOUR_BACK_SHARE = 0.45;
 export function neighbourOut(f: number, leaving = false): number {
   const x = clamp01(f);
   if (x >= 1) return 1;
-  if (leaving) return clamp01(Math.cbrt(x) / NEIGHBOUR_BACK_SHARE);
+  if (leaving)
+    return clamp01(
+      (Math.cbrt(x) - (1 - NEIGHBOUR_BACK_TO)) /
+        (NEIGHBOUR_BACK_TO - NEIGHBOUR_BACK_FROM),
+    );
   return clamp01((1 - Math.cbrt(1 - x)) / NEIGHBOUR_OUT_SHARE);
 }
 /**
@@ -178,7 +190,10 @@ export function focusPose(
     };
   }
   const side = i > ctx.index ? 1 : -1;
-  const e = smoothstep(0, 1, neighbourOut(f, ctx.leaving));
+  // leaving, the slide and sink lead the fade: most of the way home while
+  // they are still fading in
+  const s = smoothstep(0, 1, neighbourOut(f, ctx.leaving));
+  const e = ctx.leaving ? s * s : s;
   return {
     ...rest,
     dy: rest.dy + NEIGHBOUR_SINK_ART * l.artH * e,

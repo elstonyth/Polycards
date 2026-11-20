@@ -199,13 +199,63 @@ describe('focus keys (focus-poses.json)', () => {
       ).toBeLessThanOrEqual(0.1);
   });
 
-  it('neighbours come back only over the last part of the leave', () => {
+  it('neighbours come back with the leave: on screen before the pack has made 90% of its change of size, fully back just after it lands', () => {
     const op = (t: number) => focusOpacity(1 - ease(t), false, leave);
-    for (let t = 0; t < 0.5; t += 0.01) expect(op(t), String(t)).toBe(0);
-    const [a, b] = timeSpan(op);
-    expect(a).toBeGreaterThanOrEqual(0.5);
-    expect(b - a).toBeGreaterThanOrEqual(0.3);
+    for (const desktop of [false, true]) {
+      const size = desktop ? 'desktop' : 'phone';
+      const l = LAYOUT[size];
+      const panel = PANELS[size];
+      const ctx = { ...ctxFor('151', desktop), leaving: true };
+      const pose = (i: number, t: number) =>
+        focusPose(
+          restBlock(restState(2), i, l, desktop, false),
+          1 - ease(t),
+          0,
+          i,
+          2,
+          l,
+          desktop,
+          false,
+          ctx,
+        );
+      // the focused pack's scale along the leave (its real pose, Front to row)
+      const s0 = pose(2, 0).scale;
+      const s1 = pose(2, 1).scale;
+      const done = (t: number) =>
+        Math.abs(pose(2, t).scale - s0) / Math.abs(s1 - s0);
+      // the right-hand neighbour's width inside the panel, in px
+      const inside = (t: number) => {
+        const p = pose(3, t);
+        const c = l.cx + p.dx + p.fx * panel.w;
+        const hw = ((l.artW ?? 0) * p.scale) / 2;
+        return Math.max(0, Math.min(panel.w, c + hw) - Math.max(0, c - hw));
+      };
+      const ts = Array.from({ length: 1001 }, (_, i) => i / 1000);
+      const at90 = ts.find((t) => done(t) >= 0.9)!;
+      const landed = ts.find((t) => done(t) >= 0.99)!;
+      // seen: 16 px or more of it inside the panel, at a fifth opacity or more
+      const seen = ts.find((t) => inside(t) >= 16 && op(t) >= 0.2)!;
+      const firstDrawn = ts.find((t) => op(t) > 0.001)!;
+      const fullyBack = ts.find((t) => op(t) >= 0.99)!;
+      expect(inside(1), size + ' on screen at rest').toBeGreaterThan(16);
+      expect(seen, size + ' seen').toBeLessThanOrEqual(at90);
+      // within 150 ms of the 1.5 s move after the pack lands
+      expect(
+        fullyBack - landed,
+        size + ' back after landing',
+      ).toBeLessThanOrEqual(0.1);
+      // still a ramp of 450 ms or more
+      expect(fullyBack - firstDrawn, size + ' ramp').toBeGreaterThanOrEqual(
+        0.3,
+      );
+    }
+    // nothing for the first 250 ms of the move (the stop's text is still
+    // fading when a gesture pages back past Front), fully back at the row
+    for (let t = 0; t <= 0.16; t += 0.01) expect(op(t), String(t)).toBe(0);
     expect(op(1)).toBe(1);
+    // at 60 fps no frame brings them back by more than a tenth
+    for (let i = 1; i <= 90; i++)
+      expect(op(i / 90) - op((i - 1) / 90)).toBeLessThanOrEqual(0.1);
   });
 
   it('neighbours slide out, sink and set back as they fade, and back again', () => {
@@ -232,7 +282,7 @@ describe('focus keys (focus-poses.json)', () => {
       restBlock(restState(2), 3, l, false, false).z,
     );
     // leaving, still out until the last part
-    expect(pose(1 - ease(0.4), leave).fx).toBeGreaterThan(0.5);
+    expect(pose(1 - ease(0.2), leave).fx).toBeGreaterThan(0.5);
   });
 
   it('neighbours slide off', () => {

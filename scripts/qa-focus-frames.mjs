@@ -41,6 +41,8 @@ const ONLY = opt('only', '');
 const NEIGHBOUR_GONE_AT = 0.8;
 /** The shortest the other packs may take to go (tap) or come back (leave). */
 const RAMP_MS = 450;
+/** On the leave the other packs are fully back within this of the pack landing. */
+const BACK_AFTER_LAND_MS = 150;
 /** Largest change of another pack's opacity between two frames. */
 const RAMP_STEP = 0.15;
 /** The focus moves' length (focus-poses.json framingChangeMs). */
@@ -114,7 +116,7 @@ function sampler() {
       const focused = all.find((d) => d.index === index) ?? null;
       const drawn = all
         .filter((d) => d.index !== index && d.opacity > 0.001)
-        .map((d) => [d.id, +d.opacity.toFixed(3), d.z]);
+        .map((d) => [d.id, +d.opacity.toFixed(3), d.z, d.x]);
       const blocks = [];
       for (const s of w.__light
         ? []
@@ -142,6 +144,18 @@ function sampler() {
           +head.toFixed(3),
         ]);
       }
+      // the tiles' resting art boxes (they hold their row place in focus):
+      // with the drawn x of the same packs they map the canvas to the page
+      const rects = [];
+      for (const t of w.__light ? [] : tiles) {
+        const r = t.querySelector('[data-stage-art]')?.getBoundingClientRect();
+        if (r)
+          rects.push([
+            t.getAttribute('data-pack-id'),
+            (r.left + r.right) / 2,
+            r.width,
+          ]);
+      }
       w.__frames.push({
         // the frame time the stage posed this frame with
         t: ts,
@@ -155,6 +169,8 @@ function sampler() {
         css,
         drawn,
         blocks,
+        rects,
+        vw: innerWidth,
       });
     }
     requestAnimationFrame(tick);
@@ -369,6 +385,65 @@ function judge(name, all, curve = null) {
       `${name}-others-${curve === 'enter' ? 'leave' : 'return'}-over-${RAMP_MS}-ms-or-more`,
       len !== null && len >= RAMP_MS,
       len === null ? 'no complete ramp seen' : `${Math.round(len)} ms`,
+    );
+  }
+  // the leave: the other packs come back with it, with no beat where the pack
+  // is alone. On the canvas's own clock, another pack is first seen on the
+  // page no later than the pose that has made 90% of the pack's change of
+  // size, and they are all fully back within BACK_AFTER_LAND_MS of the pose
+  // that lands (99%).
+  if (curve === 'leave') {
+    const mv = seq.filter(
+      (fr, i) => fr.foc && (i === 0 || fr.foc.at !== seq[i - 1].foc?.at),
+    );
+    const s0 = mv[0]?.foc.scale;
+    const s1 = mv.at(-1)?.foc.scale;
+    const span = s0 !== undefined && s1 !== undefined ? Math.abs(s1 - s0) : 0;
+    const done = (fr) => Math.abs(fr.foc.scale - s0) / span;
+    const at90 = span > 0 ? mv.find((fr) => done(fr) >= 0.9) : undefined;
+    const landed = span > 0 ? mv.find((fr) => done(fr) >= 0.99) : undefined;
+    const vis = (fr) => Math.max(0, ...[...op(fr).values()]);
+    // seen: 16 px or more of another pack inside the page, at a fifth
+    // opacity or more. Page x of a drawn pack: a line through the focused
+    // pack and a neighbour at rest (drawn x against their tiles' boxes).
+    const rest = [...seq]
+      .reverse()
+      .find((fr) => fr.foc && fr.drawn.some(([, o]) => o >= 0.99));
+    const box = new Map((rest?.rects ?? []).map(([id, c, w]) => [id, [c, w]]));
+    const fid = rest?.foc.id;
+    const nb = rest?.drawn.find(([id, o]) => o >= 0.99 && box.has(id));
+    let toPage = null;
+    if (rest && box.has(fid) && nb && Math.abs(nb[3] - rest.foc.x) > 1e-6) {
+      const k = (box.get(nb[0])[0] - box.get(fid)[0]) / (nb[3] - rest.foc.x);
+      const a = box.get(fid)[0] - k * rest.foc.x;
+      toPage = (x) => a + k * x;
+    }
+    const inside = (fr, [id, , , x]) => {
+      const b = box.get(id);
+      if (!toPage || !b) return 0;
+      const c = toPage(x);
+      return Math.max(
+        0,
+        Math.min(fr.vw, c + b[1] / 2) - Math.max(0, c - b[1] / 2),
+      );
+    };
+    const seen = seq.find((fr) =>
+      fr.drawn.some((d) => d[1] >= 0.2 && inside(fr, d) >= 16),
+    );
+    const back = seq.find((fr) => vis(fr) >= 0.99);
+    report(
+      `${name}-others-seen-by-90-percent-of-the-size-change`,
+      !!(at90 && seen && seen.at <= at90.at),
+      at90 && seen
+        ? `first seen ${Math.round(seen.at - at90.at)} ms from the 90% pose`
+        : 'not seen',
+    );
+    report(
+      `${name}-others-back-within-${BACK_AFTER_LAND_MS}-ms-of-landing`,
+      !!(landed && back && back.at - landed.at <= BACK_AFTER_LAND_MS),
+      landed && back
+        ? `fully back ${Math.round(back.at - landed.at)} ms after the pack landed`
+        : 'not back',
     );
   }
   // the tap and the leave are held to the limit; stop moves are reported
