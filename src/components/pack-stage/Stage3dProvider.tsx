@@ -505,7 +505,9 @@ class StageEngine {
     this.watchdogOn = opts.override === null;
     if (this.host) this.bindHost(this.host);
     this.bindDocument();
-    if (this.debug) this.exposeDebug();
+    // ?debug=1: window.__packStage, loaded on demand
+    if (this.debug)
+      void import('./stage-debug').then((m) => m.exposeStageDebug(this));
 
     if (this.failedForPage) {
       this.settleFlat();
@@ -1050,34 +1052,6 @@ class StageEngine {
   private clearReleaseTimer() {
     if (this.releaseTimer !== null) clearTimeout(this.releaseTimer);
     this.releaseTimer = null;
-  }
-
-  /** `?debug=1`: `window.__packStage` for QA scripts. */
-  private exposeDebug() {
-    if (typeof window === 'undefined') return;
-    (window as unknown as Record<string, unknown>).__packStage = {
-      mode: () => this.snap.mode,
-      ready: () => this.snap.ready,
-      tier: () => this.tier,
-      layout: () => this.layout,
-      live: () => [...this.drawn],
-      fullCanvas: (on: boolean) => {
-        (
-          this.runtime as unknown as {
-            debugFullCanvas?: (v: boolean) => void;
-          } | null
-        )?.debugFullCanvas?.(on);
-        this.poke();
-      },
-      runtime: () =>
-        (
-          this.runtime as unknown as { debug?: () => unknown } | null
-        )?.debug?.() ?? null,
-      running: () => this.running,
-      state: this.state,
-      stats: this.stats,
-      wake: this.wake,
-    };
   }
 }
 

@@ -58,9 +58,11 @@ export type PackSpot = {
 
 /**
  * Ciao's dark room around the lit window (plan-focus-ciao section 4). The
- * shadow multiplies linear light: 0.02 shows as about 16% on screen (sRGB).
+ * shadow multiplies linear light: 0.05 shows as about 26% on screen (sRGB),
+ * dark enough for the lit window, light enough that the foil and the
+ * crimped ends still read as a pack.
  */
-export const PACK_SPOT = { shadow: 0.02, lift: 1.06, feather: 0.02 } as const;
+export const PACK_SPOT = { shadow: 0.05, lift: 1.06, feather: 0.02 } as const;
 
 const NO_RUN = new THREE.Vector4(0, 0, 1, 0);
 

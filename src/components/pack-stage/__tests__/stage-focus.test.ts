@@ -180,6 +180,84 @@ describe('focus keys (focus-poses.json)', () => {
   });
 });
 
+describe('owner correction (2026-11-20): upright fronts, the back on its side', () => {
+  it('every front-facing stop is upright; backs lie level (roll 90)', () => {
+    for (const slug of SLUGS)
+      for (const desktop of [false, true]) {
+        for (const key of focusKeys(slug, desktop, 'sleeve')) {
+          if (key.face === 'front') {
+            expect([key.rz, key.ry, key.rx]).toEqual([0, 0, 0]);
+          } else {
+            expect(key.rz).toBe(90);
+            expect(key.rx).toBe(0);
+          }
+        }
+        for (const key of focusKeys(slug, desktop, 'noOdds'))
+          expect([key.rz, key.ry, key.rx]).toEqual([0, 0, 0]);
+        for (const key of focusKeys(slug, desktop, 'capsule'))
+          expect([key.rz, key.rx]).toEqual([0, 0]);
+      }
+  });
+
+  it('the tap is a pure zoom: no rotation anywhere in the move', () => {
+    for (const desktop of [false, true]) {
+      const size = desktop ? 'desktop' : 'phone';
+      const l = LAYOUT[size];
+      const ctx = ctxFor('151', desktop);
+      const rest = restBlock(restState(2), 2, l, desktop, false);
+      for (let f = 0; f <= 1.0001; f += 0.05) {
+        const p = focusPose(rest, f, 0, 2, 2, l, desktop, false, ctx);
+        expect(p.rotX).toBeCloseTo(0, 9);
+        expect(p.rotY).toBeCloseTo(0, 9);
+        expect(p.rotZ).toBeCloseTo(0, 9);
+      }
+    }
+  });
+
+  it('Top Hits to Pull Odds: it turns over first, then lies down; size never pops', () => {
+    for (const desktop of [false, true]) {
+      const size = desktop ? 'desktop' : 'phone';
+      const l = LAYOUT[size];
+      const ctx = ctxFor('151', desktop);
+      const rest = restBlock(restState(2), 2, l, desktop, false);
+      let prev = focusPose(rest, 2, 0, 2, 2, l, desktop, false, ctx);
+      const turnAt = (q: number) => q / 176;
+      for (let f = 2.02; f <= 3.0001; f += 0.02) {
+        const p = focusPose(rest, f, 0, 2, 2, l, desktop, false, ctx);
+        const x = f - 2;
+        // the turn leads the roll through the first part of the move
+        if (x < 0.35) expect(p.rotZ).toBeCloseTo(0, 9);
+        if (x > 0.65) expect(turnAt(p.rotY / DEG)).toBeCloseTo(1, 9);
+        // the size only grows, smoothly (no pop): at most 8% a 2% step
+        expect(p.scale).toBeGreaterThanOrEqual(prev.scale - 1e-9);
+        expect(p.scale / prev.scale).toBeLessThan(1.08);
+        prev = p;
+      }
+    }
+  });
+
+  it('Buyback to Recent Pulls: it stands up first, then turns back', () => {
+    const l = LAYOUT.phone;
+    const ctx = ctxFor('gold-pack', false);
+    const rest = restBlock(restState(2), 2, l, false, false);
+    const early = focusPose(rest, 4.3, 0, 2, 2, l, false, false, ctx);
+    expect(Math.abs(early.rotY / DEG)).toBeCloseTo(176, 6);
+    expect(early.rotZ / DEG).toBeLessThan(90);
+  });
+
+  it('phone: the nearer crimped end stays on screen at both back stops', () => {
+    const W = 390;
+    const H = 716;
+    for (const slug of SLUGS) {
+      const keys = focusKeys(slug, false, 'sleeve');
+      const odds = keys.find((k) => k.kind === 'odds')!;
+      const bb = keys.find((k) => k.kind === 'buyback')!;
+      expect(odds.cx * W - (odds.long * H) / 2).toBeGreaterThan(7);
+      expect(W - (bb.cx * W + (bb.long * H) / 2)).toBeGreaterThan(7);
+    }
+  });
+});
+
 describe('timing helpers', () => {
   it('power1InOut and the 20% text switch', () => {
     expect(power1InOut(0)).toBe(0);

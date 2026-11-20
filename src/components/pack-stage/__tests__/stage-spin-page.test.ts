@@ -33,22 +33,22 @@ describe('the pin range', () => {
 });
 
 describe('the timed text flags', () => {
-  it('lock at 0.02, text at 20% of the move, header at 20% of the exit', () => {
+  it('lock at 0.02, text at 20% of the move, header as the exit starts', () => {
     expect(spinFlags(OFF, 0.019, 0)).toEqual(OFF);
     expect(spinFlags(OFF, 0.02, 0).spinning).toBe(true);
     expect(spinFlags(OFF, SPIN_TEXT_AT, 0).text).toBe(true);
-    expect(spinFlags(OFF, 1, 0.19).head).toBe(false);
-    expect(spinFlags(OFF, 1, 0.2).head).toBe(true);
+    expect(spinFlags(OFF, 1, 0.009).head).toBe(false);
+    expect(spinFlags(OFF, 1, 0.01).head).toBe(true);
   });
 
   it('holds with hysteresis so a settling value never flickers', () => {
     const on = { spinning: true, text: true, head: true };
-    expect(spinFlags(on, 0.016, 0.195)).toEqual({
+    expect(spinFlags(on, 0.016, 0.006)).toEqual({
       spinning: true,
       text: false,
       head: true,
     });
-    expect(spinFlags(on, 0.014, 0.18)).toEqual(OFF);
+    expect(spinFlags(on, 0.014, 0.004)).toEqual(OFF);
   });
 });
 

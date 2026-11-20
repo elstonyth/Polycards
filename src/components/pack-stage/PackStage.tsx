@@ -39,6 +39,7 @@ import {
 } from './stage-filter';
 import StageTrack from './StageTrack';
 import { loadSpinKit } from './stage-spin-load';
+import { takeArrival } from './stage-arrival';
 import styles from './pack-stage.module.css';
 
 /** What the live region says once the track rests on a pack. */
@@ -228,6 +229,10 @@ export default function PackStage({
       if (wasUpRef.current || performance.now() > LOADER_LATE_AT_MS) return;
       wasUpRef.current = true;
       holdIntro();
+    } else if (!wasUpRef.current && takeArrival()) {
+      // "All packs" from a pack page: the float-in (instant under reduced motion)
+      wasUpRef.current = true;
+      onLoaderLeave();
     } else if (wasUpRef.current && !leftRef.current) {
       // The loader went without its exit (failed to load, gave up): the packs
       // must still come in, never stay parked at the float-in's start.

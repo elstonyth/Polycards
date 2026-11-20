@@ -15,6 +15,7 @@ import { rm } from '@/lib/format';
 import { isTicketPack, packFacts, type PackCard } from '@/lib/packs-data';
 import { ticketTopHits } from '@/lib/packs-format';
 import { pullOddsOf } from '@/lib/pack-tiers';
+import { rarityRgb } from '@/lib/rarity';
 import { isPokemonPack } from '@/lib/resolve-card-pokemon';
 import type { PackDetail } from '@/lib/data/packs';
 import type { PackBackDetails } from '@/components/pack-3d/pack-print';
@@ -83,6 +84,37 @@ const ICONS: {
   { kind: 'buyback', label: 'Buyback', Icon: Coins },
   { kind: 'pulls', label: 'Recent pulls', Icon: History },
 ];
+
+/** The phone's compact odds board: one row per tier with a chance (fits one panel). */
+function CompactOdds({
+  tiers,
+  tickets,
+}: {
+  tiers: FlowData['tiers'];
+  tickets: boolean;
+}) {
+  if (!tiers) return <div className={styles.wait} aria-hidden />;
+  const rows = tiers.tiers.filter((t) => t.chance != null);
+  const noun = tickets ? 'prize' : 'card';
+  return (
+    <ol className={styles.compact}>
+      {rows.map((t) => (
+        <li key={t.rarity}>
+          <span
+            aria-hidden
+            className={styles.dot}
+            style={{ backgroundColor: `rgb(${rarityRgb(t.rarity)})` }}
+          />
+          <span className={styles.tier}>{t.rarity}</span>
+          <span className={styles.count}>
+            {t.count} {t.count === 1 ? noun : `${noun}s`}
+          </span>
+          <span className={styles.chance}>{t.chance}%</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
 
 /** What usePackBuy reads from a detail: only whether the pool has a card. */
 function demoDetail(data: FlowData): PackDetail | null {
@@ -202,7 +234,7 @@ export function FocusStops({
   const allPacks = (cls = '') => (
     <button type="button" onClick={leave} className={`${styles.back} ${cls}`}>
       <ArrowLeft className="h-4 w-4" aria-hidden />
-      All {noun}s
+      <span className={styles.backLabel}>All {noun}s</span>
     </button>
   );
 
@@ -278,13 +310,17 @@ export function FocusStops({
             {!tickets && <p className={styles.tag}>Printed on the back</p>}
             {head(k, <span className={styles.line}>Pull odds by rarity</span>)}
             <div className={styles.board}>
-              <PackPullOdds
-                pack={pack}
-                tiers={data.tiers}
-                counts
-                bare
-                heading={false}
-              />
+              {desktop || !stage ? (
+                <PackPullOdds
+                  pack={pack}
+                  tiers={data.tiers}
+                  counts
+                  bare
+                  heading={false}
+                />
+              ) : (
+                <CompactOdds tiers={data.tiers} tickets={tickets} />
+              )}
             </div>
           </>
         );

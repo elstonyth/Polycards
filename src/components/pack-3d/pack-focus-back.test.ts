@@ -45,8 +45,9 @@ describe('the spotlight', () => {
 
 describe('the back reads level (ZYX, roll outermost)', () => {
   for (const [kind, tilt] of [
-    ['odds', -4],
-    ['buyback', 2],
+    // owner, 2026-11-20: the wording level at both back stops
+    ['odds', 0],
+    ['buyback', 0],
   ] as const) {
     it(`${kind}: along +x within the tilt, upper long edge receding`, () => {
       const key = focusKeys('151', true, 'sleeve').find(

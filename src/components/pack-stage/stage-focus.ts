@@ -58,11 +58,29 @@ export function power1InOut(q: number): number {
 /** The focus pose block: `PoseBlock` plus the panel-fraction offsets. */
 export type FocusPoseBlock = PoseBlock & { fx: number; fy: number };
 
-/** The segment F lies in: [k0, k0 + 1] and the eased local progress. */
-function segment(f: number, n: number): { k0: number; t: number } {
-  const x = Math.min(n, Math.max(0, f));
-  const k0 = Math.min(n - 1, Math.floor(x));
-  return { k0: Math.max(0, k0), t: power1InOut(x - Math.max(0, k0)) };
+/** The segment F lies in: [k0, k0 + 1], the local progress and its ease. */
+function segment(f: number, n: number): { k0: number; t: number; x: number } {
+  const v = Math.min(n, Math.max(0, f));
+  const k0 = Math.max(0, Math.min(n - 1, Math.floor(v)));
+  const x = v - k0;
+  return { k0, t: power1InOut(x), x };
+}
+
+/**
+ * A move that turns the pack over is staged as a real pack is handled: the
+ * turn leads and the lie-down follows (back to the front: it stands up
+ * first, then turns). Each takes this share of the move, overlapping.
+ */
+export const TURN_SHARE = 0.65;
+
+/** The turn's and the roll's progress in a move between faces. */
+export function turnPhases(
+  x: number,
+  toBack: boolean,
+): { turn: number; roll: number } {
+  const lead = power1InOut(x / TURN_SHARE);
+  const follow = power1InOut((x - (1 - TURN_SHARE)) / TURN_SHARE);
+  return toBack ? { turn: lead, roll: follow } : { turn: follow, roll: lead };
 }
 
 /** A key as a pose block for the focused pack (`d` slots off the track). */
@@ -114,20 +132,28 @@ export function focusPose(
   const d = i - track;
   if (i === ctx.index) {
     const n = ctx.keys.length;
-    const { k0, t } = segment(f, n);
-    const b = keyBlock(ctx.keys[Math.max(0, k0 - 1)]!, d, l, ctx, soldOut);
+    const { k0, t, x } = segment(f, n);
+    const kb = ctx.keys[Math.max(0, k0 - 1)]!;
+    const b = keyBlock(kb, d, l, ctx, soldOut);
     const a: FocusPoseBlock = k0 === 0 ? { ...rest, fx: 0, fy: 0 } : b;
-    const to =
-      k0 === 0
-        ? b
-        : keyBlock(ctx.keys[Math.min(n - 1, k0)]!, d, l, ctx, soldOut);
+    const kt = ctx.keys[Math.min(n - 1, k0)]!;
+    const to = k0 === 0 ? b : keyBlock(kt, d, l, ctx, soldOut);
+    // turning over: the turn and the lie-down are staged; otherwise every
+    // part of the pose follows the same ease
+    let ty = t;
+    let tz = t;
+    if (k0 > 0 && kb.face !== kt.face) {
+      const ph = turnPhases(x, kt.face === 'back');
+      ty = ph.turn;
+      tz = ph.roll;
+    }
     return {
       dx: lerp(a.dx, to.dx, t) + 0,
       dy: lerp(a.dy, to.dy, t) + 0,
       z: lerp(a.z, to.z, t) + 0,
       rotX: lerp(a.rotX, to.rotX, t) + 0,
-      rotY: lerp(a.rotY, to.rotY, t) + 0,
-      rotZ: lerp(a.rotZ, to.rotZ, t) + 0,
+      rotY: lerp(a.rotY, to.rotY, ty) + 0,
+      rotZ: lerp(a.rotZ, to.rotZ, tz) + 0,
       scale: lerp(a.scale, to.scale, t),
       dim: lerp(a.dim, to.dim, t),
       fx: lerp(a.fx, to.fx, t) + 0,

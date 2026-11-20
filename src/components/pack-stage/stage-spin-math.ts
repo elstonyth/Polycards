@@ -59,6 +59,11 @@ export const SPIN_EXIT_PANELS = 1.25;
 /** Text over the stage changes once a move is this far (Ciao: 20% of a section). */
 export const SPIN_TEXT_AT = 0.2;
 const SPIN_TEXT_HYSTERESIS = 0.01;
+/**
+ * The stage heading fades as the exit starts (in 250 ms, CSS), so it is gone
+ * before the leaving row climbs through it.
+ */
+export const SPIN_HEAD_AT = 0.01;
 const SPIN_LOCK_HYSTERESIS = 0.005;
 
 /**
@@ -94,7 +99,7 @@ export function spinFlags(
       ? spin > SPIN_TEXT_AT - SPIN_TEXT_HYSTERESIS
       : spin >= SPIN_TEXT_AT,
     head: prev.head
-      ? exit > SPIN_TEXT_AT - SPIN_TEXT_HYSTERESIS
-      : exit >= SPIN_TEXT_AT,
+      ? exit > SPIN_HEAD_AT - SPIN_LOCK_HYSTERESIS
+      : exit >= SPIN_HEAD_AT,
   };
 }
