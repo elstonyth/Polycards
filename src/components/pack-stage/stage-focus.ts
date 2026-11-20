@@ -30,12 +30,24 @@ export const LEAVE_FADE_MS = 250;
 /** A back uploaded after the pack reached its stop turns over this long. */
 export const BACK_TURN_MS = 650;
 /**
- * Neighbours are gone by this focus value. The tap's ease-out cubic reaches
- * it in its first tenth of time (a ramp over several frames, while they slide
- * off), and the leave's in its last two thirds: they come back only as the
- * pack arrives.
+ * The neighbours leave WITH the tap, over this share of its time (sliding
+ * out, sinking and setting back as they fade), and come back over this last
+ * share of the leave's time, as the pack arrives.
  */
-export const NEIGHBOUR_FADE_END = 0.3;
+export const NEIGHBOUR_OUT_SHARE = 0.4;
+export const NEIGHBOUR_BACK_SHARE = 0.45;
+
+/**
+ * The neighbours' progress at focus f: 0 in the row, 1 gone. The tap and the
+ * leave are ease-out cubic moves, so their time fraction comes back from f:
+ * the tap's t = 1 - cbrt(1 - f), the leave's time left = cbrt(f).
+ */
+export function neighbourOut(f: number, leaving = false): number {
+  const x = clamp01(f);
+  if (x >= 1) return 1;
+  if (leaving) return clamp01(Math.cbrt(x) / NEIGHBOUR_BACK_SHARE);
+  return clamp01((1 - Math.cbrt(1 - x)) / NEIGHBOUR_OUT_SHARE);
+}
 /**
  * At rest on either face the extra yaw (pointer lean, idle sway) stays within
  * this, so the back rests well clear of the 155..165 degree glare band.
@@ -166,7 +178,7 @@ export function focusPose(
     };
   }
   const side = i > ctx.index ? 1 : -1;
-  const e = clamp01(f);
+  const e = smoothstep(0, 1, neighbourOut(f, ctx.leaving));
   return {
     ...rest,
     dy: rest.dy + NEIGHBOUR_SINK_ART * l.artH * e,
@@ -228,10 +240,14 @@ export function spinWhileFocused(focus: number, spin: number): number {
   return focus > 0 ? 0 : spin;
 }
 
-/** A neighbour's fade-out over F 0..0.6; the focused pack stays 1. */
-export function focusOpacity(f: number, isFocused: boolean): number {
+/** A neighbour's fade, in step with its slide (neighbourOut); the focused pack stays 1. */
+export function focusOpacity(
+  f: number,
+  isFocused: boolean,
+  ctx?: Readonly<Pick<FocusCtx, 'leaving'>> | null,
+): number {
   if (isFocused) return 1;
-  return 1 - smoothstep(0, NEIGHBOUR_FADE_END, f);
+  return 1 - smoothstep(0, 1, neighbourOut(f, !!ctx?.leaving));
 }
 
 /**

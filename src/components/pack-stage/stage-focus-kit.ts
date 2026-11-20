@@ -239,6 +239,10 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
     leaving = false;
     for (const off of offs.splice(0)) off();
     d.src.wrap.removeAttribute('data-focus-on');
+    // the row's own UI fades back in (not at once) for this while
+    const wrap = d.src.wrap;
+    wrap.setAttribute('data-focus-off', '');
+    window.setTimeout(() => wrap.removeAttribute('data-focus-off'), 600);
     d.src.wrap.style.removeProperty('--focus-n');
     d.src.panel.style.removeProperty('--dock-bottom');
     d.src.panel.style.removeProperty('--dock-left');
@@ -412,10 +416,11 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       // From a later stop the pack goes home from where it is: Front's pose
       // becomes this stop's, so the jump to Front below moves nothing and the
       // last move runs from this pose straight to the row.
+      // `leaving`: the neighbours come back over the leave's last part only.
       const held = k > 1 ? decl?.ctx.keys[k - 1] : undefined;
-      if (decl && held) {
-        const keys = [held, ...decl.ctx.keys.slice(1)];
-        decl = { ...decl, ctx: { ...decl.ctx, keys } };
+      if (decl) {
+        const keys = held ? [held, ...decl.ctx.keys.slice(1)] : decl.ctx.keys;
+        decl = { ...decl, ctx: { ...decl.ctx, keys, leaving: true } };
         publish();
       }
       setTimeout(() => {
@@ -501,6 +506,14 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       if (f.scrollTo !== null && Math.abs(f.scrollTo - window.scrollY) >= 0.5)
         window.scrollTo(0, f.scrollTo);
       if (f.focus > 0.001) leftRow = true;
+      // paged back past Front by a gesture: a leave too (text out, the
+      // neighbours back over its last part)
+      if (f.animating && f.target === 0 && !leaving && leftRow && decl) {
+        leaving = true;
+        render();
+        decl = { ...decl, ctx: { ...decl.ctx, leaving: true } };
+        publish();
+      }
       if (trace.push([t, window.scrollY, f.focus]) > 4000)
         trace.splice(0, 2000);
       if (f.focus !== lastF) {

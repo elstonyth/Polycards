@@ -29,12 +29,13 @@
     visibility 0s linear 0.5s;
 }
 
+/* a block comes in once the other packs have gone (0.6 s into the tap) */
 .over .block[data-on] {
   opacity: 1;
   visibility: visible;
   pointer-events: auto;
   transition:
-    opacity 0.5s cubic-bezier(0.455, 0.03, 0.515, 0.955) 0.35s,
+    opacity 0.5s cubic-bezier(0.455, 0.03, 0.515, 0.955) 0.6s,
     visibility 0s linear 0s;
 }
 
@@ -71,7 +72,7 @@
    length), so heading and body come in together */
 .over .block[data-on] .line {
   transform: none;
-  transition: transform 0.5s cubic-bezier(0.215, 0.61, 0.355, 1) 0.35s;
+  transition: transform 0.5s cubic-bezier(0.215, 0.61, 0.355, 1) 0.6s;
 }
 
 .tag {

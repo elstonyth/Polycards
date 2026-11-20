@@ -288,6 +288,8 @@ export type FocusCtx = {
   panel: { w: number; h: number };
   backW?: number;
   fit?: number;
+  /** The leave is under way: the neighbours come back over its last part. */
+  leaving?: boolean;
 };
 
 /**
@@ -368,7 +370,11 @@ export type FocusTerm = {
     ctx: Readonly<FocusCtx>,
   ): PoseBlock & { fx: number; fy: number };
   clampYaw(extraYaw: number, focus: number): number;
-  opacity(focus: number, focused: boolean): number;
+  opacity(
+    focus: number,
+    focused: boolean,
+    ctx?: Readonly<Pick<FocusCtx, 'leaving'>> | null,
+  ): number;
 };
 
 /** What `poseAt` and `stageOpacity` read beyond the state (all optional). */

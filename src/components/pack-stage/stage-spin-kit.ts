@@ -165,7 +165,7 @@ export const SPIN_KIT: StageSpinKit = {
       const pose = poseAt(state, i, lf, g.desktop, soldOut, ctx);
       const op =
         stageOpacity(state, i, g.desktop, count, ctx) *
-        (fo ? fo.term.opacity(state.focus, i === fo.ctx.index) : 1);
+        (fo ? fo.term.opacity(state.focus, i === fo.ctx.index, fo.ctx) : 1);
       const k = 1 / g.artH;
       vars[`--${p}-dx`] = fmt((pose.dx + pose.fx * g.panel.w) * k);
       vars[`--${p}-dy`] = fmt((pose.dy + pose.fy * g.panel.h) * k);

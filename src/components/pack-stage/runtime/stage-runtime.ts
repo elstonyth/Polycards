@@ -188,6 +188,8 @@ export type DrawnPack = {
   y: number;
   z: number;
   scale: number;
+  /** The frame time it was posed for. */
+  at: number;
 };
 
 export type StageRuntimeDebug = {
@@ -1230,7 +1232,7 @@ export function createStageRuntime(
           // The same fade as the CSS tiles: reach (the row's, in the spin) and the category switch.
           const opacity =
             stageOpacity(s, slot.index, desktop, n, ctx) *
-            (fo ? fo.term.opacity(s.focus, focused) : 1);
+            (fo ? fo.term.opacity(s.focus, focused, fo.ctx) : 1);
           if (opacity <= 0) {
             model.visible = false;
             continue;
@@ -1245,6 +1247,7 @@ export function createStageRuntime(
             y: model.position.y,
             z: model.position.z,
             scale: model.scale.x,
+            at: now,
           });
           const sleeve = shown.model;
           if (focused && fo && fctx && sleeve) {

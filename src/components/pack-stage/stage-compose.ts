@@ -54,7 +54,9 @@ export function stageOpacityStep2(
   ctx: Readonly<ComposeCtx> = {},
 ): number {
   const fade =
-    st.focus > 0 ? focusOpacity(st.focus, ctx.focus?.index === i) : 1;
+    st.focus > 0
+      ? focusOpacity(st.focus, ctx.focus?.index === i, ctx.focus)
+      : 1;
   return (
     stageOpacity(st, i, desktop, count, ctx) *
     introOpacity(st.intro, i - st.track) *

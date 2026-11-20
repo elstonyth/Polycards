@@ -38,9 +38,11 @@ const SLUG = opt('slug', '151');
 const TAB = opt('tab', '');
 const ONLY = opt('only', '');
 /** The focus value by which the row's other packs must be gone. */
-const NEIGHBOUR_GONE_AT = 0.3;
+const NEIGHBOUR_GONE_AT = 0.8;
+/** The shortest the other packs may take to go (tap) or come back (leave). */
+const RAMP_MS = 450;
 /** Largest change of another pack's opacity between two frames. */
-const RAMP_STEP = 0.35;
+const RAMP_STEP = 0.15;
 /** The focus moves' length (focus-poses.json framingChangeMs). */
 const MOVE_MS = 1500;
 const HEADED = args.includes('--headed');
@@ -143,6 +145,8 @@ function sampler() {
       w.__frames.push({
         // the frame time the stage posed this frame with
         t: ts,
+        // the frame time the canvas posed what it drew (its own clock)
+        at: focused?.at ?? all[0]?.at ?? ts,
         on: !!fr.on,
         f: fr.on ? st.focus : 0,
         foc: focused,
@@ -224,9 +228,11 @@ function judge(name, all, curve = null) {
   for (let i = 1; i < seq.length; i++) {
     const a = op(seq[i - 1]);
     const b = op(seq[i]);
+    // per 60 fps frame of the canvas's own clock (a slow frame may step more)
+    const span = Math.max(1, (seq[i].at - seq[i - 1].at) / (1000 / 60));
     for (const id of new Set([...a.keys(), ...b.keys()])) {
       const d = Math.abs((b.get(id) ?? 0) - (a.get(id) ?? 0));
-      if (d > RAMP_STEP)
+      if (d > RAMP_STEP * span)
         bad.ramp.push(
           `${id} ${(a.get(id) ?? 0).toFixed(2)} -> ${(b.get(id) ?? 0).toFixed(2)} at f=${seq[i].f.toFixed(3)}`,
         );
@@ -243,7 +249,10 @@ function judge(name, all, curve = null) {
   }
   // the focused pack along the tap's or the leave's curve
   if (curve) {
-    const mv = seq.filter((fr) => fr.foc);
+    // one sample per pose the canvas drew, on the canvas's own clock
+    const mv = seq.filter(
+      (fr, i) => fr.foc && (i === 0 || fr.foc.at !== seq[i - 1].foc?.at),
+    );
     const s0 = mv[0]?.foc;
     const s1 = mv.at(-1)?.foc;
     if (s0 && s1) {
@@ -256,7 +265,7 @@ function judge(name, all, curve = null) {
       for (let i = 1; i < mv.length; i++) {
         const a = mv[i - 1].foc;
         const b = mv[i].foc;
-        const dt = mv[i].t - mv[i - 1].t;
+        const dt = mv[i].foc.at - mv[i - 1].foc.at;
         const ds = b.scale - a.scale;
         const want =
           curve === 'enter'
@@ -337,6 +346,31 @@ function judge(name, all, curve = null) {
       bad.curve.length === 0,
       show(bad.curve),
     );
+  // the other packs go (tap) or come back (leave) over a stretch of the move,
+  // not in a few frames: at least RAMP_MS from the first frame they change to
+  // the frame they are gone (or fully back)
+  if (curve) {
+    const vis = seq.map((fr) => ({
+      t: fr.t,
+      v: Math.max(0, ...[...op(fr).values()]),
+    }));
+    let t0 = null;
+    let t1 = null;
+    for (const { t, v } of vis) {
+      if (t0 === null) {
+        if (curve === 'enter' ? v < 0.99 : v > 0.01) t0 = t;
+      } else if (curve === 'enter' ? v <= 0.001 : v >= 0.99) {
+        t1 = t;
+        break;
+      }
+    }
+    const len = t0 !== null && t1 !== null ? t1 - t0 : null;
+    report(
+      `${name}-others-${curve === 'enter' ? 'leave' : 'return'}-over-${RAMP_MS}-ms-or-more`,
+      len !== null && len >= RAMP_MS,
+      len === null ? 'no complete ramp seen' : `${Math.round(len)} ms`,
+    );
+  }
   // the tap and the leave are held to the limit; stop moves are reported
   if (HEADED && curve)
     report(

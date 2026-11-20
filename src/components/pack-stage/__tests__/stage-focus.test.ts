@@ -5,7 +5,6 @@ import POSES from '../focus-poses.json';
 import {
   blockAt,
   focusOpacity,
-  NEIGHBOUR_FADE_END,
   focusPose,
   power1InOut,
   spotAt,
@@ -161,25 +160,79 @@ describe('focus keys (focus-poses.json)', () => {
     expect(spotAt(3, ctx).on).toBe(0);
   });
 
-  it('neighbours leave with the zoom and come back only as the pack arrives', () => {
-    // gone by NEIGHBOUR_FADE_END: early in the tap's ease-out, late in the leave
-    for (let f = NEIGHBOUR_FADE_END; f <= 6; f += 0.05) {
-      expect(focusOpacity(f, false), `f=${f}`).toBe(0);
-      expect(focusOpacity(f, true)).toBe(1);
+  // the moves are a 1.5 s ease-out cubic: the tap's focus is ease(t), the
+  // leave's 1 - ease(t), t the move's time fraction
+  const ease = (t: number) => 1 - (1 - t) ** 3;
+  const enter: FocusCtx = {
+    index: 2,
+    anchorY: 0.5,
+    keys: [],
+    panel: { w: 1, h: 1 },
+    leaving: false,
+  };
+  const leave = { ...enter, leaving: true };
+  const timeSpan = (op: (t: number) => number) => {
+    // the time fractions where the neighbours are part-way (0 < op < 1)
+    const ts: number[] = [];
+    for (let i = 0; i <= 1000; i++) {
+      const o = op(i / 1000);
+      if (o > 0.001 && o < 0.999) ts.push(i / 1000);
     }
-    expect(NEIGHBOUR_FADE_END).toBeLessThanOrEqual(0.35);
-    expect(focusOpacity(0, false)).toBe(1);
-    // a ramp, not a cut: the 1.5 s ease-out cubic at 60 fps never drops the
-    // neighbours by more than a quarter in one frame, and takes several frames
-    const ease = (t: number) => 1 - (1 - t) ** 3;
-    let frames = 0;
-    for (let i = 1; i <= 90; i++) {
-      const a = focusOpacity(ease((i - 1) / 90), false);
-      const b = focusOpacity(ease(i / 90), false);
-      expect(a - b, `frame ${i}`).toBeLessThanOrEqual(0.25);
-      if (a > 0) frames++;
+    return [ts[0] ?? NaN, ts.at(-1) ?? NaN] as const;
+  };
+
+  it('neighbours leave WITH the tap: a ramp over about the first 40% of the move', () => {
+    const [a, b] = timeSpan((t) => focusOpacity(ease(t), false, enter));
+    expect(a).toBeLessThanOrEqual(0.02);
+    expect(b).toBeGreaterThanOrEqual(0.33);
+    expect(b).toBeLessThanOrEqual(0.47);
+    // and they are gone for the rest of the focus, the focused pack never fades
+    for (let f = ease(0.47); f <= 6; f += 0.05) {
+      expect(focusOpacity(f, false, enter), String(f)).toBe(0);
+      expect(focusOpacity(f, true, enter)).toBe(1);
     }
-    expect(frames).toBeGreaterThanOrEqual(6);
+    // at 60 fps no frame drops them by more than a tenth
+    for (let i = 1; i <= 90; i++)
+      expect(
+        focusOpacity(ease((i - 1) / 90), false, enter) -
+          focusOpacity(ease(i / 90), false, enter),
+      ).toBeLessThanOrEqual(0.1);
+  });
+
+  it('neighbours come back only over the last part of the leave', () => {
+    const op = (t: number) => focusOpacity(1 - ease(t), false, leave);
+    for (let t = 0; t < 0.5; t += 0.01) expect(op(t), String(t)).toBe(0);
+    const [a, b] = timeSpan(op);
+    expect(a).toBeGreaterThanOrEqual(0.5);
+    expect(b - a).toBeGreaterThanOrEqual(0.3);
+    expect(op(1)).toBe(1);
+  });
+
+  it('neighbours slide out, sink and set back as they fade, and back again', () => {
+    const l = LAYOUT.phone;
+    const pose = (f: number, c: typeof enter) =>
+      focusPose(
+        restBlock(restState(2), 3, l, false, false),
+        f,
+        0,
+        3,
+        2,
+        l,
+        false,
+        false,
+        { ...ctxFor('151', false), ...c, keys: ctxFor('151', false).keys },
+      );
+    // half-way through their fade they are part-way out
+    const mid = pose(ease(0.2), enter);
+    expect(mid.fx).toBeGreaterThan(0.1);
+    expect(mid.fx).toBeLessThan(0.55);
+    expect(pose(1, enter).fx).toBeGreaterThan(0.5);
+    // never in front of their row place (they set back)
+    expect(mid.z).toBeLessThanOrEqual(
+      restBlock(restState(2), 3, l, false, false).z,
+    );
+    // leaving, still out until the last part
+    expect(pose(1 - ease(0.4), leave).fx).toBeGreaterThan(0.5);
   });
 
   it('neighbours slide off', () => {
