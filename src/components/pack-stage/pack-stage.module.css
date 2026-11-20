@@ -90,7 +90,9 @@
   transition: opacity 0.3s ease-out 0.1s;
 }
 
-.spinWrap[data-focus-on] .pose {
+/* the row takes no swipes or taps while a pack is focused */
+.spinWrap[data-focus-on] .pose,
+.spinWrap[data-focus-on] [data-stage-viewport] {
   pointer-events: none;
 }
 

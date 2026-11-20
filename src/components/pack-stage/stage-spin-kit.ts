@@ -324,33 +324,37 @@ export function startSpin(host: SpinHost): SpinControl {
     frame.update(tick, true);
   }
 
+  /** Focused: input that belongs to a dialog (the card overlay, a sheet). */
+  const inDialog = (t: EventTarget | null): boolean =>
+    !!(t instanceof Element && t.closest('[role="dialog"]')) ||
+    !!document.querySelector('[role="dialog"][aria-modal="true"]');
   const onWheel = (e: WheelEvent) => {
-    if (e.ctrlKey || !armed(e.target)) return;
     if (focus?.active()) {
-      focus.wheel(e);
+      if (!e.ctrlKey && !inDialog(e.target)) focus.wheel(e);
       return;
     }
+    if (e.ctrlKey || !armed(e.target)) return;
     gestures?.push(now());
     if (d.wheel(wheelPx(e), window.scrollY, now())) e.preventDefault();
     wake();
   };
   const onTouchStart = (e: TouchEvent) => {
     const p = e.touches[0];
-    if (!p || e.touches.length > 1 || !armed(e.target)) return;
     if (focus?.active()) {
-      focus.touchStart(e);
+      if (!inDialog(e.target)) focus.touchStart(e);
       return;
     }
+    if (!p || e.touches.length > 1 || !armed(e.target)) return;
     d.touchStart(p.clientX, p.clientY, window.scrollY, now());
     wake();
   };
   const onTouchMove = (e: TouchEvent) => {
     const p = e.touches[0];
-    if (!p || e.touches.length > 1) return;
     if (focus?.active()) {
-      focus.touchMove(e);
+      if (!inDialog(e.target)) focus.touchMove(e);
       return;
     }
+    if (!p || e.touches.length > 1) return;
     if (
       d.touchMove(p.clientX, p.clientY, window.scrollY, now()) &&
       e.cancelable
@@ -450,7 +454,11 @@ export function startSpin(host: SpinHost): SpinControl {
       return;
     e.preventDefault();
     e.stopPropagation();
+    if (tapping) return;
+    tapping = true;
     void loadFocus().then((f) => {
+      tapping = false;
+      if (f?.active()) return;
       // not focusable (no data for it): today's pack page
       if (!f || !f.enter(index)) {
         const a = tile.querySelector<HTMLAnchorElement>('a[href]');
@@ -460,11 +468,25 @@ export function startSpin(host: SpinHost): SpinControl {
       measure();
     });
   };
+  let tapping = false;
   const onKey = (e: KeyboardEvent) => {
     if (focus?.active()) focus.key(e);
   };
   window.addEventListener('keydown', onKey);
   const idleLoad = setTimeout(() => void loadFocus(), 2500);
+  const atEntry = () => {
+    const st: unknown = window.history.state;
+    return (
+      /^\/slots\/[^/]+\/?$/.test(window.location.pathname) &&
+      !!st &&
+      typeof st === 'object' &&
+      '__flow' in st
+    );
+  };
+  const resume = () => {
+    if (!atEntry()) return;
+    void loadFocus().then((f) => f?.resume());
+  };
 
   const bind = (next: StageSpinSource | null) => {
     if (next === src) return;
@@ -483,6 +505,7 @@ export function startSpin(host: SpinHost): SpinControl {
       ro.observe(next.panel);
       next.panel.addEventListener('focusin', onFocusIn);
       next.panel.addEventListener('click', onTap, { capture: true });
+      setTimeout(resume, 0);
       unbindPage = () => {
         ro.disconnect();
         next.panel.removeEventListener('focusin', onFocusIn);

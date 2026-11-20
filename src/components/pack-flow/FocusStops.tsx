@@ -8,6 +8,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { ArrowLeft, Coins, Gem, History, Percent } from 'lucide-react';
 import { Pill } from '@/components/ui/pill';
 import { ArrowDisc } from '@/components/ui/soft';
@@ -470,9 +471,18 @@ export function FocusStops({
         {said}
       </p>
       {!desktop && (!stage || activeKind === 'front') && (
-        <PackBuyControls model={buy} variant="dock" />
+        // the overlay layer lets taps through; the dock takes them
+        <div className={styles.live}>
+          <PackBuyControls model={buy} variant="dock" />
+        </div>
       )}
-      <PackCardOverlay pack={pack} overlay={overlay} />
+      {/* on the page body: over the header and the tab bar, and outside the
+          click-through layer (its scrim, Close and scrolling take input) */}
+      {typeof document !== 'undefined' &&
+        createPortal(
+          <PackCardOverlay pack={pack} overlay={overlay} />,
+          document.body,
+        )}
     </div>
   );
 }

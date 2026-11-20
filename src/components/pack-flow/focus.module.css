@@ -12,6 +12,11 @@
   pointer-events: none;
 }
 
+/* a part of the layer that takes taps (the phone's buy dock) */
+.live {
+  pointer-events: auto;
+}
+
 .block {
   position: absolute;
   display: flex;
@@ -235,10 +240,18 @@
 }
 
 .over .block[data-kind='pulls'] .pulls {
-  min-height: 0;
-  flex: 1 1 auto;
-  margin-top: 104px;
+  position: absolute;
+  top: calc(var(--dock-bottom, 212px) - 64px + 8px);
+  right: 0;
+  bottom: 0;
+  left: 0;
   overflow: hidden;
+}
+
+/* titles beside the docked pack stop short of it */
+.over .block[data-kind='tophits'] > :not(.strip),
+.over .block[data-kind='pulls'] > h2 {
+  max-width: calc(var(--dock-left, 262px) - 16px - 8px);
 }
 
 .over .block[data-kind='closing'] {

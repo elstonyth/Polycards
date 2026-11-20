@@ -27,7 +27,12 @@ import type {
 } from './contract';
 import { FOCUS_TERM } from './stage-compose';
 import { spotAt } from './stage-focus';
-import { focusKeys, focusStops, type FocusVariant } from './stage-focus-keys';
+import {
+  focusKeys,
+  focusPlate,
+  focusStops,
+  type FocusVariant,
+} from './stage-focus-keys';
 import { readFocusSeeds } from './stage-focus-seeds';
 import { STAGE_DESKTOP_QUERY } from './stage-gate';
 import { createPager, durationFor } from './stage-pager';
@@ -118,12 +123,19 @@ export type FocusRun = {
   key(e: KeyboardEvent): void;
   /** One frame; true when at rest. */
   frame(now: number): boolean;
+  /** The page shows a focus entry of ours (Back from the reel, Forward): focus that pack. */
+  resume(): boolean;
   /** Debug: the stops and timing of the last moves. */
   debug(): unknown;
   stop(): void;
 };
 
 const MARK = '__flow';
+/** The stop a focus entry rests on (restored on Forward and Back). */
+const stopKey = (entry: string) => `pack-flow:stop:${entry}`;
+/** A page left off a stop (scrollbar, a pinch) snaps back after this quiet. */
+const SNAP_QUIET_MS = 150;
+const SNAP_MS = 600;
 
 export function createFocusRun(d: FocusRunDeps): FocusRun {
   const pager = createPager();
@@ -201,6 +213,8 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
     for (const off of offs.splice(0)) off();
     d.src.wrap.removeAttribute('data-focus-on');
     d.src.wrap.style.removeProperty('--focus-n');
+    d.src.panel.style.removeProperty('--dock-bottom');
+    d.src.panel.style.removeProperty('--dock-left');
     d.state.focus = 0;
     d.state.focusOn = null;
     decl = null;
@@ -212,9 +226,10 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
     d.paint();
     // the address goes back with the pack (our entry: one step back)
     if (entry && window.location.pathname === path) {
-      ignorePop = true;
-      if (window.history.state?.[MARK] === entry) window.history.back();
-      else window.history.replaceState(null, '', base);
+      if (window.history.state?.[MARK] === entry) {
+        ignorePop = true; // the popstate this step fires
+        window.history.back();
+      } else window.history.replaceState(null, '', base);
     }
     entry = null;
     seed = null;
@@ -232,18 +247,26 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       return;
     }
     // Forward to a focus entry of ours: focus that pack again (no new entry)
+    resumeEntry();
+  };
+  const resumeEntry = (): boolean => {
     const st: unknown = window.history.state;
     const mark =
       st && typeof st === 'object'
         ? (st as Record<string, unknown>)[MARK]
         : null;
     const m = /^\/slots\/([^/]+)\/?$/.exec(window.location.pathname);
-    if (on || typeof mark !== 'string' || !m?.[1]) return;
+    if (on || typeof mark !== 'string' || !m?.[1]) return false;
     const id = decodeURIComponent(m[1]);
     const tile = d.src.panel.querySelector<HTMLElement>(
       `[data-stage-panel]:not([hidden]) [data-stage-tile][data-pack-id="${CSS.escape(id)}"]`,
     );
-    if (tile) run.enter(Number(tile.dataset.index), mark);
+    return tile ? run.enter(Number(tile.dataset.index), mark) : false;
+  };
+  let lastScrollAt = 0;
+  let savedK = 0;
+  const onScroll = () => {
+    lastScrollAt = performance.now();
   };
   window.addEventListener('popstate', onPop);
 
@@ -282,6 +305,21 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
         anchorY,
       });
       d.src.wrap.style.setProperty('--focus-n', String(kinds.length));
+      // the docked pack's edges (Top Hits, Recent Pulls) for the blocks beside it
+      const dock = decl.ctx.keys.find((k) => k.kind === 'pulls');
+      const plate = focusPlate(id) ?? focusPlate('151');
+      if (dock && plate) {
+        const L = dock.long * h;
+        const W = (L * plate[0]) / plate[1];
+        panel.style.setProperty(
+          '--dock-bottom',
+          `${Math.round(dock.cy * h + L / 2)}px`,
+        );
+        panel.style.setProperty(
+          '--dock-left',
+          `${Math.round(dock.cx * w - W / 2)}px`,
+        );
+      }
       d.src.wrap.setAttribute('data-focus-on', '');
       measureStops();
       pager.setDuration(durationFor(kinds));
@@ -309,8 +347,20 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       });
       ro.observe(panel);
       offs.push(() => ro.disconnect());
+      window.addEventListener('scroll', onScroll, { passive: true });
+      offs.push(() => window.removeEventListener('scroll', onScroll));
       render();
-      pager.goTo(1, window.scrollY, now());
+      // Forward or Back to an entry: the stop it rested on
+      let at = 1;
+      if (fromEntry)
+        try {
+          const v = Number(window.sessionStorage.getItem(stopKey(fromEntry)));
+          if (v >= 1 && v <= kinds.length) at = Math.round(v);
+        } catch {
+          // storage blocked: Front
+        }
+      savedK = at;
+      pager.goTo(at, window.scrollY, now());
       trace.push([now(), -1, 1]);
       d.loop();
       return true;
@@ -375,6 +425,7 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       d.loop();
     },
     key(e) {
+      if (leaving) return;
       const t = e.target as HTMLElement | null;
       if (
         t?.closest?.(
@@ -393,7 +444,11 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       let to: number | null = null;
       if (e.key === 'ArrowDown' || e.key === 'PageDown') to = k + 1;
       else if (e.key === 'ArrowUp' || e.key === 'PageUp') to = k - 1;
-      else if (e.key === ' ') to = e.shiftKey ? k - 1 : k + 1;
+      else if (
+        e.key === ' ' &&
+        !t?.closest?.('button,a[href],[role="button"],summary,label')
+      )
+        to = e.shiftKey ? k - 1 : k + 1;
       else if (e.key === 'Home') to = 1;
       else if (e.key === 'End') to = n;
       if (to === null) return;
@@ -423,8 +478,27 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
         end();
         return true;
       }
+      if (f.idle && !leaving && stops.length > 0) {
+        const k = Math.round(pager.focusAt(window.scrollY));
+        const off = Math.abs(window.scrollY - (stops[k] ?? window.scrollY));
+        if (off > 0.5) {
+          // native scroll moved the page (scrollbar, a pinch): back on a stop
+          if (t - lastScrollAt > SNAP_QUIET_MS)
+            pager.goTo(k, window.scrollY, t, SNAP_MS);
+          return false;
+        }
+        if (k >= 1 && k !== savedK && entry) {
+          savedK = k;
+          try {
+            window.sessionStorage.setItem(stopKey(entry), String(k));
+          } catch {
+            // storage blocked: Forward opens on Front
+          }
+        }
+      }
       return f.idle && !leaving;
     },
+    resume: () => resumeEntry(),
     debug: () => ({
       on,
       kinds,
