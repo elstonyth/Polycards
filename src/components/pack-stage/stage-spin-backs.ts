@@ -18,7 +18,7 @@
  * - A changed back (the 60 s poll: price, buyback, odds) is reprinted after
  *   300 ms of quiet; the old print stays drawn until then.
  */
-import type { PackBackDetails, StageSpinBack } from './contract-step2';
+import type { PackBackDetails, StageSpinBack } from './contract';
 
 /** Reprint debounce for a changed back (section 4). */
 export const BACK_REPRINT_DEBOUNCE_MS = 300;

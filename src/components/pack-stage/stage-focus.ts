@@ -11,13 +11,9 @@
  * pack never rests inside the Silver / Platinum glare band.
  */
 import type { StageLayout } from './contract';
-import type {
-  FocusCtx,
-  PoseBlock,
-  StageStop,
-  StageStopKind,
-} from './contract-step2';
-import { SPIN_LOCK, dampedFollow, smoothstep } from './stage-pose-step2';
+import type { FocusCtx, PoseBlock, StageStop, StageStopKind } from './contract';
+import { SPIN_LOCK } from './stage-pose';
+import { dampedFollow, smoothstep } from './stage-spin-math';
 
 const DEG = Math.PI / 180;
 

@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import type { StageLayout } from '../contract';
-import type { SpinCtx, StageStateStep2 } from '../contract-step2';
+import type { SpinCtx, StageState } from '../contract';
 import { restBlock } from '../stage-compose';
 import { restState, slotOpacity } from '../stage-pose';
-import { CAPSULE_LEAN, LEAN } from '../stage-pose-step2';
+import { CAPSULE_LEAN, LEAN } from '../stage-spin-math';
 import {
   CIAO_PACKSHOT,
   CIAO_ROW,
@@ -58,7 +58,7 @@ const SIZES = [
   { name: 'desktop', desktop: true, l: DESKTOP },
 ] as const;
 
-const st = (spin: number, track = 0): StageStateStep2 => ({
+const st = (spin: number, track = 0): StageState => ({
   ...restState(track),
   spin,
 });

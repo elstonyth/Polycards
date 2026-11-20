@@ -24,15 +24,11 @@ import type {
   SpinPanel,
   SpinPoseBlock,
   SpinPoseFn,
-  StageStateStep2,
-} from './contract-step2';
+  StageState,
+} from './contract';
 import { slotOpacity } from './stage-pose';
-import {
-  SPIN_GATHER,
-  SPIN_LOCK,
-  clamp01,
-  smoothstep,
-} from './stage-pose-step2';
+import { SPIN_LOCK } from './stage-pose';
+import { SPIN_GATHER, clamp01, smoothstep } from './stage-spin-math';
 
 export { SPIN_LOCK, smoothstep };
 
@@ -634,7 +630,7 @@ export const ciaoPose: SpinPoseFn = (rest, st, i, l, desktop, ctx) => {
 
 /** The `tip` variant's reach fade: lerp(step 1's, the packshot's reach, the formation ease). */
 export function ciaoOpacity(
-  st: Readonly<StageStateStep2>,
+  st: Readonly<StageState>,
   i: number,
   desktop: boolean,
   count: number,
@@ -715,7 +711,7 @@ export function reachOpacity(d: number, reach: number): number {
  * Multiply by the swap fade and `introOpacity` as `stageOpacity` does.
  */
 export function spinOpacity(
-  st: Readonly<StageStateStep2>,
+  st: Readonly<StageState>,
   i: number,
   desktop: boolean,
   count: number,
@@ -738,7 +734,7 @@ export function spinOpacity(
 
 /** Whether pack i is drawn at all at this spin (its turn weight may flip only when it is not). */
 export function spinInView(
-  st: Readonly<StageStateStep2>,
+  st: Readonly<StageState>,
   i: number,
   desktop: boolean,
   count: number,

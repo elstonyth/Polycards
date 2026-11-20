@@ -14,12 +14,64 @@
  * image, under the pose.
  */
 
+/* ---- The pin (step 2): one screen, stuck through the spin and the exit -- */
+
+/* The flow: the site header's and the phone tab bar's heights (measured by
+   PackStage; these defaults are today's) give the panel, exactly one screen. */
+.flow {
+  --flow-top: 69px;
+  --flow-bottom: 65px;
+  --panel: calc(100svh - var(--flow-top) - var(--flow-bottom));
+}
+
+@media (min-width: 1024px) {
+  .flow {
+    --flow-bottom: 0px;
+  }
+}
+
+/* Panel + the pin (1.75 panels) + the exit (1.25 panels): PackStage's
+   SPIN_PIN_PANELS and SPIN_EXIT_PANELS. */
+.spinWrap {
+  position: relative;
+  height: calc(var(--panel) * 4);
+}
+
+.stage.panel {
+  position: sticky;
+  top: var(--flow-top);
+  height: var(--panel);
+}
+
+/* The page below starts at the pin's end and rises over the stuck panel
+   during the exit (Ciao's FAQ over its fixed canvas). */
+.spinAfter {
+  position: relative;
+  z-index: 1;
+  margin-top: calc(var(--panel) * -1);
+}
+
+.spinOff {
+  height: auto;
+}
+
+.spinOff .stage.panel {
+  position: relative;
+  top: auto;
+  height: auto;
+}
+
+.spinOff + .spinAfter {
+  margin-top: 0;
+}
+
 /* ---- Stage sizes: the art box drives everything ------------------------ */
 
 .stage {
   /* Phone: centre pack about 190x352 on an iPhone 13, neighbours' inner
-     halves showing at the screen edges. */
-  --art-h: clamp(232px, calc(100svh - 470px), 352px);
+     halves showing at the screen edges. Fits the panel: heading, tabs, row
+     and info block in one screen (326 px is everything but the art). */
+  --art-h: clamp(200px, calc(var(--panel, 100svh) - 326px), 352px);
   --art-w: calc(var(--art-h) * 0.54);
   --step: calc(var(--art-h) * 0.511);
   /* Phones label only the centred pack, in the info block. */
@@ -34,7 +86,7 @@
     /* Desktop: centre about 300x560 at its tallest, +-1 one step (330 px at
        full size) out, +-2 at 560 px. Shrinks with a short window so the info
        block stays on the first screen. */
-    --art-h: clamp(340px, calc(100svh - 470px), 560px);
+    --art-h: clamp(220px, calc(var(--panel, 100svh) - 411px), 560px);
     --art-w: calc(var(--art-h) * 0.5357);
     --step: calc(var(--art-h) * 0.589);
     --label-h: 3.5rem;
@@ -76,12 +128,13 @@
 }
 
 .tile {
-  /* The pose the media query picks. */
+  /* The pose the media query picks (lengths in art heights). */
   --dx: var(--m-dx, 0);
   --dy: var(--m-dy, 0);
   --z: var(--m-z, 0);
   --rx: var(--m-rx, 0);
   --ry: var(--m-ry, 0);
+  --rz: var(--m-rz, 0);
   --s: var(--m-s, 1);
   --dim: var(--m-dim, 1);
   --op: var(--m-op, 1);
@@ -103,6 +156,7 @@
     --z: var(--d-z, 0);
     --rx: var(--d-rx, 0);
     --ry: var(--d-ry, 0);
+    --rz: var(--d-rz, 0);
     --s: var(--d-s, 1);
     --dim: var(--d-dim, 1);
     --op: var(--d-op, 1);
@@ -138,12 +192,12 @@
   inset: 0;
   transform-style: preserve-3d;
   transform: translate3d(
-      calc(var(--dx) * var(--step)),
+      calc(var(--dx) * var(--art-h)),
       calc(var(--dy) * var(--art-h)),
       calc(var(--z) * var(--art-h))
     )
-    rotateY(calc(var(--ry) * 1rad)) rotateX(calc(var(--rx) * 1rad))
-    scale(var(--s));
+    rotateZ(calc(var(--rz) * 1rad)) rotateY(calc(var(--ry) * 1rad))
+    rotateX(calc(var(--rx) * 1rad)) scale(var(--s));
   opacity: var(--op);
   pointer-events: var(--pe);
   border-radius: 1rem;
@@ -357,7 +411,7 @@
   /* Follows its pack: the same x offset, and up by the height the scale took
      off the art's bottom half. */
   transform: translate3d(
-    calc(var(--dx) * var(--step)),
+    calc(var(--dx) * var(--art-h)),
     calc((var(--s) - 1) * var(--art-h) * 0.5),
     0
   );
@@ -459,9 +513,60 @@
     var(--fade-delay, 0ms) both;
 }
 
+/* ---- The spin's text and lock (step 2) ------------------------------------ */
+
+/* Text over the stage changes on timed tweens (Ciao: 0.5 s power2.inOut once
+   a move is 20% done), never tied to the scroll position: PackStage sets the
+   flags, the transitions play forward and back. Only children fade, so the
+   loader's fill animation on the info block and the labels' per-frame reach
+   fade are never touched. */
+.stage [data-stage-info] > *,
+.label > *,
+.stage [data-stage-head] {
+  transition: opacity 500ms cubic-bezier(0.45, 0, 0.55, 1);
+}
+
+.stage[data-spin-text] [data-stage-info] > *,
+.stage[data-spin-text] .label > *,
+.stage[data-spin-text] [data-stage-nav] {
+  opacity: 0;
+}
+
+.stage[data-spin-head] [data-stage-head] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Once the spin has started the row is the scroll's (10.4): a tap on a pack
+   is a scroll gesture, the discs and the info block take no hits. The tabs
+   and the sort control stay live: a pick plays the usual sink and rise. */
+.stage[data-spinning] .pose,
+.stage[data-spinning] .label,
+.stage[data-spinning] [data-stage-nav],
+.stage[data-spinning] [data-stage-info] {
+  pointer-events: none;
+}
+
+/* The capsules' CSS sway would double the row's own lean. */
+.stage[data-spinning] .sway {
+  animation-play-state: paused;
+}
+
 /* ---- Reduced motion ------------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {
+  /* No pin, no scrub: the page reads as step 1. */
+  .spinWrap {
+    height: auto;
+  }
+  .stage.panel {
+    position: relative;
+    top: auto;
+    height: auto;
+  }
+  .spinAfter {
+    margin-top: 0;
+  }
   .sway {
     animation: none;
   }

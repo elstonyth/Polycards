@@ -18,6 +18,7 @@ import { openPack3d, type Pack3d } from '@/components/pack-3d/catalog/build';
 import type { PackFoilSettings } from '@/components/pack-3d/pack-material';
 import type { PackModel } from '@/components/pack-3d/pack-model';
 import type {
+  ComposeCtx,
   StageLayout,
   StageRuntime,
   StageRuntimeFailReason,
@@ -26,7 +27,16 @@ import type {
   StageRuntimeStats,
   StageState,
 } from '../contract';
-import { poseAt, stageOpacity } from '../stage-pose';
+import { clamp01, poseAt, stageOpacity, stageSpring } from '../stage-pose';
+import { LEAN } from '../stage-spin-math';
+import {
+  CIAO_ROW,
+  ciaoCopies,
+  ciaoOpacity,
+  ciaoPose,
+  wrapRow,
+} from '../stage-spin';
+import { composePose } from '../stage-pose-compose';
 import {
   NO_PROMOTION,
   PROMOTE_MIN_DPR,
@@ -74,7 +84,40 @@ type Variant = {
   state: VariantState;
   baseEnv: number;
   baseGlow: number;
+  /**
+   * The spin row's repeats of this pack (row-slot offset -> clone): each a
+   * clone of the model sharing its geometry, textures and program, with its
+   * own material object (own opacity and light). Freed with the variant.
+   */
+  copies: Map<number, THREE.Object3D>;
 };
+
+/** Clones a pack model for a repeat: geometry and textures shared, material cloned. */
+function cloneForCopy(model: PackModel): THREE.Object3D {
+  const c = model.clone();
+  c.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const orig = mesh.material as THREE.MeshPhysicalMaterial;
+    const m = orig.clone();
+    // Material.copy leaves these out: the same closure and key give the same
+    // program and the same uniform objects (no compile, no new texture).
+    m.onBeforeCompile = orig.onBeforeCompile;
+    m.customProgramCacheKey = orig.customProgramCacheKey;
+    mesh.material = m;
+    c.userData.mesh = mesh;
+  });
+  return c;
+}
+
+function disposeCopies(v: Variant) {
+  for (const c of v.copies.values()) {
+    c.removeFromParent();
+    const mesh = c.userData.mesh as THREE.Mesh | undefined;
+    if (mesh) (mesh.material as THREE.Material).dispose();
+  }
+  v.copies.clear();
+}
 
 type Slot = {
   key: string;
@@ -115,6 +158,10 @@ export type StageRuntimeDebug = {
   textureBytes: number;
   budgetBytes: number;
   failed: StageRuntimeFailReason | null;
+  /** Spin row repeats drawn in the last frame, and whether the band covers the host. */
+  copies: number;
+  spinBand: boolean;
+  bandH: number;
 };
 
 export type StageRuntimeBench = StageRuntime & {
@@ -174,10 +221,20 @@ export function createStageRuntime(
   let prepared: Promise<void> | null = null;
   let booting = true;
 
+  /** The whole row's length (3D or not): the spin row wraps over it. */
+  let rowCount = 0;
+  /** The viewport height the spin row is projected against. */
+  let viewH = 0;
+  /** The canvas covers the whole host while the spin or its exit is under way. */
+  let spinBand = false;
+  /** Repeats (clones) drawn in the last frame. */
+  let lastCopies = 0;
+
   let inflight = 0;
   let uploadedBytes = 0;
   let needsDraw = true;
-  const lastState = new Float64Array(8).fill(Number.NaN);
+  const STATE_KEYS = 10;
+  const lastState = new Float64Array(STATE_KEYS).fill(Number.NaN);
   let lastLive: string[] = [];
   const seenShared = new Set<THREE.Texture>();
 
@@ -269,6 +326,7 @@ export function createStageRuntime(
     if (!v || v.state === 'disposed') return;
     if (v.state === 'uploaded') uploadedBytes -= v.bytes;
     v.state = 'disposed';
+    disposeCopies(v);
     if (v.model) v.model.removeFromParent();
     v.model = null;
     v.handle.dispose();
@@ -309,6 +367,7 @@ export function createStageRuntime(
       state: 'loading',
       baseEnv: 1,
       baseGlow: 0,
+      copies: new Map(),
     };
     counters.loads++;
     inflight++;
@@ -369,33 +428,60 @@ export function createStageRuntime(
 
   // --- residency ---------------------------------------------------------------
 
-  const applyPlan = (track: number, now: number) => {
+  /**
+   * `spinRow`: the Ciao row is formed or forming. Every pack whose wrapped row
+   * slot is within the row's reach (desktop 6, phone 2, plus the fading one)
+   * is needed, all at half resolution, no full-front promotion. The row's
+   * slots do not move during the spin (no travel, the track is locked), so
+   * this plan holds still through a move; residency maps each pack to its
+   * wrapped index so the plan's distances are row distances.
+   */
+  const applyPlan = (track: number, now: number, spinRow = false) => {
     if (slots.length === 0) return;
+    const n = Math.max(rowCount, slots.length);
+    const wrapped = (i: number) =>
+      spinRow && n > 1 ? track + wrapRow(i - track, n) : i;
+    const fromWrapped = new Map<number, Slot>();
+    for (const s of slots) fromWrapped.set(wrapped(s.index), s);
     const resident = new Map<number, ResidentInfo>();
     for (const s of slots)
-      if (s.half || s.full) resident.set(s.index, { lastNeeded: s.lastNeeded });
+      if (s.half || s.full)
+        resident.set(wrapped(s.index), { lastNeeded: s.lastNeeded });
+    const reach = desktop ? CIAO_ROW.reachDesktop : CIAO_ROW.reachPhone;
     const plan = planResidency({
-      indices: slots.filter((s) => !s.halfFailed).map((s) => s.index),
+      indices: slots.filter((s) => !s.halfFailed).map((s) => wrapped(s.index)),
       track,
-      direction: direction?.dir ?? 0,
-      config,
-      promote: promotion.index,
+      direction: spinRow ? 0 : (direction?.dir ?? 0),
+      config: spinRow
+        ? {
+            ...config,
+            reach,
+            disposeAt: reach + 1,
+            maxResident: Math.max(config.maxResident, slots.length),
+          }
+        : config,
+      promote: spinRow ? null : promotion.index,
       // A prefetch for the coming list holds its share of the budget.
       budgetBytes: Math.max(0, budget() - stagedBytes()),
       bytes: (i, res) => {
-        const s = byIndex.get(i);
+        const s = fromWrapped.get(i);
         return s ? estimateBytes(s, res) : 0;
       },
       resident,
       now,
     });
-    for (const i of plan.stamp) {
-      const s = byIndex.get(i);
+    const want = new Map<number, { full: boolean }>();
+    for (const [w, e] of plan.want) {
+      const s = fromWrapped.get(w);
+      if (s) want.set(s.index, e);
+    }
+    for (const w of plan.stamp) {
+      const s = fromWrapped.get(w);
       if (s) s.lastNeeded = now;
     }
     // Drop first, then load, so the budget is never exceeded on the way.
     for (const s of slots) {
-      const w = plan.want.get(s.index);
+      const w = want.get(s.index);
       s.wantFull = w?.full === true;
       if (!w) {
         // The coming list reuses it: keep its texture through the switch.
@@ -409,7 +495,7 @@ export function createStageRuntime(
       }
     }
     for (const s of slots) {
-      const w = plan.want.get(s.index);
+      const w = want.get(s.index);
       if (!w) continue;
       if (!s.half && !s.halfFailed) s.half = startVariant(s, 'half');
       if (w.full && !s.full && !s.fullFailed && s.half?.state === 'uploaded')
@@ -418,21 +504,23 @@ export function createStageRuntime(
   };
 
   /** The next variant to upload: wanted, built, nearest the centre, half first. */
-  const nextUpload = (track: number): Variant | null => {
+  const nextUpload = (track: number, spinRow = false): Variant | null => {
     let best: Variant | null = null;
     let bestScore = Infinity;
-    const consider = (s: Slot, centre: number) => {
+    const n = Math.max(rowCount, slots.length);
+    const consider = (s: Slot, centre: number, row = false) => {
       for (const v of [s.half, s.full]) {
         if (!v || v.state !== 'built') continue;
-        const score =
-          Math.abs(s.index - centre) * 2 + (v.res === 'full' ? 1 : 0);
+        const dist =
+          row && n > 1 ? wrapRow(s.index - centre, n) : s.index - centre;
+        const score = Math.abs(dist) * 2 + (v.res === 'full' ? 1 : 0);
         if (score < bestScore) {
           bestScore = score;
           best = v;
         }
       }
     };
-    for (const s of slots) consider(s, track);
+    for (const s of slots) consider(s, track, spinRow);
     // The coming list's packs, by distance from ITS centre.
     for (const s of staged.values()) consider(s, stagedCentre);
     return best;
@@ -453,13 +541,14 @@ export function createStageRuntime(
 
   // --- the runtime -------------------------------------------------------------
 
-  const resize = (w: number, h: number, dpr: number) => {
+  const resize = (w: number, h: number, dpr: number, vh?: number) => {
     if (dead()) return;
     const st = ensureStage(dpr);
     if (!st) return;
     sized = true;
     hostW = Math.max(0, w);
     hostH = Math.max(0, h);
+    viewH = vh && vh > 0 ? vh : hostH;
     pixelRatio = Math.max(0.5, Math.min(dpr > 0 ? dpr : 1, cap));
     applyBand();
   };
@@ -475,8 +564,13 @@ export function createStageRuntime(
   let band = { y: 0, h: 0 };
   /** QA only (`__packStage.fullCanvas`): the whole host, as before the band. */
   let fullCanvas = false;
+  // The spin row and its exit reach every part of the panel (the row climbs
+  // to the right and leaves through the top): while either runs, the whole
+  // host. Switched once as the spin leaves 0 and once as it comes back.
   const bandFor = () =>
-    fullCanvas ? { y: 0, h: Math.round(hostH) } : stageBand(hostH, layout);
+    fullCanvas || spinBand
+      ? { y: 0, h: Math.round(hostH) }
+      : stageBand(hostH, layout);
   const applyBand = () => {
     const st = stage;
     if (!st || dead()) return;
@@ -588,9 +682,14 @@ export function createStageRuntime(
     return b + stagedBytes();
   };
 
-  const setPacks = (list: StageRuntimePack[] | null, centre?: number) => {
+  const setPacks = (
+    list: StageRuntimePack[] | null,
+    centre?: number,
+    count?: number,
+  ) => {
     if (dead()) return;
     const next = list ?? [];
+    rowCount = typeof count === 'number' && count > 0 ? count : next.length;
     const key = next
       .map((p) => `${slotKey(p)}@${p.index}${p.soldOut ? 's' : ''}`)
       .join(',');
@@ -658,7 +757,7 @@ export function createStageRuntime(
       st.renderer.setRenderTarget(null);
       st.renderer.clear();
       lastLive = [];
-      for (let i = 0; i < 8; i++) lastState[i] = Number.NaN;
+      lastState.fill(Number.NaN);
     }
     if (!booting && stage) {
       // A later list (category switch, reload after release): start the
@@ -740,9 +839,11 @@ export function createStageRuntime(
       s.idle,
       s.focus,
       s.turn,
+      s.spin,
+      s.exit,
     ];
     let changed = false;
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < STATE_KEYS; i++) {
       if (lastState[i] !== v[i]) {
         lastState[i] = v[i] ?? 0;
         changed = true;
@@ -763,14 +864,20 @@ export function createStageRuntime(
       direction = direction
         ? nextDirection(direction, track)
         : initialDirection(track);
+      const spinRow = s.spin > 0 || s.exit > 0;
+      if (spinRow !== spinBand) {
+        spinBand = spinRow;
+        applyBand();
+      }
       const promoteOn =
         desktop &&
         tier === 'full' &&
         pixelRatio >= PROMOTE_MIN_DPR &&
-        !switching;
+        !switching &&
+        !spinRow;
       promotion = nextPromotion(promotion, track, now, promoteOn);
-      if (!booting) applyPlan(track, now);
-      const next = booting ? null : nextUpload(track);
+      if (!booting) applyPlan(track, now, spinRow);
+      const next = booting ? null : nextUpload(track, spinRow);
       if (next) upload(next);
 
       const moved = stateChanged(s);
@@ -785,43 +892,101 @@ export function createStageRuntime(
           st.camera.matrixWorldInverse,
         );
         frustum.setFromProjectionMatrix(projScreen);
+        const n = Math.max(rowCount, slots.length);
+        const panel = {
+          w: hostW,
+          h: hostH,
+          anchorY: hostH > 0 ? l.cy / hostH : 0.5,
+          viewH: viewH || hostH,
+        };
+        const rise = 1 - stageSpring(clamp01(s.swap));
+        let copiesDrawn = 0;
         for (const slot of slots) {
           const shown = drawnVariant(slot);
-          for (const v of [slot.half, slot.full])
-            if (v?.model && v !== shown) v.model.visible = false;
+          for (const v of [slot.half, slot.full]) {
+            if (!v || v === shown) continue;
+            if (v.model) v.model.visible = false;
+            for (const c of v.copies.values()) c.visible = false;
+          }
           const model = shown?.model;
           if (!shown || !model) continue;
-          // The same fade as the CSS tiles: reach, and the category switch.
-          const opacity = stageOpacity(s, slot.index, desktop);
-          if (opacity <= 0) {
-            model.visible = false;
-            continue;
-          }
-          const pose = poseAt(s, slot.index, l, desktop, slot.soldOut);
+          // One context for the CSS tiles and the canvas: the Ciao row, its
+          // exit, the row's own fade (stage-pose composes the rest).
+          const ctx: ComposeCtx = {
+            spin: {
+              count: n,
+              turn: 0,
+              lean: LEAN,
+              spinPose: ciaoPose,
+              soldOut: slot.soldOut,
+              exit: s.exit,
+              panel,
+            },
+            spinOpacity: ciaoOpacity,
+            compose: composePose,
+          };
           // The picture is `object-fit: contain` in the art box: a pack wider
           // than the box draws shorter than artH, so the model does too.
           const fit =
             l.artW && slot.width > 0 && slot.height > 0
               ? Math.min(1, l.artW / l.artH / (slot.width / slot.height))
               : 1;
-          placeModel(
-            model,
-            pose,
-            l.cx + (slot.index - track) * l.step,
-            fit < 1 ? { ...l, artH: l.artH * fit } : l,
-            hostW,
-            hostH,
-          );
-          const m = model.material;
-          m.opacity = opacity;
-          m.color.setScalar(pose.dim);
-          m.emissiveIntensity = shown.baseGlow * pose.dim;
-          m.envMapIntensity =
-            shown.baseEnv * Math.pow(Math.max(0, pose.dim), ENV_DIM_EXPONENT);
-          model.visible = true;
-          model.updateMatrixWorld(true);
+          const fitted = fit < 1 ? { ...l, artH: l.artH * fit } : l;
+          const slotX = l.cx + (slot.index - track) * l.step;
+          const paint = (
+            obj: THREE.Object3D,
+            m: THREE.MeshPhysicalMaterial,
+            pose: ReturnType<typeof poseAt>,
+            opacity: number,
+          ) => {
+            // the pose is in layout px; the fitted art height only scales it
+            placeModel(obj, pose, slotX, fitted, hostW, hostH);
+            m.opacity = opacity;
+            m.color.setScalar(pose.dim);
+            m.emissiveIntensity = shown.baseGlow * pose.dim;
+            m.envMapIntensity =
+              shown.baseEnv * Math.pow(Math.max(0, pose.dim), ENV_DIM_EXPONENT);
+            obj.visible = true;
+            obj.updateMatrixWorld(true);
+          };
+          // The spin row's repeats (Ciao repeats its six cans to 24): clones.
+          const offsets = spinRow
+            ? ciaoCopies(slot.index, track, n, desktop).filter((o) => o !== 0)
+            : [];
+          for (const [o, c] of shown.copies)
+            if (!offsets.includes(o)) c.visible = false;
+          for (const o of offsets) {
+            const op = ciaoOpacity(s, slot.index, desktop, n, o) * rise;
+            const have = shown.copies.get(o);
+            if (!(op > 0)) {
+              if (have) have.visible = false;
+              continue;
+            }
+            let c = have;
+            if (!c) {
+              c = cloneForCopy(model);
+              shown.copies.set(o, c);
+              st.scene.add(c);
+            }
+            const cpose = poseAt(s, slot.index, l, desktop, slot.soldOut, {
+              ...ctx,
+              spin: { ...ctx.spin!, copy: o },
+            });
+            const mesh = c.userData.mesh as THREE.Mesh;
+            paint(c, mesh.material as THREE.MeshPhysicalMaterial, cpose, op);
+            copiesDrawn++;
+          }
+          // The same fade as the CSS tiles: reach (the row's, in the spin) and the category switch.
+          const opacity = stageOpacity(s, slot.index, desktop, n, ctx);
+          if (opacity <= 0) {
+            model.visible = false;
+            continue;
+          }
+          const pose = poseAt(s, slot.index, l, desktop, slot.soldOut, ctx);
+          paint(model, model.material, pose, opacity);
           if (frustum.intersectsObject(model.mesh)) live.push(slot.id);
         }
+        lastCopies = copiesDrawn;
         st.renderer.render(st.scene, st.camera);
         if (seenShared.size === 0) sharedTextures(st);
         counters.draws++;
@@ -889,6 +1054,9 @@ export function createStageRuntime(
       textureBytes: uploadedBytes,
       budgetBytes: budget(),
       failed,
+      copies: lastCopies,
+      spinBand,
+      bandH: band.h,
     };
   };
 

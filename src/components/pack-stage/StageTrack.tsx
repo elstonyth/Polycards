@@ -20,7 +20,8 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { StagePack } from './contract';
 import { useStage3d } from './Stage3dProvider';
-import { STAGE_REACH, restState } from './stage-pose';
+import { spinKit } from './stage-spin-load';
+import { SPIN_LOCK, STAGE_REACH, restState } from './stage-pose';
 import { stageStartIndex } from './stage-filter';
 import StageTile, { tileVars } from './StageTile';
 import styles from './pack-stage.module.css';
@@ -156,6 +157,7 @@ export default function StageTrack({
   // and the pointer lean (it listens for the pointer itself). Flat or 3D, both
   // layers pose from these same values.
   const { values, attach } = stage3d;
+  const hostRef = host;
 
   // Every frame of a move: the row slides by whole steps, each tile re-poses.
   const paint = useCallback(() => {
@@ -168,8 +170,20 @@ export default function StageTrack({
       swap: values.swap.get(),
       pointerX: values.pointerX.get(),
       pointerY: values.pointerY.get(),
+      spin: values.spin.get(),
+      exit: values.exit.get(),
     };
     row.style.setProperty('--track', String(Math.round(t * 10000) / 10000));
+    // The spin row (Ciao's packshot) is posed by the lazily loaded chunk:
+    // the same pose the canvas draws, so a tile without a 3D pack stands in
+    // place. At rest (or before the chunk) the step 1 poses.
+    const host = hostRef.current;
+    if (
+      (state.spin > 0 || state.exit > 0) &&
+      host &&
+      spinKit()?.paintTiles(row, host, packs, state, cyArtRef.current)
+    )
+      return;
     const tiles = row.children;
     for (let i = 0; i < tiles.length; i++) {
       const tile = tiles[i] as HTMLElement;
@@ -181,7 +195,7 @@ export default function StageTrack({
       );
       for (const key in vars) tile.style.setProperty(key, vars[key] ?? '');
     }
-  }, [track, packs, values]);
+  }, [track, packs, values, hostRef]);
 
   // Only the visible category follows the shared values. Layout effects, here
   // and below: a changed row (React re-renders the tiles' rest pose into their
@@ -195,6 +209,8 @@ export default function StageTrack({
       values.swap.on('change', paint),
       values.pointerX.on('change', paint),
       values.pointerY.on('change', paint),
+      values.spin.on('change', paint),
+      values.exit.on('change', paint),
     ];
     paint();
     return () => offs.forEach((off) => off());
@@ -312,6 +328,9 @@ export default function StageTrack({
     if (!press || press.id !== event.pointerId) return;
     const dx = event.clientX - press.x0;
     if (!panRef.current) {
+      // The spin owns the row once it has started (10.4): no new swipe. A
+      // swipe already under way finishes its snap.
+      if (values.spin.get() >= SPIN_LOCK) return;
       const dy = event.clientY - press.y0;
       if (Math.abs(dx) < PAN_SLOP || Math.abs(dx) <= Math.abs(dy)) return;
       const step =
@@ -386,6 +405,7 @@ export default function StageTrack({
   };
 
   const onKeyDown = (event: KeyboardEvent) => {
+    if (values.spin.get() >= SPIN_LOCK) return;
     const at = targetRef.current;
     const next =
       event.key === 'ArrowLeft'

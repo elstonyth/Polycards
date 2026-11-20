@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from 'react';
 import { flushSync } from 'react-dom';
 import Link from 'next/link';
@@ -37,6 +38,7 @@ import {
   type StageFilter,
 } from './stage-filter';
 import StageTrack from './StageTrack';
+import { loadSpinKit } from './stage-spin-load';
 import styles from './pack-stage.module.css';
 
 /** What the live region says once the track rests on a pack. */
@@ -51,24 +53,6 @@ export function stageAnnouncement(
 const nounOf = (packs: readonly StagePack[]): 'pack' | 'capsule' =>
   packs.length > 0 && packs.every((p) => p.ticket) ? 'capsule' : 'pack';
 
-// Without JS: every category's panel shows (each with its name), and each
-// carousel falls back to a swipeable snap row (phones) or a grid (desktop).
-// The panel rule sits in Tailwind's base layer: preflight's `[hidden]` rule is
-// `!important` there, and a layered !important beats any unlayered one.
-const NO_SCRIPT_CSS = `
-@layer base{[data-stage-panel][hidden]{display:block!important}}
-[data-stage-panel-name]{position:static!important;width:auto!important;height:auto!important;margin:2rem 0 .75rem!important;clip:auto!important;clip-path:none!important;overflow:visible!important;white-space:normal!important}
-[data-stage-nav],[data-stage-info],[data-stage-count],[data-stage-chips]{display:none!important}
-[data-stage-viewport]{height:auto!important;perspective:none!important;touch-action:auto!important;user-select:auto!important;overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:1rem}
-[data-stage-row]{position:static!important;transform:none!important;width:max-content;gap:1rem;padding:0 1rem}
-[data-stage-tile]{width:auto!important;scroll-snap-align:center}
-[data-stage-hit]{pointer-events:auto!important}
-[data-stage-pose]{transform:none!important;opacity:1!important}
-[data-stage-label]{transform:none!important;opacity:1!important}
-[data-stage-art] img{filter:none!important}
-@media (min-width:1024px){[data-stage-viewport]{overflow:visible}[data-stage-row]{display:grid!important;grid-template-columns:repeat(auto-fill,minmax(13rem,1fr));width:auto}[data-stage-art]{width:10.75rem!important;height:20rem!important}}
-`;
-
 /**
  * The home pack stage (plan sections 1, 3, 7), complete without any 3D: the
  * compact heading, the franchise tabs (driving the shared ShelfCategory pick,
@@ -80,21 +64,69 @@ export default function PackStage({
   categories,
   tabs,
   freePackPromo,
-  debug = false,
+  children,
 }: {
   categories: StageCategory[];
   tabs: PackTab[];
   /** A free welcome pack is on offer to a new visitor (getFreePackPromo). */
   freePackPromo: boolean;
-  debug?: boolean;
+  /**
+   * The page below the stage. It is laid out from the pin's end and scrolls
+   * up OVER the stuck panel during the exit (as Ciao's FAQ scrolls over its
+   * fixed canvas), so it is rendered here, after the pin.
+   */
+  children?: ReactNode;
 }) {
   const { active, pick } = useShelfCategory();
   const stage3d = useStage3d();
   const reduced = usePrefersReducedMotion();
   const hostRef = useRef<HTMLElement>(null);
+  const flowRef = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const empty0 = categories.length === 0;
+
+  // The pin (10.2 as corrected by the Ciao motion sheet): the panel sticks
+  // under the site header for the spin (1.75 panels) and the exit (1.25
+  // panels), then the page below covers it. The spin chunk measures the range
+  // from these elements, sets the panel's flags and pages the spin.
   // Never in the server HTML: a visitor whose JS never runs must not get an
   // inert page. Client-side, the stage is inert while the loader covers it.
   const loaderUp = useStageLoaderUp(false);
+  const spinValues = stage3d.values;
+  useEffect(() => {
+    const flow = flowRef.current;
+    const wrap = wrapRef.current;
+    const panel = hostRef.current;
+    // After the loader has gone (its exit is never slowed by the chunk).
+    if (!flow || !wrap || !panel || reduced || loaderUp) return;
+    let ctl: { stop(): void } | null = null;
+    let live = true;
+    const t = setTimeout(() => {
+      loadSpinKit().then(
+        (m) => {
+          if (!live) return;
+          const c = m.startSpin({
+            set: (spin, exit) => {
+              spinValues.spin.set(spin);
+              spinValues.exit.set(exit);
+            },
+          });
+          c.bind({ flow, wrap, panel, empty: empty0 });
+          ctl = c;
+        },
+        // No spin chunk: the page stays step 1 (one screen, never paged).
+        () => {},
+      );
+    }, 300);
+    return () => {
+      live = false;
+      clearTimeout(t);
+      ctl?.stop();
+      spinValues.spin.set(0);
+      spinValues.exit.set(0);
+    };
+  }, [spinValues, empty0, reduced, loaderUp]);
+
   const [revealed, setRevealed] = useState(false);
 
   // The centred pack per category (the info block follows the active one).
@@ -235,128 +267,157 @@ export default function PackStage({
   const noun = category ? nounOf(category.packs) : 'pack';
 
   return (
-    <>
+    <div ref={flowRef} className={styles.flow}>
       <StageLoader onLeave={onLoaderLeave} />
-      <section
-        ref={hostRef}
-        aria-roledescription="carousel"
-        aria-label={noun === 'capsule' ? 'Capsules' : 'Packs'}
-        data-stage-root=""
-        data-revealed={revealed ? '1' : undefined}
-        inert={loaderUp || undefined}
-        className={cn(
-          styles.stage,
-          'isolate w-full pb-8 pt-5 lg:pb-10 lg:pt-8',
-        )}
+      {/* The pin: the panel sticks through the spin and the exit. */}
+      <div
+        ref={wrapRef}
+        data-spin-wrap=""
+        className={cn(styles.spinWrap, empty && styles.spinOff)}
       >
-        {/* The 3D layer's canvas host: first child, under every tile. */}
-        <Stage3dCanvas />
-
-        {/* Two soft pools of neutral light, as the /slots header: no colour,
-            no blur, never moves. */}
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[40rem] bg-[radial-gradient(50%_55%_at_50%_42%,rgba(255,255,255,0.07),transparent_70%),radial-gradient(35%_40%_at_12%_0%,rgba(255,255,255,0.05),transparent_70%)]"
-        />
-
-        <div className="px-fluid flex flex-col items-center gap-4 lg:gap-5">
-          <h1 className="text-center font-heading text-[clamp(1.5rem,6.4vw,1.875rem)] leading-[1.05] tracking-[-0.03em] text-white lg:text-[clamp(2rem,2.6vw,2.75rem)]">
-            Open packs. Pull real cards.
-          </h1>
-          {(tabs.length > 1 || (anyChips && !empty)) && (
-            // The pill and, hanging from it, the sorting control's own 24 px
-            // row (in the gap the pill always had above the packs, so the
-            // stage sits where it did before). Above the tiles: the control's
-            // panel draws over the stage and never moves it.
-            <div
-              className={cn(styles.pillWrap, 'relative z-30 w-full max-w-xl')}
-            >
-              {tabs.length > 1 && (
-                <PackCategoryTabs
-                  categories={tabs}
-                  active={target}
-                  onChange={pickTab}
-                />
-              )}
-              {anyChips && !empty && (
-                <div className="flex h-6 justify-center">
-                  {chipCat && (
-                    <StageChips
-                      category={chipCat}
-                      filter={chipFilter}
-                      label={filterLabel(chipCat, chipFilter)}
-                      off={!chipsOn}
-                      onPick={pickRowFilter}
-                    />
-                  )}
-                </div>
-              )}
-            </div>
+        <section
+          ref={hostRef}
+          aria-roledescription="carousel"
+          aria-label={noun === 'capsule' ? 'Capsules' : 'Packs'}
+          data-stage-root=""
+          data-revealed={revealed ? '1' : undefined}
+          inert={loaderUp || undefined}
+          className={cn(
+            styles.stage,
+            styles.panel,
+            'isolate w-full pb-8 pt-5 lg:pb-10 lg:pt-8',
           )}
-        </div>
-        {empty ? (
-          <p className="px-fluid mx-auto mt-8 max-w-xl">
-            <span className="block rounded-2xl border border-white/10 bg-neutral-900 px-4 py-10 text-center text-[13px] text-neutral-400">
-              No packs available right now — check back soon.
-            </span>
-          </p>
-        ) : (
-          <>
-            <div
-              className={cn('relative', anyChips ? 'lg:mt-1' : 'mt-6 lg:mt-8')}
-            >
-              {categories.map((c, ci) => {
-                const tabName = tabs.find((t) => t.id === c.id)?.tab ?? c.id;
-                const isVisible = c.id === visible;
-                const packs = rowOf(c);
-                return (
-                  <div key={c.id} data-stage-panel={c.id} hidden={!isVisible}>
-                    <h2
-                      data-stage-panel-name=""
-                      className="sr-only px-fluid font-heading text-xl text-white"
-                    >
-                      {tabName}
-                    </h2>
-                    <StageTrack
-                      categoryId={c.id}
-                      packs={packs}
-                      startAt={rowStarts[c.id]}
-                      rowKey={rowKeyOf(c.id, filterOf(c.id))}
-                      active={isVisible}
-                      noun={nounOf(c.packs)}
-                      reduced={reduced}
-                      priority={ci === 0}
-                      host={hostRef}
-                      selected={selectedIn(c)}
-                      onSelect={(i) => select(c.id, i)}
-                      onSettle={(i) => settle(packs, i)}
-                    />
-                  </div>
-                );
-              })}
-            </div>
+        >
+          {/* The 3D layer's canvas host: first child, under every tile. */}
+          <Stage3dCanvas />
 
-            {pack && category && (
+          {/* Two soft pools of neutral light, as the /slots header: no colour,
+            no blur, never moves. */}
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[40rem] bg-[radial-gradient(50%_55%_at_50%_42%,rgba(255,255,255,0.07),transparent_70%),radial-gradient(35%_40%_at_12%_0%,rgba(255,255,255,0.05),transparent_70%)]"
+          />
+
+          <div className="px-fluid flex flex-col items-center gap-4 lg:gap-5">
+            <h1
+              data-stage-head=""
+              className="text-center font-heading text-[clamp(1.5rem,6.4vw,1.875rem)] leading-[1.05] tracking-[-0.03em] text-white lg:text-[clamp(2rem,2.6vw,2.75rem)]"
+            >
+              Open packs. Pull real cards.
+            </h1>
+            {(tabs.length > 1 || (anyChips && !empty)) && (
+              // The pill and, hanging from it, the sorting control's own 24 px
+              // row (in the gap the pill always had above the packs, so the
+              // stage sits where it did before). Above the tiles: the control's
+              // panel draws over the stage and never moves it.
               <div
-                data-stage-info=""
-                data-stage-fade=""
-                // Desktop: up into the label band, which only neighbours use.
-                className="px-fluid relative mt-3 flex flex-col items-center lg:-mt-9"
-                style={{ '--fade-delay': '120ms' } as CSSProperties}
+                data-stage-head=""
+                className={cn(styles.pillWrap, 'relative z-30 w-full max-w-xl')}
               >
-                <StageInfo
-                  pack={pack}
-                  index={at}
-                  count={row.length}
-                  categoryName={tab?.tab ?? category.id}
-                />
-                <HeroFreePack promo={freePackPromo} />
+                {tabs.length > 1 && (
+                  <PackCategoryTabs
+                    categories={tabs}
+                    active={target}
+                    onChange={pickTab}
+                  />
+                )}
+                {anyChips && !empty && (
+                  <div className="flex h-6 justify-center">
+                    {chipCat && (
+                      <StageChips
+                        category={chipCat}
+                        filter={chipFilter}
+                        label={filterLabel(chipCat, chipFilter)}
+                        off={!chipsOn}
+                        onPick={pickRowFilter}
+                      />
+                    )}
+                  </div>
+                )}
               </div>
             )}
-          </>
-        )}
+          </div>
+          {empty ? (
+            <p className="px-fluid mx-auto mt-8 max-w-xl">
+              <span className="block rounded-2xl border border-white/10 bg-neutral-900 px-4 py-10 text-center text-[13px] text-neutral-400">
+                No packs available right now — check back soon.
+              </span>
+            </p>
+          ) : (
+            <>
+              <div
+                className={cn(
+                  'relative',
+                  anyChips ? 'lg:mt-1' : 'mt-6 lg:mt-8',
+                )}
+              >
+                {categories.map((c, ci) => {
+                  const tabName = tabs.find((t) => t.id === c.id)?.tab ?? c.id;
+                  const isVisible = c.id === visible;
+                  const packs = rowOf(c);
+                  return (
+                    <div key={c.id} data-stage-panel={c.id} hidden={!isVisible}>
+                      <h2
+                        data-stage-panel-name=""
+                        className="sr-only px-fluid font-heading text-xl text-white"
+                      >
+                        {tabName}
+                      </h2>
+                      <StageTrack
+                        categoryId={c.id}
+                        packs={packs}
+                        startAt={rowStarts[c.id]}
+                        rowKey={rowKeyOf(c.id, filterOf(c.id))}
+                        active={isVisible}
+                        noun={nounOf(c.packs)}
+                        reduced={reduced}
+                        priority={ci === 0}
+                        host={hostRef}
+                        selected={selectedIn(c)}
+                        onSelect={(i) => select(c.id, i)}
+                        onSettle={(i) => settle(packs, i)}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
 
-        <p className="px-fluid mt-6 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-[11px] text-neutral-400 lg:text-xs">
+              {pack && category && (
+                <div
+                  data-stage-info=""
+                  data-stage-fade=""
+                  // Desktop: up into the label band, which only neighbours use.
+                  className="px-fluid relative mt-3 flex flex-col items-center lg:-mt-9"
+                  style={{ '--fade-delay': '120ms' } as CSSProperties}
+                >
+                  <StageInfo
+                    pack={pack}
+                    index={at}
+                    count={row.length}
+                    categoryName={tab?.tab ?? category.id}
+                  />
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Polite, and only once the track rests: never during a drag. */}
+          <p aria-live="polite" aria-atomic="true" className="sr-only">
+            {announcement}
+          </p>
+        </section>
+      </div>
+
+      {/* After the pin: laid out from its end, it rises over the stuck panel
+          during the exit. The free pack offer and the trust line were below
+          the first screen in step 1 too; the panel is one screen now. */}
+      <div data-spin-after="" className={styles.spinAfter}>
+        {!empty && (
+          <div className="px-fluid flex flex-col items-center">
+            <HeroFreePack promo={freePackPromo} />
+          </div>
+        )}
+        <p className="px-fluid mt-6 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 pb-8 text-[11px] text-neutral-400 lg:pb-10 lg:text-xs">
           <span className="flex items-center gap-1.5">
             <Truck className="h-3.5 w-3.5" aria-hidden />
             Ships to Malaysia &amp; Singapore
@@ -371,23 +432,8 @@ export default function PackStage({
             How it works <ArrowUpRight className="h-3.5 w-3.5" aria-hidden />
           </Link>
         </p>
-
-        {/* Polite, and only once the track rests: never during a drag. */}
-        <p aria-live="polite" aria-atomic="true" className="sr-only">
-          {announcement}
-        </p>
-
-        <noscript>
-          <style dangerouslySetInnerHTML={{ __html: NO_SCRIPT_CSS }} />
-        </noscript>
-
-        {debug && (
-          <p className="fixed bottom-24 left-3 z-[60] rounded-lg bg-black/80 px-3 py-2 font-mono text-[11px] text-neutral-300 ring-1 ring-white/10 lg:bottom-3">
-            mode {stage3d.mode} · ready {String(stage3d.ready)} · {active} ·{' '}
-            {at + 1}/{row.length}
-          </p>
-        )}
-      </section>
-    </>
+        {children}
+      </div>
+    </div>
   );
 }

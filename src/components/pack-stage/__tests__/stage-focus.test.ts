@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { cubicBezier } from '@/components/loader/loader-timeline';
 
 import type { StageLayout } from '../contract';
-import type { FocusCtx, StageStop } from '../contract-step2';
+import type { FocusCtx, StageStop } from '../contract';
 import { restBlock } from '../stage-compose';
 import {
   DESKTOP_YAW_BEATS,

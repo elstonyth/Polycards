@@ -28,6 +28,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  writeFileSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1759,7 +1760,14 @@ async function checkChips(label, profile) {
   await sleep(1300);
 
   const per = [];
-  for (const name of [/^Classic/, /^Original/, /^Special/, /^All/]) {
+  // The shelves the live catalogue has today (the Special shelf can be absent).
+  const hasSpecial = all.chips.some((c) => /^Special/.test(c));
+  for (const name of [
+    /^Classic/,
+    /^Original/,
+    ...(hasSpecial ? [/^Special/] : []),
+    /^All/,
+  ]) {
     await chip(page, name).click();
     await sleep(1300);
     const s = await rowState(page);
@@ -1775,13 +1783,14 @@ async function checkChips(label, profile) {
       await filterShot(page, lookShot('chosen', label));
     }
   }
-  const sp = per[2];
+  const sp = hasSpecial ? per[2] : null;
   const special =
-    sp.ids.length === 1 &&
-    sp.at === 0 &&
-    sp.counter === '1/1' &&
-    sp.prevDisabled &&
-    sp.nextDisabled;
+    !sp ||
+    (sp.ids.length === 1 &&
+      sp.at === 0 &&
+      sp.counter === '1/1' &&
+      sp.prevDisabled &&
+      sp.nextDisabled);
   const counters = per.every(
     (p) =>
       p.closed &&
@@ -1792,8 +1801,8 @@ async function checkChips(label, profile) {
   const labels =
     per[0].trigger === 'Pack type: Classic · Graded' &&
     per[1].trigger === 'Pack type: Original · Raw Cards' &&
-    per[2].trigger === 'Pack type: Special · Graded' &&
-    per[3].trigger === 'Pack type: All packs';
+    (!hasSpecial || per[2].trigger === 'Pack type: Special · Graded') &&
+    per[per.length - 1].trigger === 'Pack type: All packs';
   pass(
     `chips-counter-arrows-${label}`,
     counters && special && labels,
@@ -1805,25 +1814,34 @@ async function checkChips(label, profile) {
       .join(' | '),
   );
   // The one-pack row: a swipe either way leaves it centred.
-  await chip(page, /^Special/).click();
-  await sleep(1300);
-  await swipe(page, profile, -0.8);
-  await sleep(900);
-  await swipe(page, profile, 0.8);
-  await sleep(900);
-  const after = await rowState(page);
-  const track = (await stageInfo(page))?.state.track;
-  const fitSp = await openFit(page);
-  pass(
-    `one-pack-row-${label}`,
-    after.ids.length === 1 && Math.abs(track) < 0.01 && after.counter === '1/1',
-    `after two swipes: track ${track?.toFixed(3)}, counter ${after.counter}; Open ${fitSp.openTop}-${fitSp.openBottom} (tab bar ${fitSp.barTop})`,
-  );
-  await page.mouse.move(2, 2);
-  await waitRest(page).catch(() => {});
-  await filterShot(page, lookShot('special', label));
-  await chip(page, /^All/).click();
-  await sleep(1300);
+  if (!hasSpecial) {
+    skip(
+      `one-pack-row-${label}`,
+      `no Special shelf in today's catalogue (chips ${JSON.stringify(all.chips)})`,
+    );
+  } else {
+    await chip(page, /^Special/).click();
+    await sleep(1300);
+    await swipe(page, profile, -0.8);
+    await sleep(900);
+    await swipe(page, profile, 0.8);
+    await sleep(900);
+    const after = await rowState(page);
+    const track = (await stageInfo(page))?.state.track;
+    const fitSp = await openFit(page);
+    pass(
+      `one-pack-row-${label}`,
+      after.ids.length === 1 &&
+        Math.abs(track) < 0.01 &&
+        after.counter === '1/1',
+      `after two swipes: track ${track?.toFixed(3)}, counter ${after.counter}; Open ${fitSp.openTop}-${fitSp.openBottom} (tab bar ${fitSp.barTop})`,
+    );
+    await page.mouse.move(2, 2);
+    await waitRest(page).catch(() => {});
+    await filterShot(page, lookShot('special', label));
+    await chip(page, /^All/).click();
+    await sleep(1300);
+  }
   await page.getByRole('button', { name: /^Poly$/ }).click();
   await sleep(1300);
   const poly = await rowState(page);
@@ -1889,10 +1907,10 @@ async function checkPanelChunk(label, profile) {
       `panel-chunk-fails-${label}`,
       aborted > 0 &&
         s.expanded === 'false' &&
-        s.tiles === 11 &&
+        s.tiles > 0 &&
         s.heading &&
         pageErrors.length === 0 &&
-        after.counter === '4/11',
+        after.counter === `4/${s.tiles}`,
       `panel chunk aborted ${aborted}x: page still the stage (${s.tiles} tiles, heading ${s.heading}), tab tap leaves it closed (aria-expanded ${s.expanded}), carousel still works (${after.counter}); uncaught page errors ${pageErrors.length}${pageErrors.length ? `: ${pageErrors[0]}` : ''}`,
     );
     await ctx.close();
@@ -2203,7 +2221,16 @@ async function checkChipMemory(label, profile) {
       await sleep(60);
     }
   };
-  const order = [/^Classic/, /^All/, /^Original/, /^All/, /^Special/, /^All/];
+  // The shelves the live catalogue has today (the Special shelf can be absent).
+  const special = startRow.chips.some((c) => /^Special/.test(c));
+  const order = [
+    /^Classic/,
+    /^All/,
+    /^Original/,
+    /^All/,
+    special ? /^Special/ : /^Classic/,
+    /^All/,
+  ];
   for (let k = 0; k < 20; k++) {
     if (k === 9) {
       // A double tap: the second supersedes the first mid-sink.
@@ -2582,7 +2609,9 @@ async function recordFilter(label, profile, { jp = false } = {}) {
     await swipe(page, profile, -0.75);
     await sleep(1200);
     await tap(chip(page, /^Original/));
-    await tap(chip(page, /^Special/));
+    // the Special shelf can be absent from the live catalogue
+    if ((await rowState(page)).chips.some((c) => /^Special/.test(c)))
+      await tap(chip(page, /^Special/));
     await tap(chip(page, /^All/));
     await swipe(page, profile, 0.75);
     await sleep(1200);
@@ -2632,6 +2661,698 @@ async function recordFilter(label, profile, { jp = false } = {}) {
 }
 
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// The scroll spin (step 2: Ciao's packshot row, paged; shots-spin/)
+
+const SPIN_SHOTS =
+  process.env.SPIN_SHOTS_DIR ??
+  join(ROOT, 'docs/research/home-3d/pack-stage/shots-spin');
+/** Ciao's paging move (motion sheet 9.2/9.3): 1.5 s ease-out cubic. */
+const PAGED_MS = 1500;
+const easeOutCubic = (t) => 1 - (1 - Math.min(1, Math.max(0, t))) ** 3;
+/** Step 1's document heights (baseline build, reduced motion must equal them). */
+const STEP1_DOC_H = { phone: 4052, desktop: 3074 };
+const spinMemory = {};
+
+const spinInfo = (page) =>
+  page.evaluate(() => {
+    const s = window.__packStage;
+    const sp = s?.spin?.();
+    return {
+      kit: !!sp?.kit,
+      range: sp?.range ?? null,
+      frame: sp?.frame ?? null,
+      flags: sp?.flags ?? null,
+      y: window.scrollY,
+      spin: s?.state.spin ?? null,
+      exit: s?.state.exit ?? null,
+      stats: s?.stats() ?? null,
+      rt: (() => {
+        const r = s?.runtime?.();
+        return r
+          ? {
+              copies: r.copies,
+              spinBand: r.spinBand,
+              bandH: r.bandH,
+              textureBytes: r.textureBytes,
+              uploaded: r.slots.filter((x) => x.half === 'uploaded').length,
+              full: r.slots.filter((x) => x.full === 'uploaded').length,
+            }
+          : null;
+      })(),
+    };
+  });
+
+async function waitSpinReady(page) {
+  await page.waitForFunction(
+    () => {
+      const sp = window.__packStage?.spin?.();
+      return !!sp?.kit && !!sp.range;
+    },
+    null,
+    { timeout: 20000, polling: 100 },
+  );
+}
+
+/** Per-frame sampler: [ms since start, scrollY, spin, exit]. */
+async function startSampler(page) {
+  await page.evaluate(() => {
+    const out = [];
+    window.__spinSamples = out;
+    const t0 = performance.now();
+    const f = () => {
+      const s = window.__packStage?.state;
+      out.push([
+        performance.now() - t0,
+        window.scrollY,
+        s?.spin ?? 0,
+        s?.exit ?? 0,
+      ]);
+      if (out.length < 600) requestAnimationFrame(f);
+    };
+    requestAnimationFrame(f);
+  });
+}
+const samples = (page) => page.evaluate(() => window.__spinSamples ?? []);
+
+/** One trusted gesture down (or up): a wheel notch on desktop, a swipe on a phone (CDP touch). */
+async function spinGesture(page, profile, dir = 1, px = 120, holdMs = 0) {
+  const vw = profile.context.viewport;
+  const x = vw.width / 2;
+  const y = vw.height * 0.55;
+  if (profile.kind === 'phone' && !WEBKIT) {
+    const cdp = await page.context().newCDPSession(page);
+    const steps = 8;
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [{ x, y }],
+    });
+    let heldY = null;
+    for (let i = 1; i <= steps; i++) {
+      await cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchMove',
+        touchPoints: [{ x, y: y - (dir * px * i) / steps }],
+      });
+      await sleep(16);
+    }
+    if (holdMs) {
+      await sleep(holdMs);
+      heldY = await page.evaluate(() => window.scrollY);
+    }
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchEnd',
+      touchPoints: [],
+    });
+    await cdp.detach().catch(() => {});
+    return { heldY };
+  }
+  await page.mouse.move(x, y);
+  await page.mouse.wheel(0, dir * 100);
+  return { heldY: null };
+}
+
+/** The paged move's scroll curve against Ciao's (normalised displacement vs easeOutCubic). */
+function curveFit(rows, from, to, startKnown = false) {
+  const span = to - from;
+  const moving = rows.filter((r) => Math.abs(r[1] - from) > 0.5);
+  if (!moving.length || !span) return null;
+  const i0 = rows.indexOf(moving[0]);
+  // a known start (the driver's trace, timed from the gesture) is row 0's time
+  const lo = startKnown
+    ? rows[0][0]
+    : i0 > 0
+      ? rows[i0 - 1][0]
+      : moving[0][0] - 50;
+  const hi = startKnown ? rows[0][0] : moving[0][0];
+  const score = (t0) => {
+    let se = 0;
+    let n = 0;
+    let maxErr = 0;
+    for (const r of rows.slice(i0)) {
+      const t = r[0] - t0;
+      if (t > PAGED_MS + 200) break;
+      const e = Math.abs((r[1] - from) / span - easeOutCubic(t / PAGED_MS));
+      se += e * e;
+      n++;
+      maxErr = Math.max(maxErr, e);
+    }
+    return { rms: Math.sqrt(se / Math.max(1, n)), maxErr, n };
+  };
+  // the move starts (the gesture lands) somewhere between the last still
+  // frame and the first moved one: take the start that fits best
+  let best = { t0: hi, ...score(hi) };
+  for (let t0 = lo; t0 <= hi; t0 += 1) {
+    const sc = score(t0);
+    if (sc.rms < best.rms) best = { t0, ...sc };
+  }
+  const t0 = best.t0;
+  const at = (frac) => {
+    const r = rows.slice(i0).find((x) => (x[1] - from) / span >= frac);
+    return r ? Math.round(r[0] - t0) : null;
+  };
+  const done = rows.slice(i0).find((x) => Math.abs(x[1] - to) < 1);
+  return {
+    rms: best.rms,
+    maxErr: best.maxErr,
+    doneAt: done ? Math.round(done[0] - t0) : null,
+    t50: at(0.5),
+    t90: at(0.9),
+    t98: at(0.98),
+    frames: best.n,
+  };
+}
+
+async function spinPage(profile, more = {}, b = browser, extra = {}) {
+  const { ctx, page } = await newPage(profile, extra, b);
+  await page.goto(stageUrl(forced({ loader: 'never', ...more })), {
+    waitUntil: 'load',
+  });
+  await dismissChrome(page);
+  return { ctx, page };
+}
+
+async function spinShot(page, name) {
+  if (!WANT_SHOTS) return;
+  mkdirSync(SPIN_SHOTS, { recursive: true });
+  await page.screenshot({
+    path: join(SPIN_SHOTS, `${name.replace('-headed', '')}.png`),
+  });
+}
+
+/** The paged move, the lock, one stop per gesture, the formed row, repeats, exit, memory. */
+async function checkSpin(label, profile) {
+  const { ctx, page } = await spinPage(profile);
+  await waitLive(page, profile.kind === 'desktop' ? 3 : 2);
+  await waitSpinReady(page);
+  await page.mouse.move(2, 2);
+  await waitRest(page).catch(() => {});
+  const cap = CAPS[profile.kind];
+  const rest = await spinInfo(page);
+  const r = rest.range;
+  const mem = { rest: rest.stats?.gpuBytesEstimate ?? null };
+
+  // 1. one gesture plays one move: Ciao's curve, input locked meanwhile
+  await startSampler(page);
+  const g = await spinGesture(
+    page,
+    profile,
+    1,
+    120,
+    profile.kind === 'phone' ? 400 : 0,
+  );
+  if (profile.kind === 'phone' && !WEBKIT)
+    pass(
+      `spin-held-finger-${label}`,
+      g.heldY === r.start,
+      `a 120 px swipe held 400 ms before release: scrollY while held ${g.heldY} (pin start ${r.start}); the page never follows the finger`,
+    );
+  // mid-move: extra input is swallowed (wheel again; on a phone a reverse wheel)
+  await sleep(300);
+  await page.mouse.move(
+    profile.context.viewport.width / 2,
+    profile.context.viewport.height / 2,
+  );
+  await page.mouse.wheel(0, profile.kind === 'phone' ? -100 : 100);
+  await sleep(PAGED_MS + 600);
+  const rows = await samples(page);
+  const end = r.start + r.length;
+  // The driver's own trace (scrollY read back right after each write, on the
+  // frame's clock, from the gesture that started the move): exact even when
+  // software frames are slow. The page sampler is the fallback.
+  const tr = await page.evaluate(() => window.__packStage?.spinTrace?.());
+  let fit = null;
+  if (tr?.trace?.length) {
+    const firstMoved = tr.trace.find((x) => x[1] > r.start + 0.5);
+    const g0 = firstMoved
+      ? Math.max(...tr.gestures.filter((t) => t <= firstMoved[0]))
+      : null;
+    if (firstMoved && Number.isFinite(g0)) {
+      const rel = tr.trace
+        .filter((x) => x[0] >= g0)
+        .map((x) => [x[0] - g0, x[1], x[2], 0]);
+      fit = curveFit([[0, r.start, 0, 0], ...rel], r.start, end, true);
+    }
+  }
+  fit ??= curveFit(rows, r.start, end);
+  const after = await spinInfo(page);
+  pass(
+    `spin-paged-curve-${label}`,
+    !!fit &&
+      fit.rms <= 0.03 &&
+      fit.doneAt !== null &&
+      fit.doneAt <= PAGED_MS + 120,
+    fit
+      ? `scroll ${r.start} -> ${end} px: RMS ${(fit.rms * 100).toFixed(2)}% (max ${(fit.maxErr * 100).toFixed(1)}%) against 1.5 s ease-out cubic over ${fit.frames} frames; 50% at ${fit.t50} ms (sheet 0.35 s), 90% at ${fit.t90} ms (0.87 s), 98% at ${fit.t98} ms (1.13 s), landed at ${fit.doneAt} ms (1.43-1.5 s)`
+      : `no move recorded (${rows.length} samples)`,
+  );
+  // spin == scroll progress through the pin at every frame of the move
+  const lagFrames = rows.filter((x) => x[1] > r.start && x[1] < end);
+  const worst = lagFrames.reduce(
+    (m, x) => Math.max(m, Math.abs(x[2] - (x[1] - r.start) / r.length)),
+    0,
+  );
+  pass(
+    `spin-is-scroll-${label}`,
+    lagFrames.length > 3 && worst <= 0.02,
+    `${lagFrames.length} frames inside the pin: worst |spin - scroll progress| ${worst.toFixed(4)} (Ciao's row: the spin is the eased scroll itself)`,
+  );
+  pass(
+    `spin-input-locked-${label}`,
+    after.y === end && after.spin === 1 && after.exit === 0,
+    `a second ${profile.kind === 'phone' ? 'reverse ' : ''}wheel 300 ms into the move was swallowed: landed on the pin end exactly (scrollY ${after.y}, end ${end}), spin ${after.spin}, exit ${after.exit}`,
+  );
+  mem.formed = after.stats?.gpuBytesEstimate ?? null;
+
+  // 2. the formed row: canvas and CSS tiles in one place; repeats share textures
+  await waitRest(page).catch(() => {});
+  await sleep(600);
+  const formed = await spinInfo(page);
+  await spinShot(page, `formed-${label}`);
+  const fAlign = await align(page, profile).catch(() => null);
+  const restTex =
+    rest.stats && rest.rt
+      ? rest.stats.textures - rest.rt.uploaded - rest.rt.full
+      : null;
+  const formedTex =
+    formed.stats && formed.rt
+      ? formed.stats.textures - formed.rt.uploaded - formed.rt.full
+      : null;
+  pass(
+    `spin-formed-row-${label}`,
+    !!fAlign && fAlign.iou >= 0.9 && formed.flags?.text === true,
+    `spin ${formed.spin}: canvas vs tiles IoU ${fAlign?.iou ?? 'n/a'} (${fAlign?.detail ?? ''}); text faded (data-spin-text ${formed.flags?.text}); band ${formed.rt?.bandH} px (whole panel ${formed.rt?.spinBand})`,
+  );
+  pass(
+    `spin-repeats-share-textures-${label}`,
+    formed.rt !== null &&
+      restTex !== null &&
+      restTex === formedTex &&
+      (profile.kind === 'phone' || formed.rt.copies > 0),
+    `repeats drawn ${formed.rt?.copies}; textures ${formed.stats?.textures} = ${formed.rt?.uploaded} pack fronts + ${formedTex} shared (at rest ${rest.stats?.textures} = ${rest.rt?.uploaded} + ${rest.rt?.full} full + ${restTex}); texture bytes ${((formed.rt?.textureBytes ?? 0) / 1e6).toFixed(2)} MB = the fronts alone (clones add none)`,
+  );
+  pass(
+    `spin-memory-formed-${label}`,
+    (formed.stats?.gpuBytesEstimate ?? Infinity) <= cap,
+    `formed row ${((formed.stats?.gpuBytesEstimate ?? 0) / 1e6).toFixed(1)} MB (cap ${cap / 1e6}); at rest ${((mem.rest ?? 0) / 1e6).toFixed(1)} MB`,
+  );
+
+  // 3. a category change and a sort change mid-spin: the usual sink and rise
+  const y0 = (await spinInfo(page)).y;
+  await page.getByRole('button', { name: /^Poly$/ }).click();
+  await sleep(1200);
+  const poly = await spinInfo(page);
+  const polyTiles = await page
+    .locator('[data-stage-panel]:not([hidden]) [data-stage-tile]')
+    .count();
+  await spinShot(page, `midspin-poly-${label}`);
+  await page.getByRole('button', { name: /^Pok/ }).click();
+  await sleep(1200);
+  let sortOk = null;
+  try {
+    await openPanel(page);
+    const opt = page
+      .locator(
+        '[data-stage-chips] [role="radio"], [data-stage-chips] [role="option"], [data-stage-chips] button',
+      )
+      .filter({ hasText: /Classic|Original|Special/ })
+      .first();
+    await opt.click({ timeout: 3000 });
+    await sleep(1200);
+    sortOk = await page
+      .locator('[data-stage-panel]:not([hidden]) [data-stage-tile]')
+      .count();
+  } catch (e) {
+    sortOk = `failed: ${String(e?.message ?? e).split('\n')[0]}`;
+  }
+  const sorted = await spinInfo(page);
+  await spinShot(page, `midspin-sort-${label}`);
+  pass(
+    `spin-midspin-changes-${label}`,
+    poly.y === y0 &&
+      sorted.y === y0 &&
+      poly.spin === 1 &&
+      sorted.spin === 1 &&
+      polyTiles === 5 &&
+      typeof sortOk === 'number',
+    `at the formed row: Poly tab -> ${polyTiles} capsules (spin ${poly.spin}, scrollY ${poly.y}), back to Pokemon, then a sort pick -> ${sortOk} packs (spin ${sorted.spin}, scrollY ${sorted.y}); the page never moved (${y0})`,
+  );
+
+  // 4. 20 changes mid-spin: memory peak
+  let peak = 0;
+  const tabs = [/^Poly$/, /^Pok/];
+  for (let k = 0; k < 20; k++) {
+    await page.getByRole('button', { name: tabs[k % 2] }).click();
+    for (let t = 0; t < 4; t++) {
+      await sleep(200);
+      const s = await page.evaluate(
+        () => window.__packStage?.stats()?.gpuBytesEstimate ?? 0,
+      );
+      peak = Math.max(peak, s);
+    }
+  }
+  await sleep(800);
+  mem.changes20Peak = peak;
+  pass(
+    `spin-memory-20-changes-${label}`,
+    peak <= cap,
+    `20 category changes at the formed row: peak ${(peak / 1e6).toFixed(1)} MB (cap ${cap / 1e6})`,
+  );
+
+  // 5. the exit: Ciao's camera move as the page below rises over the stuck panel
+  const exitEnd = r.start + r.length + r.exit;
+  if (profile.kind === 'phone' && !WEBKIT) {
+    await spinGesture(page, profile, 1);
+    await sleep(PAGED_MS + 400);
+  } else {
+    for (
+      let k = 0;
+      k < 30 && (await page.evaluate(() => window.scrollY)) < exitEnd;
+      k++
+    ) {
+      await page.mouse.wheel(0, 100);
+      await sleep(60);
+    }
+    await sleep(900);
+  }
+  const ex = await spinInfo(page);
+  const below = await page.evaluate(() => {
+    const a = document.querySelector('[data-spin-after]');
+    const p = document.querySelector('[data-stage-root]');
+    return {
+      afterTop: Math.round(a.getBoundingClientRect().top),
+      panelTop: Math.round(p.getBoundingClientRect().top),
+      head: p.hasAttribute('data-spin-head'),
+    };
+  });
+  await spinShot(page, `exit-${label}`);
+  pass(
+    `spin-exit-${label}`,
+    ex.exit >= 0.999 && below.head && below.afterTop <= below.panelTop + 2,
+    `${profile.kind === 'phone' ? 'one swipe paged' : 'free wheel scrubbed'} through the exit: exit ${ex.exit.toFixed(4)}, scrollY ${ex.y} (exit end ${exitEnd}); header faded ${below.head}; the page below tops the panel (${below.afterTop} vs panel ${below.panelTop})`,
+  );
+  // back up: paging again once the start is nearer
+  await page.evaluate((y) => window.scrollTo(0, y), r.start + r.length);
+  await sleep(500);
+  mem.exit = ex.stats?.gpuBytesEstimate ?? null;
+  spinMemory[`${label}-dpr${profile.context.deviceScaleFactor ?? 1}`] = {
+    restMB: mem.rest / 1e6,
+    formedMB: mem.formed / 1e6,
+    changes20PeakMB: peak / 1e6,
+    exitMB: (mem.exit ?? 0) / 1e6,
+    capMB: cap / 1e6,
+    dpr: profile.context.deviceScaleFactor ?? 1,
+    mode: (await stageInfo(page))?.mode,
+    renderer: await renderer(page),
+  };
+  await ctx.close();
+}
+
+/** A long fast swipe or a burst of notches still plays one stop only. */
+async function checkSpinOneStop(label, profile) {
+  const { ctx, page } = await spinPage(profile);
+  await waitLive(page, 1).catch(() => {});
+  await waitSpinReady(page);
+  const r = (await spinInfo(page)).range;
+  const end = r.start + r.length;
+  await startSampler(page);
+  const t0 = Date.now();
+  let notches = 0;
+  if (profile.kind === 'phone' && !WEBKIT)
+    await spinGesture(page, profile, 1, 420);
+  else {
+    await page.mouse.move(profile.context.viewport.width / 2, 400);
+    for (let k = 0; k < 10; k++) {
+      await page.mouse.wheel(0, 100);
+      notches++;
+      if (Date.now() - t0 > 1200) break; // stay inside the lock window
+    }
+  }
+  const burstMs = Date.now() - t0;
+  await sleep(PAGED_MS + 500);
+  const rows = await samples(page);
+  const s = await spinInfo(page);
+  const first = rows.find((x) => x[1] > r.start + 0.5);
+  const inLock = first
+    ? rows.filter((x) => x[0] - first[0] < PAGED_MS - 50)
+    : [];
+  const maxInLock = inLock.reduce((m, x) => Math.max(m, x[1]), 0);
+  pass(
+    `spin-one-stop-${label}`,
+    s.y === end && maxInLock <= end + 1,
+    `${profile.kind === 'phone' ? 'a 420 px swipe' : `${notches} wheel notches in ${burstMs} ms`}: never past the pin end during the move (max ${Math.round(maxInLock)}), landed at ${s.y} (pin end ${end}, exit end ${end + r.exit})`,
+  );
+  await ctx.close();
+}
+
+/** Reduced motion: no pin, no scrub, no spin chunk; the page reads as step 1. */
+async function checkSpinReduced(label, profile) {
+  const { ctx, page } = await spinPage(profile, {}, browser, {
+    reducedMotion: 'reduce',
+  });
+  await sleep(2500);
+  const info = await page.evaluate(() => {
+    const w = document.querySelector('[data-spin-wrap]');
+    const p = document.querySelector('[data-stage-root]');
+    return {
+      wrapH: Math.round(w.getBoundingClientRect().height),
+      panelH: Math.round(p.getBoundingClientRect().height),
+      pos: getComputedStyle(p).position,
+      docH: document.documentElement.scrollHeight,
+      gap: Math.round(
+        document.querySelector('[data-spin-after]').getBoundingClientRect()
+          .top - w.getBoundingClientRect().bottom,
+      ),
+      kit: !!window.__packStage?.spin,
+      chunk: performance
+        .getEntriesByType('resource')
+        .some((e) => /pack-stage-spin/.test(e.name)),
+    };
+  });
+  await page.mouse.move(200, 400);
+  await page.mouse.wheel(0, 300);
+  await sleep(700);
+  const y = await page.evaluate(() => window.scrollY);
+  const base = STEP1_DOC_H[profile.kind];
+  pass(
+    `spin-reduced-motion-${label}`,
+    info.wrapH === info.panelH &&
+      info.pos !== 'sticky' &&
+      !info.kit &&
+      !info.chunk &&
+      y > 0 &&
+      info.gap === 0,
+    `wrapper ${info.wrapH} px = panel ${info.panelH} px (position ${info.pos}); spin chunk requested ${info.chunk}; a wheel scrolled natively to ${y}; the page below follows the panel (gap ${info.gap} px); document ${info.docH} px (step 1 measured ${base} with that day's feed)`,
+  );
+  await ctx.close();
+}
+
+/** The flat tier (no WebGL): the CSS tiles page into the same row. */
+async function checkSpinFlat(label, profile) {
+  const { ctx, page } = await newPage(profile);
+  await page.goto(stageUrl({ stage: 'flat', debug: '1', loader: 'never' }), {
+    waitUntil: 'load',
+  });
+  await dismissChrome(page);
+  await waitSpinReady(page);
+  const r = (await spinInfo(page)).range;
+  await spinGesture(page, profile, 1);
+  await sleep(PAGED_MS + 600);
+  const s = await spinInfo(page);
+  const tiles = await page.evaluate(() => {
+    const prefix = window.matchMedia('(min-width: 1024px)').matches ? 'd' : 'm';
+    return [
+      ...document.querySelectorAll(
+        '[data-stage-panel]:not([hidden]) [data-stage-tile]',
+      ),
+    ].map((li) => ({
+      rz: Number(li.style.getPropertyValue(`--${prefix}-rz`)),
+      op: Number(li.style.getPropertyValue(`--${prefix}-op`)),
+    }));
+  });
+  await spinShot(page, `flat-formed-${label}`);
+  const shown = tiles.filter((t) => t.op > 0.05);
+  pass(
+    `spin-flat-${label}`,
+    s.y === r.start + r.length &&
+      s.spin === 1 &&
+      shown.length >= (profile.kind === 'phone' ? 3 : 7) &&
+      shown.every((t) => t.rz !== 0),
+    `no canvas (mode ${(await stageInfo(page))?.mode}): one gesture paged to ${s.y} (end ${r.start + r.length}), spin ${s.spin}; ${shown.length} CSS tiles shown in the row, all rolled (rz ${shown.map((t) => t.rz.toFixed(2)).join(', ')})`,
+  );
+  await ctx.close();
+}
+
+/** WebKit: the row at both sizes, paged by the wheel (no CDP touch there). */
+async function checkSpinWebkit(label, profile) {
+  const { ctx, page } = await spinPage(profile);
+  await waitLive(page, 1).catch(() => {});
+  await waitSpinReady(page);
+  const r = (await spinInfo(page)).range;
+  await page.mouse.move(profile.context.viewport.width / 2, 400);
+  await page.mouse.wheel(0, 100);
+  await sleep(PAGED_MS + 800);
+  const s = await spinInfo(page);
+  if (profile.kind === 'phone' && WANT_SHOTS) {
+    mkdirSync(SPIN_SHOTS, { recursive: true });
+    await page.screenshot({ path: join(SPIN_SHOTS, 'webkit-spin-phone.png') });
+  } else await spinShot(page, `webkit-spin-${profile.kind}`);
+  pass(
+    `spin-webkit-${label}`,
+    s.y === r.start + r.length &&
+      s.spin === 1 &&
+      (s.stats?.gpuBytesEstimate ?? 0) <= CAPS[profile.kind],
+    `WebKit: a wheel notch paged to ${s.y} (end ${r.start + r.length}), spin ${s.spin}; mode ${(await stageInfo(page))?.mode}; ${((s.stats?.gpuBytesEstimate ?? 0) / 1e6).toFixed(1)} MB; touch paging not run (WebKit has no CDP touch)`,
+  );
+  await ctx.close();
+}
+
+/** The panel is one screen at every width: heading, tabs, row and Open fit above the tab bar. */
+async function checkSpinFit() {
+  const sizes = [
+    {
+      name: '375x667',
+      viewport: { width: 375, height: 667 },
+      isMobile: true,
+      hasTouch: true,
+      deviceScaleFactor: 2,
+    },
+    {
+      name: '390x844',
+      viewport: { width: 390, height: 844 },
+      isMobile: true,
+      hasTouch: true,
+      deviceScaleFactor: 2,
+    },
+    {
+      name: '430x932',
+      viewport: { width: 430, height: 932 },
+      isMobile: true,
+      hasTouch: true,
+      deviceScaleFactor: 2,
+    },
+    {
+      name: '1280x720',
+      viewport: { width: 1280, height: 720 },
+      deviceScaleFactor: 1,
+    },
+    {
+      name: '1440x900',
+      viewport: { width: 1440, height: 900 },
+      deviceScaleFactor: 1,
+    },
+    {
+      name: '1920x1080',
+      viewport: { width: 1920, height: 1080 },
+      deviceScaleFactor: 1,
+    },
+  ];
+  const rows = [];
+  for (const s of sizes) {
+    const { ctx, page } = await newPage({ kind: 'fit', context: s });
+    await page.goto(stageUrl({ stage: 'flat', loader: 'never' }), {
+      waitUntil: 'load',
+    });
+    await dismissChrome(page);
+    await sleep(1200);
+    const m = await page.evaluate(() => {
+      const panel = document
+        .querySelector('[data-stage-root]')
+        .getBoundingClientRect();
+      const open = [
+        ...document.querySelectorAll(
+          '[data-stage-info] a, [data-stage-info] span',
+        ),
+      ].find((e) => /^(Open|Sold out)/.test(e.textContent ?? ''));
+      const o = open?.getBoundingClientRect();
+      const bar = document.querySelector('nav.fixed.bottom-0');
+      const barTop =
+        bar && bar.offsetHeight > 0
+          ? bar.getBoundingClientRect().top
+          : innerHeight;
+      return {
+        panelTop: Math.round(panel.top),
+        panelBottom: Math.round(panel.bottom),
+        openBottom: o ? Math.round(o.bottom) : null,
+        barTop: Math.round(barTop),
+        art: Math.round(
+          document
+            .querySelector('[data-stage-panel]:not([hidden]) [data-stage-art]')
+            .getBoundingClientRect().height,
+        ),
+      };
+    });
+    rows.push({
+      name: s.name,
+      ...m,
+      ok:
+        m.openBottom !== null &&
+        m.openBottom <= Math.min(m.panelBottom, m.barTop) &&
+        m.panelBottom <= m.barTop + 1,
+    });
+    await ctx.close();
+  }
+  pass(
+    'spin-panel-fits',
+    rows.every((r) => r.ok),
+    rows
+      .map(
+        (r) =>
+          `${r.name}: panel ${r.panelTop}-${r.panelBottom}, Open ends ${r.openBottom} (tab bar ${r.barTop}), art ${r.art} px${r.ok ? '' : ' OVERFLOW'}`,
+      )
+      .join('; '),
+  );
+}
+
+/** Sold-out packs and the one-pack Special row in the formed row (shots for the owner). */
+async function checkSpinRows(label, profile) {
+  const { ctx, page } = await spinPage(profile, { soldout: '151,ah' });
+  await waitLive(page, 1).catch(() => {});
+  await waitSpinReady(page);
+  const r = (await spinInfo(page)).range;
+  await spinGesture(page, profile, 1);
+  await sleep(PAGED_MS + 900);
+  await spinShot(page, `formed-soldout-${label}`);
+  let special = "no Special shelf in today's catalogue";
+  try {
+    await openPanel(page);
+    const sp = page
+      .locator('[data-stage-chips] [aria-pressed]')
+      .filter({ hasText: /^Special/ });
+    if ((await sp.count()) > 0) {
+      await sp.first().click({ timeout: 3000 });
+      await sleep(1600);
+      special = await page
+        .locator('[data-stage-panel]:not([hidden]) [data-stage-tile]')
+        .count();
+    } else await page.keyboard.press('Escape');
+  } catch (e) {
+    special = `failed: ${String(e?.message ?? e).split('\n')[0]}`;
+  }
+  const s = await spinInfo(page);
+  await spinShot(page, `formed-special-${label}`);
+  pass(
+    `spin-rows-${label}`,
+    s.y === r.start + r.length &&
+      (special === 1 || /^no Special/.test(String(special))) &&
+      (profile.kind === 'phone' || (s.rt?.copies ?? 1) > 0 || s.rt === null),
+    `formed row with 151 and AH sold out (shot formed-soldout-${label}); the Special row: ${special} pack, ${s.rt?.copies ?? 'n/a'} repeats fill the row (shot formed-special-${label}); scrollY ${s.y}`,
+  );
+  await ctx.close();
+}
+
+function writeSpinMemory() {
+  if (Object.keys(spinMemory).length === 0) return;
+  mkdirSync(SPIN_SHOTS, { recursive: true });
+  const file = join(SPIN_SHOTS, 'memory.json');
+  let prev = {};
+  try {
+    prev = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    prev = {};
+  }
+  writeFileSync(file, JSON.stringify({ ...prev, ...spinMemory }, null, 2));
+}
 
 async function main() {
   if (SELF_TEST) {
@@ -2705,6 +3426,24 @@ async function main() {
         checkAllPacks(l, profile),
       );
       await run('soldout', `soldout-${l}`, () => checkSoldOut(l, profile));
+      // The scroll spin (step 2): Ciao's paged packshot row.
+      if (WEBKIT) {
+        await run('spin', `spin-webkit-${l}`, () =>
+          checkSpinWebkit(l, profile),
+        );
+      } else {
+        await run('spin', `spin-${l}`, () => checkSpin(l, profile));
+        await run('spin', `spin-rows-${l}`, () => checkSpinRows(l, profile));
+        await run('spin', `spin-one-stop-${l}`, () =>
+          checkSpinOneStop(l, profile),
+        );
+        if (!HEADED) {
+          await run('spin', `spin-reduced-motion-${l}`, () =>
+            checkSpinReduced(l, profile),
+          );
+          await run('spin', `spin-flat-${l}`, () => checkSpinFlat(l, profile));
+        }
+      }
       if (!HEADED) {
         await run('chips', `chips-${l}`, () => checkChips(l, profile));
         await run('feed', `feed-${l}`, () => checkFeedFollows(l, profile));
@@ -2770,9 +3509,11 @@ async function main() {
           await wk.close();
         }
       });
+      await run('spin', 'spin-panel-fits', () => checkSpinFit());
       await run('js', 'js-size', () => jsSizes());
     }
   } finally {
+    writeSpinMemory();
     await browser.close();
   }
 }

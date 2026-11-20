@@ -52,12 +52,13 @@ export function placeModel(
 ): void {
   const k = worldPerPixel(hostH);
   object.position.set(
-    (slotX + pose.dx - hostW / 2) * k,
-    -(layout.cy + pose.dy - hostH / 2) * k,
+    (slotX + pose.dx + pose.fx * hostW - hostW / 2) * k,
+    -(layout.cy + pose.dy + pose.fy * hostH - hostH / 2) * k,
     pose.z * k,
   );
-  // CSS `rotateY() rotateX()` with y flipped: rotation.x = -rotX, order YXZ.
-  object.rotation.set(-pose.rotX, pose.rotY, 0, 'YXZ');
+  // CSS `rotateZ() rotateY() rotateX()` with y flipped: rotation.x = -rotX,
+  // rotation.z = -rotZ, order ZYX (the same as step 1's YXZ while rotZ is 0).
+  object.rotation.set(-pose.rotX, pose.rotY, -pose.rotZ, 'ZYX');
   object.scale.setScalar(layout.artH * k * pose.scale);
 }
 

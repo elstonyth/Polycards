@@ -17,6 +17,7 @@ import TrustBoard from '@/components/home/TrustBoard';
 import FinalCta from '@/components/home/FinalCta';
 import PackStage from '@/components/pack-stage/PackStage';
 import { Stage3dProvider } from '@/components/pack-stage/Stage3dProvider';
+import { StageNoScript } from '@/components/pack-stage/StageNoScript';
 import { toStageCategories } from '@/components/pack-stage/stage-packs';
 import type {
   GateMode,
@@ -103,24 +104,26 @@ export default async function HomePreviewPage({
   // (stage-loader-script.ts, STAGE_LOADER_PATHS); it reads ?loader= itself.
   return (
     <div className="w-full">
+      <StageNoScript />
       <ShelfCategoryProvider categories={packTabs(categories)}>
         <Stage3dProvider override={stage} debug={debug}>
+          {/* The page below the stage rises over its pinned panel during the
+              spin's exit, so PackStage lays it out after the pin. */}
           <PackStage
             categories={toStageCategories(categories, chaseByPack)}
             tabs={packTabs(categories)}
             freePackPromo={freePackPromo}
-            debug={debug}
-          />
+          >
+            <PullsMarquee pulls={feed.pulls} />
+
+            <RecentPullsSection initial={feed} />
+
+            <TheGame topRippers={topRippers} />
+            <TrustBoard />
+            <FinalCta />
+          </PackStage>
         </Stage3dProvider>
-
-        <PullsMarquee pulls={feed.pulls} />
-
-        <RecentPullsSection initial={feed} />
       </ShelfCategoryProvider>
-
-      <TheGame topRippers={topRippers} />
-      <TrustBoard />
-      <FinalCta />
     </div>
   );
 }

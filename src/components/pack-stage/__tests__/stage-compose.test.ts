@@ -1,10 +1,15 @@
 import { describe, expect, it } from 'vitest';
 
 import type { StageLayout, StageState } from '../contract';
-import type { StageStateStep2 } from '../contract-step2';
 import { poseStep2, restBlock, stageOpacityStep2 } from '../stage-compose';
-import { poseAt, restState, stageOpacity } from '../stage-pose';
-import { LEAN, introOpacity } from '../stage-pose-step2';
+import { LEAN, introOpacity } from '../stage-spin-math';
+import {
+  poseAt,
+  poseStep1,
+  restState,
+  slotOpacity,
+  stageSpring,
+} from '../stage-pose';
 import { PITCH_MAX, spinOpacity, spinPose } from '../stage-spin';
 
 const PHONE: StageLayout = {
@@ -40,8 +45,9 @@ describe('poseStep2 with no spin and no focus is step 1 exactly', () => {
       for (const s of STATES)
         for (let i = 0; i < 6; i++)
           for (const soldOut of [false, true]) {
-            const a = poseAt(s, i, l, desktop, soldOut);
+            const a = poseStep1(s, i, l, desktop, soldOut);
             const b = poseStep2({ ...s, spin: 0 }, i, l, desktop, soldOut);
+            expect(poseAt(s, i, l, desktop, soldOut)).toEqual(a);
             for (const k of [
               'dx',
               'dy',
@@ -58,7 +64,9 @@ describe('poseStep2 with no spin and no focus is step 1 exactly', () => {
             expect(
               stageOpacityStep2({ ...s, spin: 0 }, i, desktop, 6),
             ).toBeCloseTo(
-              stageOpacity(s, i, desktop) * introOpacity(s.intro, i - s.track),
+              slotOpacity(i - s.track, desktop) *
+                (1 - stageSpring(Math.min(1, Math.max(0, s.swap)))) *
+                introOpacity(s.intro, i - s.track),
               12,
             );
           }
@@ -82,7 +90,7 @@ describe('the spin composes with the other terms', () => {
   });
 
   it('the float-in composes at any spin (a reload mid-pin)', () => {
-    const s: StageStateStep2 = { ...restState(0), intro: 0, spin: 0.5 };
+    const s: StageState = { ...restState(0), intro: 0, spin: 0.5 };
     const floated = poseStep2(s, 0, PHONE, false, false, { spin });
     const settled = poseStep2({ ...s, intro: 1 }, 0, PHONE, false, false, {
       spin,
@@ -108,7 +116,7 @@ describe('the spin composes with the other terms', () => {
   });
 
   it('the spin term is skipped without spinPose (CSS tiles before the idle import)', () => {
-    const s: StageStateStep2 = { ...restState(0), spin: 0.5 };
+    const s: StageState = { ...restState(0), spin: 0.5 };
     const p = poseStep2(s, 1, PHONE, false, false, {
       spin: { count: 11, turn: 1, lean: LEAN },
     });
@@ -118,7 +126,7 @@ describe('the spin composes with the other terms', () => {
   });
 
   it('the spin is ignored while focused (held at 0)', () => {
-    const s: StageStateStep2 = { ...restState(0), spin: 0.5, focus: 0.5 };
+    const s: StageState = { ...restState(0), spin: 0.5, focus: 0.5 };
     const p = poseStep2(s, 1, PHONE, false, false, {
       spin,
       focus: { index: 0, anchorY: 0.46, stops: null },

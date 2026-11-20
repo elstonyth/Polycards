@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { PackBackDetails } from '../contract-step2';
+import type { PackBackDetails } from '../contract';
 import {
   BACK_REPRINT_DEBOUNCE_MS,
   backPrintKey,

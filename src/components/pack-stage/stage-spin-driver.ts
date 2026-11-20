@@ -39,7 +39,7 @@
  * no packs): spin and exit 0, nothing consumed, no scroll writes: pass
  * `reducedMotion: true` and draw step 1.
  */
-import { clamp01, dampedFollow } from './stage-pose-step2';
+import { clamp01, dampedFollow } from './stage-spin-math';
 
 export type SpinDriverMode = 'paged' | 'free';
 

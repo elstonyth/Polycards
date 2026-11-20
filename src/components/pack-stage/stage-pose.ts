@@ -28,11 +28,21 @@
  * - `idle`: idle clock in seconds (0 = no idle motion). Bob and sway are both
  *   zero at every multiple of `IDLE_REST_PERIOD_S`; the provider eases the
  *   clock to the next one to come to rest.
- * - `focus`, `turn`: step 2. Not read yet.
+ * - `spin`, `exit` (step 2): the scroll spin's progress and its exit; the row
+ *   itself comes from the injected `ctx.spin.spinPose` (lazily loaded).
+ * - `focus`, `turn` (step 2): read only through the injected focus term.
+ *
+ * Composition (plan-step2.md 10.9): the rest-carousel block -> the spin term
+ * (only with `ctx.spin.spinPose`) -> the focus term (only with
+ * `ctx.focusTerm`) -> the float-in, swap, pointer-lean and idle terms added on
+ * top. With no spin, no exit and no focus `poseAt` is step 1's pose exactly.
  */
 import { cubicBezier } from '@/components/loader/loader-timeline';
 
-import type { Pose, StageLayout, StageState } from './contract';
+import type { ComposeCtx, Pose, StageLayout, StageState } from './contract';
+
+/** Below this the spin counts as stopped: controls back, focus allowed (10.3, 10.4). */
+export const SPIN_LOCK = 0.02;
 
 /** soft.tsx SPRING curve. */
 export const STAGE_SPRING_BEZIER = [0.32, 0.72, 0, 1] as const;
@@ -55,7 +65,7 @@ export const IDLE_SWAY_RAD = 2.5 * DEG;
 export const IDLE_PERIOD_S = 6;
 export const IDLE_REST_PERIOD_S = 3;
 /** About 0.015 world units of bob, expressed against the art height. */
-const IDLE_BOB_ART = 0.006;
+export const IDLE_BOB_ART = 0.006;
 
 const FLOAT_TILT_RAD = 0.5;
 const FLOAT_TURN_RAD = 0.6;
@@ -96,19 +106,29 @@ export function slotOpacity(d: number, desktop: boolean): number {
 }
 
 /**
- * A pack's whole opacity: its reach fade times the category switch's fade
- * (sinking packs fade out, rising ones in, on the SPRING curve of `swap`).
- * The canvas draws with this; the CSS tiles (`tileVars`) use the same formula.
+ * A pack's whole opacity: its reach fade (the spin row's, while it runs),
+ * times the category switch's fade (sinking packs fade out, rising ones in, on
+ * the SPRING curve of `swap`). (The arrival's float-in fade, `introOpacity`,
+ * and the focus fade are added by `stage-compose.ts`, wired with focus.) And
+ * the focus neighbour fade. The canvas draws with this; the CSS tiles
+ * (`tileVars`) use the same formula.
  */
 export function stageOpacity(
   s: StageState,
   i: number,
   desktop: boolean,
+  count = 0,
+  ctx: Readonly<ComposeCtx> = {},
 ): number {
-  return slotOpacity(i - s.track, desktop) * (1 - stageSpring(clamp01(s.swap)));
+  const d = i - s.track;
+  const reach =
+    ctx.spinOpacity && (s.spin > 0 || s.exit > 0) && !(s.focus > 0)
+      ? ctx.spinOpacity(s, i, desktop, count)
+      : slotOpacity(d, desktop);
+  return reach * (1 - stageSpring(clamp01(s.swap)));
 }
 
-function clamp01(v: number): number {
+export function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
@@ -153,7 +173,28 @@ export function labelIntro(intro: number, d: number): number {
   return clamp01((t - start) / Math.min(INTRO_SLOT_MS, span));
 }
 
+/**
+ * The whole pose (10.9 composition). Without spin, exit or focus this is step
+ * 1's pose exactly. The composed pose (`stage-pose-compose.ts`) is injected
+ * as `ctx.compose` by the lazily loaded spin chunk and the runtime, so the
+ * first load never carries it; without it the spin term is skipped.
+ */
 export function poseAt(
+  st: StageState,
+  i: number,
+  l: StageLayout,
+  desktop: boolean,
+  soldOut: boolean,
+  ctx: Readonly<ComposeCtx> = {},
+): Pose {
+  // the composed pose only while something composes (it checks the rest)
+  return ctx.compose && (st.spin > 0 || st.exit > 0 || st.focus > 0)
+    ? ctx.compose(st, i, l, desktop, soldOut, ctx)
+    : poseStep1(st, i, l, desktop, soldOut);
+}
+
+/** Step 1's pose: the rest carousel plus float-in, swap, pointer lean and idle. */
+export function poseStep1(
   s: StageState,
   i: number,
   l: StageLayout,
@@ -217,7 +258,7 @@ export function poseAt(
   z += 0;
   rotX += 0;
   rotY += 0;
-  return { dx, dy, z, rotX, rotY, scale, dim };
+  return { dx, dy, z, rotX, rotY, rotZ: 0, scale, dim, fx: 0, fy: 0 };
 }
 
 /** The identity pose (centred pack at rest). */
@@ -227,8 +268,11 @@ export const REST_POSE: Readonly<Pose> = Object.freeze({
   z: 0,
   rotX: 0,
   rotY: 0,
+  rotZ: 0,
   scale: 1,
   dim: 1,
+  fx: 0,
+  fy: 0,
 });
 
 /** A state at rest on the given track position. */
@@ -242,5 +286,7 @@ export function restState(track = 0): StageState {
     idle: 0,
     focus: 0,
     turn: 0,
+    spin: 0,
+    exit: 0,
   };
 }

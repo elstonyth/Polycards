@@ -217,6 +217,8 @@ class StageEngine {
     swap: motionValue(0),
     pointerX: motionValue(0),
     pointerY: motionValue(0),
+    spin: motionValue(0),
+    exit: motionValue(0),
   };
 
   private snap: Snapshot = { mode: 'pending', ready: false };
@@ -296,6 +298,14 @@ class StageEngine {
     });
     this.values.pointerY.on('change', (v) => {
       this.state.pointerY = v;
+      this.poke();
+    });
+    this.values.spin.on('change', (v) => {
+      this.state.spin = v;
+      this.poke();
+    });
+    this.values.exit.on('change', (v) => {
+      this.state.exit = v;
       this.poke();
     });
   }
@@ -707,7 +717,8 @@ class StageEngine {
     // The attached track is the new list's start: carried and prefetched
     // packs are kept by key, and residency centres on the right pack.
     const centre = this.state.track;
-    this.safe(() => rt.setPacks(list.length > 0 ? list : null, centre));
+    const count = src?.packs.length ?? 0;
+    this.safe(() => rt.setPacks(list.length > 0 ? list : null, centre, count));
   }
 
   private dropPrefetch(always = false) {
@@ -761,7 +772,9 @@ class StageEngine {
     if (!host || !rt) return;
     const cap = this.tier === 'lite' ? DPR_CAP_LITE : DPR_CAP_FULL;
     const dpr = Math.min(window.devicePixelRatio || 1, cap);
-    this.safe(() => rt.resize(host.clientWidth, host.clientHeight, dpr));
+    this.safe(() =>
+      rt.resize(host.clientWidth, host.clientHeight, dpr, window.innerHeight),
+    );
     this.watchdog.hold(performance.now());
   }
 
@@ -1083,6 +1096,8 @@ function makeFlatApi(): Stage3dStage {
       swap: motionValue(0),
       pointerX: motionValue(0),
       pointerY: motionValue(0),
+      spin: motionValue(0),
+      exit: motionValue(0),
     },
     attach: () => noop,
     wake: noop,

@@ -5,13 +5,13 @@ import Image from 'next/image';
 import { IntentLink } from '@/components/IntentLink';
 import { cn } from '@/lib/utils';
 import { isOptimizableImage } from '@/lib/optimizable-image';
-import type { StageLayout, StagePack, StageState } from './contract';
+import type { SpinPanel, StageLayout, StagePack, StageState } from './contract';
 import {
   STAGE_REACH,
   labelIntro,
   poseAt,
   restState,
-  slotOpacity,
+  stageOpacity,
   stageSpring,
 } from './stage-pose';
 import styles from './pack-stage.module.css';
@@ -20,16 +20,42 @@ const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const n = (v: number) => String(Math.round(v * 10000) / 10000);
 
 /**
+ * The stage's CSS proportions in art heights (pack-stage.module.css: `--step`
+ * is `--art-h` x 0.511 on phones and x 0.589 on desktop, `--art-w` x 0.54 and
+ * x 0.5357). Kept in step with the stylesheet.
+ */
+export const STAGE_UNITS = {
+  phone: { step: 0.511, artW: 0.54 },
+  desktop: { step: 0.589, artW: 0.5357 },
+} as const;
+
+/**
+ * The measured stage, for the spin row (a projection in host px, which does
+ * not separate into steps and art heights): host CSS px of the breakpoint in
+ * use, the art centre's height in the host, and the panel.
+ */
+export type TileGeom = {
+  desktop: boolean;
+  step: number;
+  artH: number;
+  artW: number;
+  cy: number;
+  panel: SpinPanel;
+};
+
+/**
  * A tile's pose as CSS custom properties, for phones (--m-*) and desktop
  * (--d-*). Written into the server HTML (at rest) and then per frame by
  * StageTrack, from the same `poseAt` and the same state (track, the
- * provider's intro / swap / pointer) the 3D layer draws with.
+ * provider's intro / swap / pointer / spin / exit) the 3D layer draws with.
  *
- * The layout is in UNIT terms: `poseAt` is linear in it (x with `step`, y and z
- * with `artH`), so with step = artH = 1 its numbers are steps and art heights
- * and the CSS multiplies them back by the stage's own --step and --art-h.
- * `cyArt` is the art centre's height in the host, in art heights (it sets how
- * far the float-in drops); 0 at rest is exact.
+ * Every length is in ART HEIGHTS (the CSS multiplies by --art-h): at rest
+ * `poseAt` runs on the stage's unit layout (step and art width in art heights,
+ * `STAGE_UNITS`), which is exact because it is linear in the layout. While the
+ * spin row is formed (`spin` given, with `geom`) the breakpoint in use is
+ * posed in host px from the measured stage and divided back by the art height
+ * (the row's panel offsets folded into dx and dy). `cyArt` is the art centre's
+ * height in the host, in art heights (it sets how far the float-in drops).
  */
 export function tileVars(
   index: number,
@@ -37,7 +63,6 @@ export function tileVars(
   soldOut: boolean,
   cyArt = 0,
 ): Record<string, string> {
-  const layout: StageLayout = { cx: 0, cy: cyArt, step: 1, artH: 1 };
   const d = index - state.track;
   const a = Math.abs(d);
   // The category switch fades the sinking packs out and the rising ones in.
@@ -48,9 +73,17 @@ export function tileVars(
     ['m', false],
     ['d', true],
   ] as const) {
+    const u = desktop ? STAGE_UNITS.desktop : STAGE_UNITS.phone;
+    const layout: StageLayout = {
+      cx: 0,
+      cy: cyArt,
+      step: u.step,
+      artH: 1,
+      artW: u.artW,
+    };
     const pose = poseAt(state, index, layout, desktop, soldOut);
     const reach = desktop ? STAGE_REACH.desktop : STAGE_REACH.phone;
-    const op = slotOpacity(d, desktop) * swapFade;
+    const op = stageOpacity(state, index, desktop);
     // Desktop: every visible neighbour carries its name and price; the centred
     // pack's live in the info block. Phones show the info block only.
     const lo = desktop
@@ -61,6 +94,7 @@ export function tileVars(
     vars[`--${prefix}-z`] = n(pose.z);
     vars[`--${prefix}-rx`] = n(pose.rotX);
     vars[`--${prefix}-ry`] = n(pose.rotY);
+    vars[`--${prefix}-rz`] = n(pose.rotZ);
     vars[`--${prefix}-s`] = n(pose.scale);
     vars[`--${prefix}-dim`] = n(pose.dim);
     vars[`--${prefix}-op`] = n(op);
