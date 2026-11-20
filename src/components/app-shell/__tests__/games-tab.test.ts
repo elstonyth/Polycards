@@ -10,7 +10,10 @@ import { TABS, isTabActive } from '../tabs';
 // rather than Task, and that Lucky Draw left Games for its own tab (2026-10-30).
 
 const nav = { pathname: '/' };
-vi.mock('next/navigation', () => ({ usePathname: () => nav.pathname }));
+vi.mock('next/navigation', () => ({
+  usePathname: () => nav.pathname,
+  useRouter: () => ({ push: vi.fn() }),
+}));
 vi.mock('@/components/auth/AuthProvider', () => ({
   useAuth: () => ({ customer: { id: 'cus_1' }, isLoading: false }),
 }));

@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { pillVariants } from '@/components/ui/pill';
+import { PAGE_TITLE } from '@/components/ui/page-frame';
 
 /**
  * The one text-input style for the account cluster (settings, addresses,
@@ -25,9 +26,7 @@ export function AccountHeader({
 }) {
   return (
     <header className="mb-6">
-      <h1 className="font-heading text-2xl font-bold tracking-tight text-white sm:text-3xl">
-        {title}
-      </h1>
+      <h1 className={PAGE_TITLE}>{title}</h1>
       {sub && <p className="mt-1.5 text-sm text-white/50">{sub}</p>}
     </header>
   );

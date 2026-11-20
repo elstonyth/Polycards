@@ -7,6 +7,7 @@ import { getPackCategories } from '@/lib/data/packs';
 import { ticketPackHref } from '@/lib/packs-data';
 import { AccountHeader } from '@/components/account/ui';
 import { VaultTabs } from '@/components/account/VaultTabs';
+import { PageBody } from '@/components/ui/page-frame';
 import VaultClient from './VaultClient';
 
 export const metadata: Metadata = { title: 'Vault' };
@@ -29,16 +30,18 @@ export default async function VaultPage() {
         title="Vault"
         sub="The cards you hold. Ship them, or sell back instantly."
       />
-      <VaultTabs current="/vault" />
-      <VaultClient
-        initial={initial}
-        addresses={addresses}
-        // Unreadable reads as none: the Packs row simply stays hidden.
-        initialGifts={gifts ?? []}
-        // null (unreadable) hides the Lucky Draw tickets row.
-        tickets={tickets}
-        spinHref={ticketPackHref(categories)}
-      />
+      <PageBody>
+        <VaultTabs current="/vault" />
+        <VaultClient
+          initial={initial}
+          addresses={addresses}
+          // Unreadable reads as none: the Packs row simply stays hidden.
+          initialGifts={gifts ?? []}
+          // null (unreadable) hides the Lucky Draw tickets row.
+          tickets={tickets}
+          spinHref={ticketPackHref(categories)}
+        />
+      </PageBody>
     </>
   );
 }
