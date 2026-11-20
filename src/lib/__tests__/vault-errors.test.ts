@@ -219,6 +219,8 @@ describe('VAULT_RULES backend-message contract', () => {
       'USDT payments are paused right now — please try again shortly.',
       'SGD top-ups are not available right now.',
       'Enter the name on the bank account you are paying from.',
+      // A payer name of initials (gateway-deposit.ts PAYER_NAME_INCOMPLETE_MESSAGE).
+      'Singapore top-ups are matched to the full name on your bank account, and the name on your Polycards account is incomplete. Contact support to update it to your full name exactly as your bank shows it.',
       // The pending-cap refusal (gateway-deposit.ts): fell to the generic
       // "Something went wrong" and hid why every retry failed.
       'You have several top-ups still waiting for payment. Finish one, or wait a few minutes before starting another.',

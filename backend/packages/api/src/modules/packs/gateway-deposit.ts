@@ -219,6 +219,30 @@ export function newMerchantTransactionId(): string {
 export const PAYER_BANK_REQUIRED_MESSAGE =
   'Save the bank account you pay from first, on the Withdraw page. Singapore top-ups are matched to it.';
 
+/**
+ * The refusal when the payer name is not a full name. The name comes from the
+ * customer's real name (a saved bank's holder is never typed), which only
+ * support corrects. The storefront passes it through verbatim (vault-errors.ts
+ * matches "matched to the full name").
+ */
+export const PAYER_NAME_INCOMPLETE_MESSAGE =
+  'Singapore top-ups are matched to the full name on your bank account, and the name on your Polycards account is incomplete. Contact support to update it to your full name exactly as your bank shows it.';
+
+/**
+ * Whether a payer name can match the name a bank shows: at least two words of
+ * two or more letters. GMpay matches each pay-in to the name it is sent
+ * (2026-11-20), so a name of initials ("lkm") or one run together
+ * ("LIMWEIGUAN") never matches, and the money sits unmatched until GMpay
+ * completes it by hand. One-letter parts ("S/O", an initial) do not count.
+ */
+export function payerNameLooksFull(name: string): boolean {
+  const words = name
+    .normalize('NFKC')
+    .split(/[\s.,/@'-]+/)
+    .filter((word) => (word.match(/\p{L}/gu)?.length ?? 0) >= 2);
+  return words.length >= 2;
+}
+
 export type StartDepositInput = {
   /** From the verified token — NEVER the request body. */
   customerId: string;
@@ -400,6 +424,12 @@ export async function startDeposit(
     throw new MedusaError(
       MedusaError.Types.INVALID_DATA,
       'Enter the name on the bank account you are paying from (reload the page if you see no name field).',
+    );
+  }
+  if (needsPayerName && !payerNameLooksFull(payerName)) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      PAYER_NAME_INCOMPLETE_MESSAGE,
     );
   }
 

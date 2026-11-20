@@ -1,6 +1,11 @@
 import { Modules } from '@medusajs/framework/utils';
 import { setActiveGateway } from '../gateway';
-import { PAYER_BANK_REQUIRED_MESSAGE, startDeposit } from '../gateway-deposit';
+import {
+  PAYER_BANK_REQUIRED_MESSAGE,
+  PAYER_NAME_INCOMPLETE_MESSAGE,
+  payerNameLooksFull,
+  startDeposit,
+} from '../gateway-deposit';
 
 // GMpay declares the paying account (holder, bank, number) on every pay-in.
 // startDeposit must refuse a top-up without one BEFORE any row, and pass a
@@ -94,6 +99,7 @@ function depositPacks() {
 const pay = (
   packs: ReturnType<typeof depositPacks>,
   payerBank?: { bankCode: string; accountNumber: string },
+  payerName = 'TAN AH KOW',
 ) =>
   startDeposit(
     scopeFor(packs),
@@ -103,7 +109,7 @@ const pay = (
       ipAddress: '1.2.3.4',
       gateway: 'gmpay',
       paymentMethodCode: 'BQR',
-      payerName: 'TAN AH KOW',
+      payerName,
       payerBank,
     },
     'https://us/notify',
@@ -209,5 +215,34 @@ describe('a GMpay top-up and the paying account', () => {
     expect(packs.updateGatewayDeposits).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'gpd_1', status: 'failed' }),
     );
+  });
+});
+
+// GMpay matches a pay-in to the NAME it is sent (GMpay, 2026-11-20: "we will
+// follow the name that provide"). A name of initials ("lkm", the first live
+// S$ top-up) never matches the full name the customer's bank shows, so the
+// payment sat unmatched until GMpay completed it by hand.
+describe('a payer name GMpay can match', () => {
+  it.each([
+    'TAN AH KOW',
+    'Lim Mei Ling',
+    'NG LI',
+    'MOHAMMAD SHAFIQ BIN JOHARI',
+    'RAJ S/O KUMAR',
+    "D'SOUZA MARIA",
+  ])('accepts %s', (name) => expect(payerNameLooksFull(name)).toBe(true));
+
+  it.each(['lkm', 'ONGLAI', 'LIMWEIGUANTAN', 'LIM K M', 'L K M', 'A B', '  ', ''])(
+    'refuses %p',
+    (name) => expect(payerNameLooksFull(name)).toBe(false),
+  );
+
+  it('refuses a top-up in initials before any row or gateway call', async () => {
+    const packs = depositPacks();
+    await expect(
+      pay(packs, { bankCode: 'DBSSSGSG', accountNumber: '0123456789' }, 'lkm'),
+    ).rejects.toThrow(PAYER_NAME_INCOMPLETE_MESSAGE);
+    expect(packs.createDepositCapped).not.toHaveBeenCalled();
+    expect(global.fetch).not.toHaveBeenCalled();
   });
 });
