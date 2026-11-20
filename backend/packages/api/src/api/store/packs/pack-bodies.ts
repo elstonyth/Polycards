@@ -93,9 +93,9 @@ export async function packDetailBody(
   };
 
   // A ticket pack's pool is one row per amount, with no card join and, as below,
-  // no weight. The published odds work as on a card pack. No demo_odds: with one
+  // no weight. The Pull Odds work as on a card pack. No demo_odds: with one
   // row per tier, set 3's tier split would be the real rate of each amount, so the
-  // guest demo falls back to the published odds.
+  // guest demo falls back to the Pull Odds.
   if (pack.prize_type === 'tickets') {
     const prizes = await pageAll((opts) =>
       packsModuleService.listTicketPrizes({ pack_id: slug }, opts),
@@ -104,7 +104,7 @@ export async function packDetailBody(
       prize_type: pack.prize_type,
       pack: publicPack,
       odds: ticketOddsRows(prizes),
-      published_odds: normalizePublishedOdds(pack.published_odds),
+      pull_odds: normalizePublishedOdds(pack.published_odds),
       demo_odds: null,
     };
   }
@@ -172,11 +172,11 @@ export async function packDetailBody(
     // from the secret per-card weights above. Null = not set (panel hidden).
     // Normalized: storage null-fills the tiers (json-merge guard) and the
     // public payload must not carry those nulls.
-    published_odds: normalizePublishedOdds(pack.published_odds),
-    // Always null (owner, 2026-11-11): only PUBLISHED odds leave the backend.
+    pull_odds: normalizePublishedOdds(pack.published_odds),
+    // Always null (owner, 2026-11-11): only the Pull Odds leave the backend.
     // It used to carry odds set 3's real tier split for the guest demo spin
     // (ADR 0005, now superseded); the storefront's demo falls back to
-    // published_odds when this is null. Kept on the wire so older storefront
+    // pull_odds when this is null. Kept on the wire so older storefront
     // builds parse unchanged.
     demo_odds: null,
   };
