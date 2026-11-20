@@ -309,7 +309,8 @@ describe('getPackTiers and GET /api/pack-tiers/<slug>', () => {
         image: '/r.webp',
       },
     ],
-    pull_odds: { tiers: { Immortal: 1, Common: 99 } },
+    // The key today's backend sends (the storefront reads both).
+    published_odds: { tiers: { Immortal: 1, Common: 99 } },
   };
   const serve = (packs: unknown[], detail: unknown = detailBody) =>
     backend({
@@ -389,7 +390,7 @@ describe('getPackTiers and GET /api/pack-tiers/<slug>', () => {
             image: '/t.webp',
           },
         ],
-        pull_odds: { tiers: { Immortal: 100 } },
+        published_odds: { tiers: { Immortal: 100 } },
       },
     );
     const tiers = await getPackTiers('gold-capsule');
@@ -399,7 +400,7 @@ describe('getPackTiers and GET /api/pack-tiers/<slug>', () => {
   });
 
   it('a pack without pull odds sends no chance at all', async () => {
-    serve([catalog()], { ...detailBody, pull_odds: null });
+    serve([catalog()], { ...detailBody, published_odds: null });
     const tiers = await getPackTiers('gold-pack');
     expect(tiers?.tiers.map((t) => t.chance)).toEqual([null, null]);
     expect(tiers?.ev).toBeNull();
