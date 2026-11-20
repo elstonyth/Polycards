@@ -106,10 +106,11 @@ export async function payerOnFile(
 ): Promise<{
   name: string | undefined;
   account: { bankCode: string; accountNumber: string } | undefined;
+  realName: string | null;
 }> {
   const { saved, realName } = await savedAndRealName(scope, customerId);
   const name = typedName?.trim()
     ? typedName
     : holderOnFile(saved, realName, gateway);
-  return { name, account: payerAccountFor(saved, gateway, name) };
+  return { name, account: payerAccountFor(saved, gateway, name), realName };
 }
