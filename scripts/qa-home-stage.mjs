@@ -2998,25 +2998,32 @@ async function checkSpin(label, profile) {
     `at the formed row: Poly tab -> ${polyTiles} capsules (spin ${poly.spin}, scrollY ${poly.y}), back to Pokemon, then a sort pick -> ${sortOk} packs (spin ${sorted.spin}, scrollY ${sorted.y}); the page never moved (${y0})`,
   );
 
-  // 4. 20 changes mid-spin: memory peak
+  // 4. 20 sort changes mid-spin (two 3D rows held through each switch):
+  // memory peak, sampled every 60 ms as the chip memory check does
   let peak = 0;
-  const tabs = [/^Poly$/, /^Pok/];
-  for (let k = 0; k < 20; k++) {
-    await page.getByRole('button', { name: tabs[k % 2] }).click();
-    for (let t = 0; t < 4; t++) {
-      await sleep(200);
-      const s = await page.evaluate(
+  const sortOrder = [/^Classic/, /^All/, /^Original/, /^All/];
+  const sampleFor = async (ms) => {
+    const until = Date.now() + ms;
+    while (Date.now() < until) {
+      const v = await page.evaluate(
         () => window.__packStage?.stats()?.gpuBytesEstimate ?? 0,
       );
-      peak = Math.max(peak, s);
+      peak = Math.max(peak, v);
+      await sleep(60);
     }
+  };
+  for (let k = 0; k < 20; k++) {
+    await chip(page, sortOrder[k % sortOrder.length]).click();
+    await sampleFor(1100);
   }
-  await sleep(800);
+  await chip(page, /^All/).click();
+  await sampleFor(1200);
+  const after20 = await spinInfo(page);
   mem.changes20Peak = peak;
   pass(
     `spin-memory-20-changes-${label}`,
-    peak <= cap,
-    `20 category changes at the formed row: peak ${(peak / 1e6).toFixed(1)} MB (cap ${cap / 1e6})`,
+    peak <= cap && after20.spin === 1,
+    `20 sort changes (Classic / All / Original) at the formed row: peak ${(peak / 1e6).toFixed(1)} MB (cap ${cap / 1e6}); still formed after them: spin ${after20.spin}, scrollY ${after20.y}`,
   );
 
   // 5. the exit: Ciao's camera move as the page below rises over the stuck panel
@@ -3348,6 +3355,163 @@ async function checkSpinRows(label, profile) {
   await ctx.close();
 }
 
+/** The spin chunk failing to load: no pin at all, the page scrolls as step 1. */
+async function checkSpinChunkFails(label, profile) {
+  const { ctx, page } = await newPage(profile);
+  let aborted = 0;
+  await page.route(/pack-stage-spin/, (r) => {
+    aborted++;
+    r.abort().catch(() => {});
+  });
+  await page.goto(stageUrl(forced({ loader: 'never' })), { waitUntil: 'load' });
+  await dismissChrome(page);
+  await sleep(3000);
+  const info = await page.evaluate(() => {
+    const w = document.querySelector('[data-spin-wrap]');
+    const p = document.querySelector('[data-stage-root]');
+    const a = document.querySelector('[data-spin-after]');
+    return {
+      on: w.hasAttribute('data-spin-on'),
+      wrapH: Math.round(w.getBoundingClientRect().height),
+      panelH: Math.round(p.getBoundingClientRect().height),
+      gap: Math.round(
+        a.getBoundingClientRect().top - w.getBoundingClientRect().bottom,
+      ),
+      pos: getComputedStyle(p).position,
+    };
+  });
+  await page.mouse.move(profile.context.viewport.width / 2, 400);
+  if (profile.kind === 'phone' && !WEBKIT)
+    await spinGesture(page, profile, 1, 200);
+  else await page.mouse.wheel(0, 300);
+  await sleep(800);
+  const y = await page.evaluate(() => window.scrollY);
+  pass(
+    `spin-chunk-fails-${label}`,
+    aborted > 0 &&
+      !info.on &&
+      info.wrapH === info.panelH &&
+      info.gap === 0 &&
+      info.pos !== 'sticky' &&
+      y > 0 &&
+      page.errors.filter(
+        (e) => !/Failed to load|ChunkLoad|Loading chunk/i.test(e),
+      ).length === 0,
+    `spin chunk aborted ${aborted}x: pin on ${info.on}, wrapper ${info.wrapH} px = panel ${info.panelH} px, the page below follows it (gap ${info.gap}), panel ${info.pos}; a ${profile.kind === 'phone' ? 'swipe' : 'wheel'} scrolled natively to ${y}; uncaught errors ${page.errors.length}`,
+  );
+  await ctx.close();
+}
+
+/** Inputs beyond one gesture: a reload mid-pin and mid-exit, keys, focus, a one-pack row. */
+async function checkSpinEdges(label, profile) {
+  const { ctx, page } = await spinPage(profile);
+  await waitLive(page, 1).catch(() => {});
+  await waitSpinReady(page);
+  const r = (await spinInfo(page)).range;
+  const out = [];
+  // a reload in the middle of the pin, then in the exit
+  for (const [name, y] of [
+    ['mid-pin', r.start + Math.round(r.length / 2)],
+    ['mid-exit', r.start + r.length + Math.round(r.exit / 2)],
+  ]) {
+    await page.evaluate((v) => window.scrollTo(0, v), y);
+    await sleep(400);
+    await page.reload({ waitUntil: 'load' });
+    await waitSpinReady(page).catch(() => {});
+    await sleep(1500);
+    const s = await spinInfo(page);
+    await spinShot(page, `reload-${name}-${label}`);
+    out.push({
+      name,
+      y: s.y,
+      spin: s.spin,
+      exit: s.exit,
+      on: !!s.range,
+      errors: page.errors.length,
+    });
+  }
+  // A reload restores a scroll below the stage: the pin stays off (the page
+  // never jumps) and the visitor reads the page as step 1 from there.
+  const reloadOk = out.every((o) => o.errors === 0 && !o.on && o.y > 0);
+  pass(
+    `spin-reload-${label}`,
+    reloadOk,
+    out
+      .map(
+        (o) =>
+          `${o.name}: scrollY ${o.y}, pin ${o.on ? 'on' : 'off'}, spin ${o.spin?.toFixed(3)}, exit ${o.exit?.toFixed(3)}, errors ${o.errors}`,
+      )
+      .join('; '),
+  );
+  // back to the top, then keys (desktop): PageDown moves natively, the row follows
+  await page.goto(stageUrl(forced({ loader: 'never' })), { waitUntil: 'load' });
+  await waitSpinReady(page);
+  if (profile.kind === 'desktop') {
+    await page.mouse
+      .click(5, profile.context.viewport.height - 5)
+      .catch(() => {});
+    await page.keyboard.press('PageDown');
+    await sleep(1200);
+    const k = await spinInfo(page);
+    await spinShot(page, `pagedown-${label}`);
+    pass(
+      `spin-pagedown-${label}`,
+      k.y > 0 &&
+        Math.abs(k.spin - Math.min(1, (k.y - r.start) / r.length)) < 0.02,
+      `PageDown scrolled natively to ${k.y} (Ciao: keys are never paged); the row follows: spin ${k.spin?.toFixed(3)} at progress ${Math.min(1, (k.y - r.start) / r.length).toFixed(3)} (a key can park a half-formed row, as on Ciao)`,
+    );
+    // focus into the row mid-spin: back to the pin's start
+    await page.evaluate((v) => window.scrollTo(0, v), r.start + r.length);
+    await sleep(900);
+    await page.evaluate(() =>
+      document
+        .querySelector('[data-stage-panel]:not([hidden]) [data-stage-hit]')
+        ?.focus(),
+    );
+    await sleep(1600);
+    const f = await spinInfo(page);
+    pass(
+      `spin-focus-back-${label}`,
+      f.y <= r.start + 2 && f.spin < 0.02,
+      `focus moved into the row at the formed row: the page went back to the pin's start (scrollY ${f.y}), spin ${f.spin?.toFixed(3)}; Open is reachable by keyboard`,
+    );
+  }
+  await ctx.close();
+}
+
+/** A one-pack row (the Special shelf is gone today): one Original pack marked Japanese. */
+async function checkSpinOnePack(label, profile) {
+  const { ctx, page } = await spinPage(profile, { jp: 'cr' });
+  await waitLive(page, 1).catch(() => {});
+  await waitSpinReady(page);
+  let count = null;
+  try {
+    await chip(page, /^Original/).click();
+    await sleep(1300);
+    await langBtn(page, /^Japanese$/).click();
+    await sleep(1500);
+    count = await page
+      .locator('[data-stage-panel]:not([hidden]) [data-stage-tile]')
+      .count();
+  } catch (e) {
+    count = `failed: ${String(e?.message ?? e).split('\n')[0]}`;
+  }
+  const r = (await spinInfo(page)).range;
+  await spinGesture(page, profile, 1);
+  await sleep(PAGED_MS + 900);
+  const s = await spinInfo(page);
+  await spinShot(page, `formed-one-pack-${label}`);
+  pass(
+    `spin-one-pack-row-${label}`,
+    count === 1 &&
+      s.y === r.start + r.length &&
+      s.spin === 1 &&
+      (profile.kind === 'phone' ? true : (s.rt?.copies ?? 0) > 0),
+    `?jp=cr, Original, Japanese: ${count} pack; paged to ${s.y}, spin ${s.spin}; repeats drawn ${s.rt?.copies ?? 'n/a'} (one pack fills the row as clones; shot formed-one-pack-${label})`,
+  );
+  await ctx.close();
+}
+
 function writeSpinMemory() {
   if (Object.keys(spinMemory).length === 0) return;
   mkdirSync(SPIN_SHOTS, { recursive: true });
@@ -3441,6 +3605,14 @@ async function main() {
       } else {
         await run('spin', `spin-${l}`, () => checkSpin(l, profile));
         await run('spin', `spin-rows-${l}`, () => checkSpinRows(l, profile));
+        await run('spin', `spin-edges-${l}`, () => checkSpinEdges(l, profile));
+        await run('spin', `spin-one-pack-${l}`, () =>
+          checkSpinOnePack(l, profile),
+        );
+        if (!HEADED)
+          await run('spin', `spin-chunk-fails-${l}`, () =>
+            checkSpinChunkFails(l, profile),
+          );
         await run('spin', `spin-one-stop-${l}`, () =>
           checkSpinOneStop(l, profile),
         );

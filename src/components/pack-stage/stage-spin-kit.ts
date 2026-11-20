@@ -190,14 +190,17 @@ export function startSpin(host: SpinHost): SpinControl {
     const bottom = tabBar && tabBar.offsetHeight > 0 ? tabBar.offsetHeight : 0;
     src.flow.style.setProperty('--flow-top', `${top}px`);
     src.flow.style.setProperty('--flow-bottom', `${bottom}px`);
-    range =
-      rmq.matches || src.empty
-        ? null
-        : spinRangeOf(
-            src.wrap.getBoundingClientRect().top + window.scrollY,
-            top,
-            src.panel.offsetHeight,
-          );
+    // The pin exists only while this driver runs (the CSS reads
+    // data-spin-on). It is switched on only while the visitor is still on
+    // the stage, so a page already scrolled down never jumps.
+    const wrapTop = src.wrap.getBoundingClientRect().top + window.scrollY;
+    const was = src.wrap.hasAttribute('data-spin-on');
+    const on =
+      !rmq.matches &&
+      !src.empty &&
+      (was || window.scrollY <= wrapTop - top + src.panel.offsetHeight / 2);
+    if (on !== was) src.wrap.toggleAttribute('data-spin-on', on);
+    range = on ? spinRangeOf(wrapTop, top, src.panel.offsetHeight) : null;
     wake();
   };
 
@@ -312,6 +315,7 @@ export function startSpin(host: SpinHost): SpinControl {
     unbindPage?.();
     unbindPage = null;
     if (src) {
+      src.wrap.removeAttribute('data-spin-on');
       setFlags(0, 0);
       flags = { spinning: false, text: false, head: false };
     }

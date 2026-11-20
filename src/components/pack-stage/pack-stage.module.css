@@ -30,39 +30,43 @@
   }
 }
 
-/* Panel + the pin (1.75 panels) + the exit (1.25 panels): PackStage's
-   SPIN_PIN_PANELS and SPIN_EXIT_PANELS. */
+/* The panel is one screen. The pin exists only while the spin's driver runs
+   (the lazily loaded spin chunk sets data-spin-on): without it (no
+   JavaScript, reduced motion, the chunk failing, a visitor already down the
+   page) the page below simply follows the panel. On: panel + the pin (1.75
+   panels) + the exit (1.25 panels), stage-spin-math's SPIN_PIN_PANELS and
+   SPIN_EXIT_PANELS. */
 .spinWrap {
   position: relative;
-  height: calc(var(--panel) * 4);
 }
 
 .stage.panel {
-  position: sticky;
-  top: var(--flow-top);
   height: var(--panel);
 }
 
+.spinWrap[data-spin-on] {
+  height: calc(var(--panel) * 4);
+}
+
+.spinWrap[data-spin-on] .stage.panel {
+  position: sticky;
+  top: var(--flow-top);
+}
+
 /* The page below starts at the pin's end and rises over the stuck panel
-   during the exit (Ciao's FAQ over its fixed canvas). */
+   during the exit (Ciao's FAQ over its fixed canvas); positioned, so it
+   paints over the panel by document order (no z-index: overlays inside it
+   keep their own stacking). */
 .spinAfter {
   position: relative;
-  z-index: 1;
+}
+
+.spinWrap[data-spin-on] + .spinAfter {
   margin-top: calc(var(--panel) * -1);
 }
 
-.spinOff {
-  height: auto;
-}
-
 .spinOff .stage.panel {
-  position: relative;
-  top: auto;
   height: auto;
-}
-
-.spinOff + .spinAfter {
-  margin-top: 0;
 }
 
 /* ---- Stage sizes: the art box drives everything ------------------------ */
