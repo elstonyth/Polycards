@@ -86,7 +86,12 @@ export default function PackStage({
   // Never in the server HTML: a visitor whose JS never runs must not get an
   // inert page. Client-side, the stage is inert while the loader covers it.
   const loaderUp = useStageLoaderUp(false);
-  const { values: spinValues, state: stageState, wake } = stage3d;
+  const {
+    values: spinValues,
+    state: stageState,
+    wake,
+    show: showStage,
+  } = stage3d;
   // The focused pack's blocks (rendered by the spin chunk's focused view).
   const [focusUi, setFocusUi] = useState<ReactNode>(null);
   useEffect(() => {
@@ -102,7 +107,12 @@ export default function PackStage({
         (m) => {
           if (!live) return;
           const c = m.startSpin({
-            stage: { state: stageState, wake, values: spinValues },
+            stage: {
+              state: stageState,
+              wake,
+              values: spinValues,
+              show: showStage,
+            },
             ui: setFocusUi,
           });
           c.bind({ flow, wrap, panel, empty: empty0 });
@@ -117,7 +127,7 @@ export default function PackStage({
       clearTimeout(t);
       ctl?.stop();
     };
-  }, [spinValues, stageState, wake, empty0, reduced, loaderUp]);
+  }, [spinValues, stageState, wake, showStage, empty0, reduced, loaderUp]);
 
   const [revealed, setRevealed] = useState(false);
 

@@ -432,12 +432,19 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
         decl = { ...decl, ctx: { ...decl.ctx, keys, leaving: true } };
         publish();
       }
-      setTimeout(() => {
+      // the active block has faded: from a later stop, jump to Front first.
+      // A move that began meanwhile (a snap back to the stop) is let land
+      // first, as the mid-move path does, or the leave would never start.
+      const home = () => {
         if (!on) return;
-        // the active block has faded: from a later stop, jump to Front first
-        d.go(0, k > 1 ? { from: d.stops()[1] ?? 0 } : undefined);
+        if (
+          !d.go(0, k > 1 ? { from: d.stops()[1] ?? 0 } : undefined) &&
+          d.busy()
+        )
+          setTimeout(home, 50);
         d.loop();
-      }, LEAVE_FADE_MS);
+      };
+      setTimeout(home, LEAVE_FADE_MS);
     },
     frame(t, f) {
       if (!on) return true;

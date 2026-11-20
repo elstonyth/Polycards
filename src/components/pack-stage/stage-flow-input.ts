@@ -166,8 +166,12 @@ export interface FlowInput {
   /** True: the caller cancels the touchmove. */
   touchMove(x: number, y: number, scrollY: number, now: number): boolean;
   touchEnd(scrollY: number, now: number): void;
+  /** The touch's tracking is dropped: nothing pages, the snap and the idle report come back. */
+  touchCancel(): void;
   frame(scrollY: number, now: number): FlowInputFrame;
   busy(): boolean;
+  /** The last gesture was a down gesture at the row that no focusable pack could take. */
+  refused(): boolean;
 }
 
 /** A page this close to the row counts as on it. */
@@ -278,7 +282,9 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
     },
     touchStart(x, y, scrollY, now, o) {
       arm();
-      nativeTouch = pager.zone(scrollY) === 'free';
+      // a finger that lands during a move (one crossing the paged edge
+      // included) is the pager's, which ignores it: the move always lands
+      nativeTouch = pager.zone(scrollY) === 'free' && !pager.busy();
       if (!nativeTouch) pager.touchStart(x, y, scrollY, now, o);
     },
     touchMove(x, y, scrollY, now) {
@@ -293,6 +299,10 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
       arm();
       pager.touchEnd(scrollY, now);
       entered();
+    },
+    touchCancel() {
+      nativeTouch = false;
+      pager.touchCancel();
     },
     frame(scrollY, now) {
       build();
@@ -309,21 +319,19 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
       const y = f.scrollTo ?? scrollY;
       const t = table;
       // the band reached with no pack focused, nearer a stop than the row:
-      // focus the centred pack, or back to the row when it cannot be (nearer
-      // the row, the pager's own snap brings it back unfocused)
+      // focus the centred pack. A pack that cannot be focused has no rests
+      // in the table (its stops are the row's alone), so the snap brings
+      // the page back to the row unfocused.
       const first = t ? (t.rests[0] ?? t.exitEnd) : 0;
       if (
         t &&
         !d.focused() &&
         f.zone === 'paged' &&
         y > (t.r0 + first) / 2 &&
-        !(f.animating && f.target === 0)
-      ) {
-        if (d.enter()) build();
-        else if (!pager.busy() && pager.goTo(0, y, now) === 'moved') {
-          f = { ...f, target: 0, animating: true, idle: false };
-        }
-      }
+        !(f.animating && f.target === 0) &&
+        d.enter()
+      )
+        build();
       if (!t) return { ...f, at: null, focus: 0, fade: 0, past: false };
       const at = flowAt(y, t);
       const n = t.rests.length;
@@ -337,5 +345,6 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
       return { ...f, at, focus, fade, past };
     },
     busy: () => pager.busy(),
+    refused: () => pager.refused(),
   };
 }

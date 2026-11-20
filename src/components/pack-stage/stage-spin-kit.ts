@@ -39,6 +39,12 @@ import {
   flowLoadStart,
   type FlowInputFrame,
 } from './stage-flow-input';
+import {
+  createFocusLoad,
+  createTouchGate,
+  flowSwitch,
+  panelState,
+} from './stage-flow-gate';
 
 /**
  * The measured stage a CSS row is projected into (host px; the art box is
@@ -195,6 +201,12 @@ export type SpinHost = {
   stage: {
     state: StageState;
     wake(): void;
+    /**
+     * Whether the 3D is to be drawn at all: false while the focused pack is
+     * faded out past Closing (the engine sleeps and, after a while, lets its
+     * packs go); true again on the way back up.
+     */
+    show?(on: boolean): void;
     values: {
       spin: { set(v: number): void };
       exit: { set(v: number): void };
@@ -238,7 +250,6 @@ export function startSpin(host: SpinHost): SpinControl {
   stage.values.exit.set(0);
   /** The focused view (its chunk loads at idle after this one, or at a tap). */
   let focus: FocusRun | null = null;
-  let focusLoad: Promise<FocusRun | null> | null = null;
   const centre = () => Math.round(stage.state.track);
   const input = createFlowInput({
     centreKinds: () => focus?.kindsAt(centre()) ?? null,
@@ -271,9 +282,20 @@ export function startSpin(host: SpinHost): SpinControl {
     const r0 = rowTop(src);
     const panel = src.panel.getBoundingClientRect().height;
     const was = flowOn();
-    const on =
-      !rmq.matches && !src.empty && (was || window.scrollY <= r0 + panel / 2);
-    if (on !== was) src.flow.toggleAttribute('data-flow-on', on);
+    // off while the focused view's chunk cannot be had: plain scrolling
+    const on = flowSwitch({
+      reduced: rmq.matches,
+      empty: src.empty,
+      focusFailed: !host.ui || fload.failed(),
+      was,
+      scrollY: window.scrollY,
+      r0,
+      panel,
+    });
+    if (on !== was) {
+      src.flow.toggleAttribute('data-flow-on', on);
+      if (!on) clearPast(src);
+    }
     // the Exit spacer, measured: its bottom is where the free part starts
     const ex = on
       ? src.flow
@@ -292,23 +314,50 @@ export function startSpin(host: SpinHost): SpinControl {
     wake();
   };
 
-  /** The panel past Closing: the focused pack fades, and is hidden in the free part. */
+  /**
+   * The panel past Closing: the focused pack fades (and takes no taps from
+   * its first faded frame), the 3D is not drawn once it is gone, and the
+   * panel is hidden in the free part.
+   */
   let shownFade = -1;
   let hidden = false;
+  let inert = false;
+  let shown = true;
   const setFade = (f: FlowInputFrame, y: number) => {
-    const panel = src?.panel;
+    const s = src;
     const t = input.table();
-    if (!panel || !t) return;
+    if (!s || !t) return;
     const fade = Math.round(f.fade * 1000) / 1000;
     if (fade !== shownFade) {
       shownFade = fade;
-      if (fade > 0) panel.style.setProperty('--flow-fade', String(1 - fade));
-      else panel.style.removeProperty('--flow-fade');
+      if (fade > 0) s.panel.style.setProperty('--flow-fade', String(1 - fade));
+      else s.panel.style.removeProperty('--flow-fade');
     }
-    const free = y >= t.exitEnd - 0.5;
-    if (free !== hidden) {
-      hidden = free;
-      src?.flow.toggleAttribute('data-flow-free', free);
+    const p = panelState(f.fade, y, t.exitEnd);
+    if (p.free !== hidden) {
+      hidden = p.free;
+      s.flow.toggleAttribute('data-flow-free', p.free);
+    }
+    if (p.inert !== inert) {
+      inert = p.inert;
+      s.wrap.inert = p.inert;
+    }
+    if (p.shown !== shown) {
+      shown = p.shown;
+      stage.show?.(p.shown);
+    }
+  };
+  /** Back to the panel as the row shows it (the flow off or unbound). */
+  const clearPast = (s: StageSpinSource) => {
+    s.flow.removeAttribute('data-flow-free');
+    s.panel.style.removeProperty('--flow-fade');
+    s.wrap.inert = false;
+    shownFade = -1;
+    hidden = false;
+    inert = false;
+    if (!shown) {
+      shown = true;
+      stage.show?.(true);
     }
   };
 
@@ -375,8 +424,18 @@ export function startSpin(host: SpinHost): SpinControl {
   }
   /** The focused view is leaving: every gesture waits for it. */
   const held = () => !!focus?.leaving();
+  /** The focused view's chunk failed: any later gesture tries it again. */
+  const retry = () => {
+    if (!focus && fload.failed()) void loadFocus();
+  };
+  /** A down gesture at the row before the focused view has loaded: kept for it. */
+  const downHeld = () => {
+    if (!focus && input.refused()) fload.holdDown();
+  };
   const onWheel = (e: WheelEvent) => {
-    if (!flowOn() || e.ctrlKey || !armed(e.target)) return;
+    if (e.ctrlKey) return;
+    retry();
+    if (!flowOn() || !armed(e.target)) return;
     if (held()) {
       e.preventDefault();
       return;
@@ -386,41 +445,44 @@ export function startSpin(host: SpinHost): SpinControl {
     gestures?.push(now());
     if (input.wheel(wheelPx(e), e.deltaX, e.shiftKey, window.scrollY, now()))
       e.preventDefault();
+    downHeld();
     wake();
   };
+  const touch = createTouchGate(input, held);
   const onTouchStart = (e: TouchEvent) => {
+    retry();
     const p = e.touches[0];
-    if (!flowOn() || !p || e.touches.length > 1 || !armed(e.target)) {
-      touching = false;
-      return;
-    }
-    touching = true;
-    if (!focus) void loadFocus();
+    const ours = flowOn() && !!p && armed(e.target);
+    if (ours && !focus) void loadFocus();
     const el = e.target instanceof Element ? e.target : null;
     // a sideways touch on the Top Hits strip, or on the row at rest, is theirs
     const strip =
       !!el?.closest('[data-focus-strip]') ||
       (!focus?.active() && !!el?.closest('[data-stage-viewport]'));
-    input.touchStart(p.clientX, p.clientY, window.scrollY, now(), { strip });
-    wake();
+    const x = p?.clientX ?? 0;
+    const y = p?.clientY ?? 0;
+    if (
+      touch.start(e.touches.length, ours, x, y, window.scrollY, now(), {
+        strip,
+      })
+    )
+      wake();
   };
-  let touching = false;
   const onTouchMove = (e: TouchEvent) => {
     const p = e.touches[0];
-    if (!touching || !p || e.touches.length > 1) return;
+    if (!p) return;
+    const t = now();
     if (
-      (held() ||
-        input.touchMove(p.clientX, p.clientY, window.scrollY, now())) &&
+      touch.move(e.touches.length, p.clientX, p.clientY, window.scrollY, t) &&
       e.cancelable
     )
       e.preventDefault();
   };
   const onTouchEnd = () => {
-    if (!touching) return;
-    touching = false;
-    if (held()) return;
-    gestures?.push(now());
-    input.touchEnd(window.scrollY, now());
+    if (touch.end(window.scrollY, now())) {
+      gestures?.push(now());
+      downHeld();
+    }
     wake();
   };
   const active = { passive: false } as const;
@@ -462,22 +524,27 @@ export function startSpin(host: SpinHost): SpinControl {
     wake();
     return ok;
   };
-  const loadFocus = (): Promise<FocusRun | null> => {
-    if (!host.ui) return Promise.resolve(null);
-    focusLoad ??= import(
-      /* webpackChunkName: "pack-stage-focus" */ './stage-focus-kit'
-    ).then(
-      (m) => {
+  /**
+   * The focused view's chunk: a failure switches the flow off (plain
+   * scrolling) and a later gesture tries again; a down gesture made at the
+   * row while it loads pages to Front once it is in.
+   */
+  const fload = createFocusLoad<FocusRun>({
+    load: () =>
+      import(
+        /* webpackChunkName: "pack-stage-focus" */ './stage-focus-kit'
+      ).then((m) => {
         const s = src;
-        if (!s || !host.ui) return null;
-        focus = m.createFocusRun({
+        const ui = host.ui;
+        if (!s || !ui) return null;
+        return m.createFocusRun({
           src: s,
           state: stage.state,
           wake: stage.wake,
           values: stage.values as Parameters<
             typeof m.createFocusRun
           >[0]['values'],
-          ui: host.ui,
+          ui,
           loop: wake,
           go,
           busy: () => input.busy(),
@@ -488,12 +555,16 @@ export function startSpin(host: SpinHost): SpinControl {
             measure();
           },
         });
-        return focus;
-      },
-      () => null,
-    );
-    return focusLoad;
-  };
+      }),
+    ready: (f, down) => {
+      focus = f;
+      // back from a failure: the flow switches on again (at the row only)
+      if (!flowOn()) measure();
+      if (down && atRow() && f.kindsAt(centre()) !== null) go(1);
+    },
+    failed: () => measure(),
+  });
+  const loadFocus = (): Promise<FocusRun | null> => fload.get(now());
   /** The page rests on the row (where a tap on the centred pack focuses it). */
   const atRow = () => {
     const t = input.table();
@@ -535,7 +606,9 @@ export function startSpin(host: SpinHost): SpinControl {
   // or a dialog has focus, never Space on a control, never a key a part of
   // the page already took (the row's own arrows, the sort panel).
   const onKey = (e: KeyboardEvent) => {
-    if (e.defaultPrevented || !flowOn() || !input.table()) return;
+    if (e.defaultPrevented) return;
+    retry();
+    if (!flowOn() || !input.table()) return;
     const intent = flowKeyIntent(e);
     if (!intent) return;
     const t = e.target instanceof Element ? e.target : null;
@@ -559,6 +632,7 @@ export function startSpin(host: SpinHost): SpinControl {
     // a key at the row before the focused view has loaded: load it
     if (!focus) void loadFocus();
     const r = input.key(intent, window.scrollY, now());
+    downHeld();
     if (r === 'free') return;
     e.preventDefault();
     if (r === 'leave') focus?.leave();
@@ -618,10 +692,7 @@ export function startSpin(host: SpinHost): SpinControl {
     }
     if (src) {
       src.flow.removeAttribute('data-flow-on');
-      src.flow.removeAttribute('data-flow-free');
-      src.panel.style.removeProperty('--flow-fade');
-      shownFade = -1;
-      hidden = false;
+      clearPast(src);
     }
     src = next;
     if (next) {
@@ -667,6 +738,9 @@ export function startSpin(host: SpinHost): SpinControl {
       table: input.table(),
       stops: input.stops(),
       busy: input.busy(),
+      focusFailed: fload.failed(),
+      inert,
+      shown,
     });
   }
 

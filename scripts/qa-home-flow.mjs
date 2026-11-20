@@ -25,7 +25,12 @@
 //   adds no entry (Back leaves the page);
 // - the keys at the row, at a middle stop, at Closing and in the free part,
 //   and focus landing in the row's tabs while focused;
-// - a reload at the row, at a middle stop and in the free part.
+// - a reload at the row, at a middle stop and in the free part;
+// - (wp3c) the focused view's chunk failing: plain scrolling reaches the
+//   sections below; a leave asked for off a rest; (phone) a second finger
+//   and a finger landing mid-move past the paged edge; no tap on the faded
+//   pack's controls anywhere past the fade; the 3D asleep in the free part
+//   and awake again back at Closing.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 
@@ -35,7 +40,7 @@ const BASE =
   process.env.PW_BASE ??
   'http://localhost:4300';
 const ONLY = (args.find((a) => a.startsWith('--only=')) ?? '=').split('=')[1];
-/** --part=pass,motion,nav,keys,reload: run only these groups. */
+/** --part=pass,motion,nav,keys,reload,wp3c: run only these groups. */
 const PARTS = (args.find((a) => a.startsWith('--part=')) ?? '=')
   .split('=')[1]
   .split(',')
@@ -722,6 +727,374 @@ for (const size of sizes) {
     );
     report(
       `errors-keys-${size}`,
+      page.errors.length === 0,
+      page.errors.join(' | '),
+    );
+    await s.ctx.close();
+  }
+
+  // ---- the review fixes (work package 3c) ----
+  if (part('wp3c')) {
+    // the focused view's chunk cannot be had: the page reads as plain
+    // scrolling and the sections below are reached
+    {
+      const s = await open(size);
+      const { page } = s;
+      let aborted = 0;
+      await page.route(/pack-stage-focus\.[^/]*\.js/, (r) => {
+        aborted++;
+        return r.abort('failed');
+      });
+      await page.goto(BASE + PREVIEW + '?stage=3d&debug=1&loader=never', {
+        waitUntil: 'load',
+      });
+      await reject(page);
+      await page.waitForFunction(
+        () =>
+          window.__packStage?.ready?.() && window.__packStage.flow?.().bound,
+        null,
+        { timeout: 40000 },
+      );
+      await page.waitForTimeout(3500);
+      const f0 = await page.evaluate(() => window.__packStage.flow());
+      const vh = PROFILES[size].viewport.height;
+      let top = null;
+      for (let i = 0; i < 5; i++) {
+        if (s.cdp) await swipe(s, 200, 650, 200, 250);
+        else {
+          await page.mouse.move(720, 450);
+          await page.mouse.wheel(0, 400);
+        }
+        await page.waitForTimeout(600);
+        top = await page.evaluate(() =>
+          Math.round(
+            document
+              .querySelector('[data-flow-section]')
+              ?.getBoundingClientRect().top ?? 1e9,
+          ),
+        );
+        if (top < vh) break;
+      }
+      await shot(page, size, 'wp3c-chunk-failed');
+      report(
+        'chunk-failure-' + size,
+        !f0.on && f0.focusFailed && aborted >= 1 && top !== null && top < vh,
+        'flow on ' +
+          f0.on +
+          ', failed ' +
+          f0.focusFailed +
+          ', requests aborted ' +
+          aborted +
+          '; the first section below at ' +
+          top +
+          ' px (viewport ' +
+          vh +
+          ')',
+      );
+      report(
+        'errors-chunk-' + size,
+        page.errors.length === 0,
+        page.errors.join(' | '),
+      );
+      await s.ctx.close();
+    }
+
+    // a second finger: the pinch leaves the page off its rest, which snaps
+    // back, and the driver's loop goes to sleep
+    // (its own page: the pinch zooms it, which later checks must not inherit)
+    if (size === 'phone') {
+      const s = await open(size);
+      const { page } = s;
+      await load(s);
+      await gesture(s, 1);
+      const fr = await rest(page);
+      await s.cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchStart',
+        touchPoints: [{ x: 150, y: 500, id: 1 }],
+      });
+      await s.cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchStart',
+        touchPoints: [
+          { x: 150, y: 500, id: 1 },
+          { x: 250, y: 520, id: 2 },
+        ],
+      });
+      for (let i = 1; i <= 4; i++) {
+        await s.cdp.send('Input.dispatchTouchEvent', {
+          type: 'touchMove',
+          touchPoints: [
+            { x: 150 - i * 10, y: 500, id: 1 },
+            { x: 250 + i * 10, y: 520, id: 2 },
+          ],
+        });
+        await page.waitForTimeout(16);
+      }
+      await s.cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchEnd',
+        touchPoints: [{ x: 110, y: 500, id: 1 }],
+      });
+      await s.cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchEnd',
+        touchPoints: [],
+      });
+      // the pinch's zoom moved the page off its rest
+      await page.evaluate(() => window.scrollBy(0, 150));
+      await page.waitForTimeout(1500);
+      const r = await rest(page);
+      await page.waitForTimeout(600);
+      const looping = await page.evaluate(
+        () => window.__packStage.flow().looping,
+      );
+      report(
+        'second-finger-' + size,
+        fr.on && r.on && near(r.y, fr.y) && !looping,
+        'Front at ' +
+          fr.y +
+          '; after the pinch the page rests at ' +
+          r.y +
+          ', the loop ' +
+          (looping ? 'still runs' : 'sleeps'),
+      );
+      await s.ctx.close();
+    }
+
+    const s = await open(size);
+    const { page } = s;
+    await load(s);
+    const s0 = await snap(page);
+
+    // a leave asked for while the page is off its rest (it snaps back
+    // during the text's fade): the leave still runs
+    if (!s.cdp) {
+      await gesture(s, 1);
+      const fr = await rest(page);
+      await page.evaluate(() => {
+        window.scrollBy(0, 200);
+        setTimeout(
+          () =>
+            document.dispatchEvent(
+              new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+            ),
+          60,
+        );
+      });
+      await page.waitForTimeout(3000);
+      const r = await rest(page);
+      report(
+        'leave-off-rest-' + size,
+        fr.on && !r.on && near(r.y, s0.y),
+        'focused at ' +
+          fr.y +
+          '; Escape after a scroll off the rest: focused ' +
+          r.on +
+          ', scroll ' +
+          r.y +
+          ' (row ' +
+          s0.y +
+          ')',
+      );
+    }
+
+    // to Closing, and the controls on it
+    await page.keyboard.press('End');
+    await page.waitForTimeout(200);
+    let r = await rest(page);
+    const closingY = r.y;
+    const engineAt = () =>
+      page.evaluate(() => ({
+        present: window.__packStage.present?.() ?? null,
+        running: window.__packStage.running(),
+        gpu: window.__packStage.stats()?.gpuBytesEstimate ?? null,
+        live: window.__packStage.live(),
+        shown: window.__packStage.flow().shown,
+      }));
+    const e0 = await engineAt();
+    const pts = await page.evaluate(() => {
+      const c = (el) => {
+        const b = el?.getBoundingClientRect();
+        return b && b.width > 0
+          ? [Math.round(b.left + b.width / 2), Math.round(b.top + b.height / 2)]
+          : null;
+      };
+      const on = '[data-testid="focus-stops"] section[data-on]';
+      return Object.fromEntries(
+        Object.entries({
+          open: c(document.querySelector(on + ' button')),
+          allPacks: c([...document.querySelectorAll(on + ' button')].at(-1)),
+          tab: c(document.querySelector('[data-stage-head] button')),
+          tile: c(
+            document.querySelector(
+              '[data-stage-panel]:not([hidden]) [data-stage-tile][data-pack-id="151"] [data-stage-art]',
+            ),
+          ),
+        }).filter(([, v]) => v),
+      );
+    });
+
+    // a finger that lands while the move from Closing crosses the paged
+    // edge: the move still lands on the exit end, the page never following it
+    if (s.cdp) {
+      await gesture(s, 1);
+      await page
+        .waitForFunction((edge) => window.scrollY > edge, r.edge, {
+          timeout: 3000,
+          polling: 16,
+        })
+        .catch(() => {});
+      // whether the page cancels each move of the finger (read by a window
+      // listener added after the flow's): the page must never follow it
+      await page.evaluate(() => {
+        window.__moveLog = [];
+        if (window.__moveLogOn) return;
+        window.__moveLogOn = true;
+        addEventListener(
+          'touchmove',
+          (e) => window.__moveLog.push(e.defaultPrevented),
+          { passive: true },
+        );
+      });
+      const yIn = await page.evaluate(() => scrollY);
+      const ys = page.evaluate(
+        () =>
+          new Promise((done) => {
+            const out = [];
+            const t0 = performance.now();
+            const tick = () => {
+              out.push(scrollY);
+              if (performance.now() - t0 < 1200) requestAnimationFrame(tick);
+              else done(out);
+            };
+            requestAnimationFrame(tick);
+          }),
+      );
+      await swipe(s, 200, 300, 200, 600);
+      const seq = await ys;
+      const back = seq.some((v, i) => i > 0 && v < seq[i - 1] - 0.5);
+      const moves = await page.evaluate(() => window.__moveLog);
+      const kept = moves.length > 0 && moves.every(Boolean);
+      r = await rest(page);
+      report(
+        'edge-touch-mid-move-' + size,
+        yIn > r.edge && kept && !back && near(r.y, r.exitEnd),
+        'finger at ' +
+          Math.round(yIn) +
+          ' (edge ' +
+          r.edge +
+          '); the scroll ' +
+          (back ? 'went back under it' : 'kept going') +
+          ', ' +
+          moves.filter(Boolean).length +
+          ' of ' +
+          moves.length +
+          ' moves cancelled' +
+          ', landing ' +
+          r.y +
+          ' (exit end ' +
+          r.exitEnd +
+          ')',
+      );
+    } else {
+      await page.keyboard.press('ArrowDown');
+      await page.waitForTimeout(200);
+      r = await rest(page);
+    }
+
+    // nothing of the faded pack takes a tap anywhere past the fade
+    const t = await page.evaluate(() => window.__packStage.flow().table);
+    const ysTap = [
+      Math.round(t.edge + 10),
+      ...[0, 0.25, 0.5, 0.75, 1].map((f) =>
+        Math.round(t.exitStart + f * (t.exitEnd - t.exitStart)),
+      ),
+    ];
+    const tapRows = [];
+    let tapsOk = true;
+    for (const y of ysTap) {
+      await page.evaluate((v) => window.scrollTo(0, v), y);
+      await page.waitForTimeout(400);
+      const hit = await page.evaluate((p) => {
+        const o = {};
+        for (const [k, [x, yy]] of Object.entries(p)) {
+          const el = document.elementFromPoint(x, yy);
+          o[k] = el?.closest('[data-stage-root]') ? 'PANEL' : 'page';
+        }
+        return { o, y: Math.round(scrollY) };
+      }, pts);
+      const bad = Object.values(hit.o).includes('PANEL');
+      tapsOk &&= !bad;
+      tapRows.push(
+        '| ' +
+          hit.y +
+          ' | ' +
+          Object.entries(hit.o)
+            .map(([k, v]) => k + ' ' + v)
+            .join(', ') +
+          ' |',
+      );
+    }
+    writeFileSync(
+      OUT + '/wp3c-taps-' + size + '.md',
+      [
+        '| scrollY | what a tap at each Closing control hits |',
+        '|---|---|',
+        ...tapRows,
+      ].join('\n') + '\n',
+    );
+    report(
+      'no-tap-past-fade-' + size,
+      tapsOk && Object.keys(pts).length >= 3,
+      Object.keys(pts).join(', ') +
+        ' at ' +
+        ysTap.join(', ') +
+        ': ' +
+        (tapsOk
+          ? 'none lands on the panel'
+          : 'a tap lands on the hidden panel'),
+    );
+
+    // the 3D sleeps in the free part, and wakes on the way back to Closing
+    await page.evaluate((v) => window.scrollTo(0, v), t.exitEnd);
+    await page.waitForTimeout(1500);
+    const e1 = await engineAt();
+    // back up: the scrollbar into the paged part, which snaps to Closing
+    await page.evaluate((v) => window.scrollTo(0, v), t.edge - 50);
+    await page.waitForTimeout(300);
+    r = await rest(page);
+    await page.waitForTimeout(400);
+    const e2 = await engineAt();
+    const MB = (b) => (b === null ? null : Math.round((b / 1048576) * 10) / 10);
+    report(
+      'engine-sleeps-past-closing-' + size,
+      e0.present === true &&
+        e1.present === false &&
+        !e1.running &&
+        e2.present === true &&
+        e2.running &&
+        near(r.y, closingY) &&
+        e2.live.length > 0,
+      'Closing: present ' +
+        e0.present +
+        ', running ' +
+        e0.running +
+        ', ' +
+        MB(e0.gpu) +
+        ' MB; free part: present ' +
+        e1.present +
+        ', running ' +
+        e1.running +
+        ', ' +
+        MB(e1.gpu) +
+        ' MB; back at Closing (' +
+        r.y +
+        '): present ' +
+        e2.present +
+        ', running ' +
+        e2.running +
+        ', drawn ' +
+        e2.live.join(','),
+    );
+    report(
+      'errors-wp3c-' + size,
       page.errors.length === 0,
       page.errors.join(' | '),
     );

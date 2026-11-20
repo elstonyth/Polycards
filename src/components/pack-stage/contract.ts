@@ -443,6 +443,8 @@ export interface Stage3dStage extends Stage3dApi {
     spin: Observable<number>;
     exit: Observable<number>;
   };
+  /** The flow shows the stage or sends it away (false: it sleeps and, after a while, lets its packs go). */
+  show(on: boolean): void;
   /** Resolves once settled: 3D prepared (`'3d'`/`'lite'`) or `'flat'`. Never rejects. */
   whenSettled(): Promise<StageMode>;
   /** Park the float-in at its start (`intro = 0`). Call while the loader covers the page. */

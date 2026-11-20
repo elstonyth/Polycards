@@ -267,6 +267,8 @@ class StageEngine {
   private watchdogOn = true;
 
   private inView = true;
+  /** The flow's say: false while nothing of the stage can be seen (past Closing). */
+  private shown = true;
   private released = false;
   private releaseTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -342,6 +344,13 @@ class StageEngine {
 
   wake = () => {
     this.poke();
+  };
+
+  /** The flow shows or sends away the stage: away, it sleeps as when scrolled out of view. */
+  show = (on: boolean) => {
+    if (this.shown === on) return;
+    this.shown = on;
+    this.onPresence();
   };
 
   /**
@@ -546,6 +555,7 @@ class StageEngine {
     this.gen++;
     this.teardownRuntime(true);
     this.unbindHost();
+    this.shown = true;
     for (const c of this.cleanups.splice(0)) c();
     this.clearReleaseTimer();
     this.introStop?.();
@@ -844,6 +854,7 @@ class StageEngine {
       (this.liveCapable || this.prefetching) &&
       !this.released &&
       this.inView &&
+      this.shown &&
       typeof document !== 'undefined' &&
       !document.hidden
     );
@@ -1023,7 +1034,7 @@ class StageEngine {
 
   /** Visibility or intersection changed. */
   private onPresence() {
-    const present = this.inView && !document.hidden;
+    const present = this.inView && this.shown && !document.hidden;
     if (present) {
       this.clearReleaseTimer();
       if (this.released) {
@@ -1038,7 +1049,7 @@ class StageEngine {
       this.releaseTimer = setTimeout(() => {
         this.releaseTimer = null;
         const rt = this.runtime;
-        if (!rt || (this.inView && !document.hidden)) return;
+        if (!rt || (this.inView && this.shown && !document.hidden)) return;
         this.resetLive();
         this.safe(() => rt.setPacks(null));
         this.released = true;
@@ -1072,6 +1083,7 @@ function makeFlatApi(): Stage3dStage {
     },
     attach: () => noop,
     wake: noop,
+    show: noop,
     whenSettled: () => Promise.resolve('flat'),
     holdIntro: noop,
     playIntro: () => Promise.resolve(),
@@ -1117,6 +1129,7 @@ export function Stage3dProvider({
       values: engine.values,
       attach: engine.attach,
       wake: engine.wake,
+      show: engine.show,
       whenSettled: engine.whenSettled,
       holdIntro: engine.holdIntro,
       playIntro: engine.playIntro,

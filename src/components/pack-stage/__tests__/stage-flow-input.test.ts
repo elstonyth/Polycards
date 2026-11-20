@@ -351,3 +351,97 @@ describe('flow load start (plan 2.8: a reload starts at the row)', () => {
     expect(flowLoadStart(undefined, 400, 0)).toBeNull();
   });
 });
+
+describe('flow input: a touch during a move across the paged edge (review finding 3)', () => {
+  /** Focused and resting on Closing (6000). */
+  function closing() {
+    const p = page();
+    p.input.wheel(100, 0, false, 0, 0);
+    run(p.input, 0, 16, 1600);
+    p.input.frame(6000, 1700);
+    p.input.frame(6000, 1716);
+    return p;
+  }
+
+  it('a finger that lands past the edge on the way down is ignored: the move lands on the exit end', () => {
+    const p = closing();
+    p.input.wheel(100, 0, false, 6000, 2000);
+    // 0.9 s in: past the edge (7500), the move still running
+    const y = run(p.input, 6000, 2016, 2900);
+    expect(y).toBeGreaterThan(7500);
+    p.input.touchStart(200, 600, y, 2910);
+    expect(p.input.touchMove(200, 500, y, 2926)).toBe(true);
+    p.input.touchEnd(y, 2942);
+    expect(run(p.input, y, 2958, 4000)).toBe(9000);
+  });
+
+  it('a finger that lands past the edge on the way back up is ignored: the move lands on Closing', () => {
+    const p = closing();
+    p.input.wheel(100, 0, false, 6000, 2000);
+    let y = run(p.input, 6000, 2016, 3600);
+    expect(y).toBe(9000);
+    // the browser's own scroll up to just below the edge, then an up notch
+    // that crosses it pages back to Closing
+    y = run(p.input, 7560, 3616, 3900);
+    expect(y).toBe(7560);
+    expect(p.input.wheel(-100, 0, false, 7560, 4000)).toBe(true);
+    // the first frame of the move: still below the edge
+    y = run(p.input, 7560, 4004, 4004);
+    expect(y).toBeGreaterThan(7500);
+    p.input.touchStart(200, 300, y, 4110);
+    expect(p.input.touchMove(200, 400, y, 4126)).toBe(true);
+    p.input.touchEnd(y, 4142);
+    expect(run(p.input, y, 4158, 5700)).toBe(6000);
+  });
+});
+
+describe('flow input: a touch that is dropped (review finding 2)', () => {
+  it('a cancelled touch leaves the snap and the idle report as they were', () => {
+    const p = page();
+    p.input.wheel(100, 0, false, 0, 0);
+    let y = run(p.input, 0, 16, 1600);
+    expect(y).toBe(1000);
+    // a finger lands, then its tracking is dropped (a second finger, say)
+    p.input.touchStart(200, 600, y, 1700);
+    p.input.touchCancel();
+    // a pinch left the page off its rest
+    y = 1180;
+    expect(p.input.frame(y, 1716).idle).toBe(false);
+    y = run(p.input, y, 1732, 2700);
+    expect(y).toBe(1000);
+    expect(p.input.frame(y, 2716).idle).toBe(true);
+  });
+
+  it('a cancelled touch in the free part hands the frame back to the pager', () => {
+    const p = page();
+    p.input.touchStart(200, 600, 9000, 0);
+    p.input.touchCancel();
+    expect(p.input.frame(9000, 16).idle).toBe(true);
+  });
+});
+
+describe('flow input: a down gesture refused at the row (review finding 1)', () => {
+  it('says so after a down notch, a swipe or a next key with no focusable pack yet', () => {
+    const p = page(null);
+    expect(p.input.wheel(100, 0, false, 0, 0)).toBe(true);
+    expect(p.input.refused()).toBe(true);
+    p.input.touchStart(200, 600, 0, 3000);
+    p.input.touchMove(200, 500, 0, 3016);
+    p.input.touchEnd(0, 3032);
+    expect(p.input.refused()).toBe(true);
+    expect(p.input.key('next', 0, 6000)).toBe('swallowed');
+    expect(p.input.refused()).toBe(true);
+  });
+
+  it('an up notch, a small notch, or a focusable pack is not a refusal', () => {
+    const p = page(null);
+    p.input.wheel(100, 0, false, 0, 0);
+    p.input.wheel(-100, 0, false, 0, 3000);
+    expect(p.input.refused()).toBe(false);
+    p.input.wheel(2, 0, false, 0, 6000);
+    expect(p.input.refused()).toBe(false);
+    const q = page();
+    q.input.wheel(100, 0, false, 0, 0);
+    expect(q.input.refused()).toBe(false);
+  });
+});

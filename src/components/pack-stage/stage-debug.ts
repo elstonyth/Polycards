@@ -12,6 +12,9 @@ type EngineView = {
   drawn: readonly string[];
   runtime: unknown;
   running: boolean;
+  inView: boolean;
+  shown: boolean;
+  released: boolean;
   state: StageState;
   stats(): StageRuntimeStats | null;
   wake(): void;
@@ -38,6 +41,9 @@ export function exposeStageDebug(engine: unknown): () => void {
     },
     runtime: () => rt()?.debug?.() ?? null,
     running: () => e.running,
+    /** Drawn at all: in view, shown by the flow, the tab visible. */
+    present: () => e.inView && e.shown && !document.hidden,
+    released: () => e.released,
     state: e.state,
     stats: () => e.stats(),
     wake: () => e.wake(),

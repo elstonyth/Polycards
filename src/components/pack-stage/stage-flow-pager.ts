@@ -170,8 +170,12 @@ export interface FlowPager {
   ): void;
   touchMove(x: number, y: number, scrollY: number, now: number): FlowTouchMove;
   touchEnd(scrollY: number, now: number): void;
+  /** The touch's tracking is dropped (a second finger, a release that is not ours): nothing pages. */
+  touchCancel(): void;
   frame(scrollY: number, now: number): FlowPagerFrame;
   busy(): boolean;
+  /** The last gesture (wheel, key, release) was a down gesture at the row that entry refused. */
+  refused(): boolean;
 }
 
 type Move = { t0: number; from: number; k: number; ms: number };
@@ -271,6 +275,8 @@ export function createFlowPager(): FlowPager {
   let ext: number[] = [];
   let duration: (from: number, to: number) => number = () => PAGE_MS;
   let entry = true;
+  /** The last gesture asked to enter stop 1 while entry was refused. */
+  let refusedEntry = false;
   let move: Move | null = null;
   let glide: Glide | null = null;
   let touch: Touch | null = null;
@@ -304,7 +310,10 @@ export function createFlowPager(): FlowPager {
           k = j;
           break;
         }
-      if (k === 1 && !entry) return null;
+      if (k === 1 && !entry) {
+        refusedEntry = true;
+        return null;
+      }
     } else {
       for (let j = ext.length - 1; j >= 0; j--)
         if (ext[j]! < y - SAME_PX) {
@@ -409,6 +418,7 @@ export function createFlowPager(): FlowPager {
     },
     zone: zoneOf,
     wheel(dy, dx, shift, scrollY, now) {
+      refusedEntry = false;
       if (!table) return false;
       if (shift || Math.abs(dx) > Math.abs(dy)) return false;
       const abs = Math.abs(dy);
@@ -439,9 +449,11 @@ export function createFlowPager(): FlowPager {
       return true;
     },
     step(dir, scrollY, now) {
+      refusedEntry = false;
       return key(scrollY, () => targetFrom(scrollY, dir), now);
     },
     goTo(k, scrollY, now, ms) {
+      refusedEntry = false;
       const pick = () =>
         ext.length === 0 ? null : Math.max(0, Math.min(ext.length - 1, k));
       return key(scrollY, pick, now, ms);
@@ -487,6 +499,7 @@ export function createFlowPager(): FlowPager {
       return { consumed: true, axis: 'y', scrollTo: t.follow };
     },
     touchEnd(scrollY, now) {
+      refusedEntry = false;
       const t = touch;
       touch = null;
       if (!t || !table || t.ignored || t.axis !== 'y' || locked()) return;
@@ -505,6 +518,9 @@ export function createFlowPager(): FlowPager {
         } else glide = { y: scrollY, target: table.edge, toEdge: true };
       } else if (Math.abs(target - scrollY) >= SAME_PX)
         glide = { y: scrollY, target, toEdge: false };
+    },
+    touchCancel() {
+      touch = null;
     },
     frame(scrollY, now) {
       const dt = lastFrame === null ? FRAME_MS : Math.max(0, now - lastFrame);
@@ -590,5 +606,6 @@ export function createFlowPager(): FlowPager {
       return out(null, k, false, !off && !touch, zone);
     },
     busy: locked,
+    refused: () => refusedEntry,
   };
 }
