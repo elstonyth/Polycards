@@ -14,6 +14,7 @@
 import type { ReactNode } from 'react';
 import type {
   ComposeCtx,
+  FocusKey,
   SpinPanel,
   SpinRange,
   StageSpinKit,
@@ -82,6 +83,26 @@ function geomOf(row: HTMLElement, host: HTMLElement): TileGeom | null {
   return g;
 }
 
+/**
+ * The picture is the front: at a back stop it holds the last front-facing
+ * pose (no turn, no lie-down), and the stop's block carries the back's facts.
+ */
+const heldKeys = new WeakMap<readonly FocusKey[], FocusKey[]>();
+function frontKeys(keys: readonly FocusKey[]): FocusKey[] {
+  let out = heldKeys.get(keys);
+  if (!out) {
+    let last: FocusKey | undefined;
+    out = keys.map((k) => {
+      if (k.face !== 'back') return (last = k);
+      return last
+        ? { ...last, kind: k.kind }
+        : { ...k, face: 'front', ry: 0, rz: 0, on: 0 };
+    });
+    heldKeys.set(keys, out);
+  }
+  return out;
+}
+
 const fmt = (v: number) => String(Math.round(v * 10000) / 10000);
 
 export const SPIN_KIT: StageSpinKit = {
@@ -133,6 +154,7 @@ export const SPIN_KIT: StageSpinKit = {
         lf = { ...l, cx: g.panel.w / 2 };
         ctx.focus = {
           ...fo.ctx,
+          keys: frontKeys(fo.ctx.keys),
           panel: { w: g.panel.w, h: g.panel.h },
           anchorY: g.panel.anchorY,
           backW: 0,
