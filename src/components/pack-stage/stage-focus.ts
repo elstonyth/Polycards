@@ -85,7 +85,7 @@ function keyBlock(
     rotX: key.rx * DEG,
     rotY: ry * DEG,
     rotZ: key.rz * DEG,
-    scale: (key.long * h) / l.artH,
+    scale: (key.long * h) / (l.artH * (ctx.fit ?? 1)),
     dim: soldOut ? FOCUS_SOLD_OUT_DIM : 1,
     fx: w > 0 ? (key.cx * w - l.cx) / w : 0,
     fy: h > 0 ? (key.cy * h - l.cy) / h : 0,

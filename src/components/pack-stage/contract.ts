@@ -88,6 +88,11 @@ export type StageState = {
    * (not only in `SpinCtx`) so the runtime redraws when it changes.
    */
   exit: number;
+  /**
+   * The focused pack, written by the focus chunk while `focus > 0` (absent
+   * otherwise). The runtime and the tiles read the same declaration.
+   */
+  focusOn?: StageFocusOn | null;
 };
 export type StageLayout = {
   cx: number;
@@ -267,6 +272,8 @@ export type FocusKey = {
  * - `keys`: its stops in order (stop k >= 1 rests on `keys[k - 1]`).
  * - `panel`: the panel in host CSS px (keys are fractions of it).
  * - `backW`: 0..1, the back's readiness (back stops turn over as it arrives).
+ * - `fit`: the drawn art height over the art box height (`object-fit:
+ *   contain` of a pack wider than the box); keys size the drawn pack.
  */
 export type FocusCtx = {
   index: number;
@@ -274,6 +281,20 @@ export type FocusCtx = {
   keys: readonly FocusKey[];
   panel: { w: number; h: number };
   backW?: number;
+  fit?: number;
+};
+
+/**
+ * The focus declaration on `StageState.focusOn`. `term` and `spot` are the
+ * focus maths, passed in so the runtime chunk does not carry them; `details`
+ * is the back to print (null: the pack shows no back).
+ */
+export type StageFocusOn = {
+  id: string;
+  ctx: FocusCtx;
+  term: FocusTerm;
+  spot(focus: number, ctx: Readonly<FocusCtx>): { on: number; rect: SpotRect };
+  details: PackBackDetails | null;
 };
 
 export type StageFocusRequest = {

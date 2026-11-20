@@ -342,6 +342,8 @@ export function startSpin(host: SpinHost): SpinControl {
     trace = [];
     gestures = [];
     dbg.spinTrace = () => ({ trace, gestures });
+    dbg.focusKit = () =>
+      import(/* webpackChunkName: "pack-stage-focus" */ './stage-focus-kit');
   }
   if (dbg)
     dbg.spin = () => ({

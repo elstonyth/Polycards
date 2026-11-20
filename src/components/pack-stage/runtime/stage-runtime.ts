@@ -15,10 +15,16 @@
 import * as THREE from 'three';
 
 import { openPack3d, type Pack3d } from '@/components/pack-3d/catalog/build';
-import type { PackFoilSettings } from '@/components/pack-3d/pack-material';
+import type {
+  PackFoilMaterial,
+  PackFoilSettings,
+} from '@/components/pack-3d/pack-material';
 import type { PackModel } from '@/components/pack-3d/pack-model';
 import type {
   ComposeCtx,
+  FocusCtx,
+  PackBackDetails,
+  StageFocusOn,
   StageLayout,
   StageRuntime,
   StageRuntimeFailReason,
@@ -71,6 +77,8 @@ const LITE_FOIL: Partial<PackFoilSettings> = { clearcoat: 0, sheen: 0 };
  */
 const ENV_DIM_EXPONENT = Math.log(0.35) / Math.log(0.4);
 const LITE_MAX_ANISOTROPY = 4;
+/** A back that reaches the GPU after its pack got to a back stop turns over this long. */
+const BACK_TURN_MS = 650;
 
 type Res = 'half' | 'full';
 type VariantState =
@@ -134,6 +142,20 @@ type Slot = {
   wantFull: boolean;
 };
 
+/** The focused pack's back, printed from the full plate on its drawn variant. */
+type FocusBack = {
+  slot: Slot;
+  v: Variant;
+  details: PackBackDetails;
+  state: 'printing' | 'ready' | 'failed';
+  /** GPU bytes once uploaded (charged to the uploaded total). */
+  bytes: number;
+  /** Peak CPU bytes the print held. */
+  transient: number;
+  /** Render time the back reached the GPU (NaN until the next frame). */
+  readyAt: number;
+};
+
 export type StageRuntimeDebug = {
   slots: {
     id: string;
@@ -162,6 +184,15 @@ export type StageRuntimeDebug = {
   copies: number;
   spinBand: boolean;
   bandH: number;
+  /** The focused back: state, GPU bytes, peak print bytes, canvas bytes held, turn weight. */
+  focusBack: {
+    id: string;
+    state: FocusBack['state'];
+    bytes: number;
+    transient: number;
+    canvasBytes: number;
+    backW: number;
+  } | null;
 };
 
 export type StageRuntimeBench = StageRuntime & {
@@ -229,6 +260,12 @@ export function createStageRuntime(
   let spinBand = false;
   /** Repeats (clones) drawn in the last frame. */
   let lastCopies = 0;
+  /** The focused pack's back (one at a time). */
+  let focusBack: FocusBack | null = null;
+  let backW = 0;
+  /** The material the spotlight was last set on. */
+  let spotted: PackFoilMaterial | null = null;
+  let lastFocusOn: StageFocusOn | null = null;
 
   let inflight = 0;
   let uploadedBytes = 0;
@@ -322,8 +359,88 @@ export function createStageRuntime(
     return b;
   };
 
+  /** Frees the focused back (its GPU texture and canvas) and its charge. */
+  const dropFocusBack = () => {
+    const fb = focusBack;
+    if (!fb) return;
+    focusBack = null;
+    backW = 0;
+    if (fb.state === 'ready') uploadedBytes -= fb.bytes;
+    if (fb.v.state !== 'disposed') fb.v.handle.hideBack();
+    needsDraw = true;
+  };
+
+  /**
+   * The back the focused pack needs: printed on the variant drawn for it (on
+   * a promoted desktop pack, once the full front is up), reprinted when that
+   * variant or the details change, freed when focus ends.
+   */
+  const syncFocusBack = (fo: StageFocusOn | null) => {
+    const slot = fo
+      ? slots.find((x) => x.id === fo.id && x.index === fo.ctx.index)
+      : undefined;
+    let target: Variant | null = null;
+    if (fo?.details && slot) {
+      target =
+        slot.wantFull && !slot.fullFailed
+          ? slot.full?.state === 'uploaded'
+            ? slot.full
+            : null
+          : slot.half?.state === 'uploaded'
+            ? slot.half
+            : null;
+    }
+    const fb = focusBack;
+    if (
+      fb &&
+      (!fo ||
+        !fo.details ||
+        fb.slot !== slot ||
+        fb.details !== fo.details ||
+        fb.v.state === 'disposed' ||
+        (target !== null && fb.v !== target))
+    )
+      dropFocusBack();
+    if (focusBack || !target || !fo?.details || !slot) return;
+    const st = stage;
+    if (!st) return;
+    const next: FocusBack = {
+      slot,
+      v: target,
+      details: fo.details,
+      state: 'printing',
+      bytes: 0,
+      transient: 0,
+      readyAt: Number.NaN,
+    };
+    focusBack = next;
+    backW = 0;
+    target.handle
+      .showBack(fo.details, { plate: 'full', releaseCanvas: true })
+      .then(
+        (b) => {
+          if (focusBack !== next || dead()) return;
+          if (!b) {
+            next.state = 'failed';
+            return;
+          }
+          // on the GPU now (and the print canvas freed), not mid-pose later
+          st.renderer.initTexture(b.texture);
+          next.bytes = b.info.bytes;
+          next.transient = b.transientBytes;
+          next.state = 'ready';
+          uploadedBytes += next.bytes;
+          needsDraw = true;
+        },
+        () => {
+          if (focusBack === next) next.state = 'failed';
+        },
+      );
+  };
+
   const disposeVariant = (v: Variant | null) => {
     if (!v || v.state === 'disposed') return;
+    if (focusBack?.v === v) dropFocusBack();
     if (v.state === 'uploaded') uploadedBytes -= v.bytes;
     v.state = 'disposed';
     disposeCopies(v);
@@ -332,6 +449,15 @@ export function createStageRuntime(
     v.handle.dispose();
     counters.disposals++;
     needsDraw = true;
+  };
+
+  /** The focused back's bytes, an estimate (the full front's size) while it prints. */
+  const focusBackBytes = (): number => {
+    const fb = focusBack;
+    if (!fb || fb.state === 'failed') return 0;
+    return fb.state === 'ready'
+      ? fb.bytes
+      : textureBytes(fb.slot.width, fb.slot.height);
   };
 
   const disposeSlot = (slot: Slot) => {
@@ -462,7 +588,7 @@ export function createStageRuntime(
         : config,
       promote: spinRow ? null : promotion.index,
       // A prefetch for the coming list holds its share of the budget.
-      budgetBytes: Math.max(0, budget() - stagedBytes()),
+      budgetBytes: Math.max(0, budget() - stagedBytes() - focusBackBytes()),
       bytes: (i, res) => {
         const s = fromWrapped.get(i);
         return s ? estimateBytes(s, res) : 0;
@@ -864,9 +990,12 @@ export function createStageRuntime(
       direction = direction
         ? nextDirection(direction, track)
         : initialDirection(track);
-      const spinRow = s.spin > 0 || s.exit > 0;
-      if (spinRow !== spinBand) {
-        spinBand = spinRow;
+      const fo = s.focus > 0 ? (s.focusOn ?? null) : null;
+      const spinRow = (s.spin > 0 || s.exit > 0) && !fo;
+      // the focused pack's stops reach the whole panel too
+      const wide = spinRow || fo !== null;
+      if (wide !== spinBand) {
+        spinBand = wide;
         applyBand();
       }
       const promoteOn =
@@ -879,6 +1008,32 @@ export function createStageRuntime(
       if (!booting) applyPlan(track, now, spinRow);
       const next = booting ? null : nextUpload(track, spinRow);
       if (next) upload(next);
+
+      if (fo !== lastFocusOn) {
+        lastFocusOn = fo;
+        needsDraw = true;
+      }
+      if (!booting) syncFocusBack(fo);
+      const fb = focusBack;
+      let turning = false;
+      if (fb?.state === 'ready') {
+        if (Number.isNaN(fb.readyAt)) fb.readyAt = now;
+        const t = clamp01((now - fb.readyAt) / BACK_TURN_MS);
+        const w = t * t * (3 - 2 * t);
+        if (w !== backW) {
+          backW = w;
+          needsDraw = true;
+        }
+        turning = w < 1;
+      } else if (backW !== 0) {
+        backW = 0;
+        needsDraw = true;
+      }
+      if (!fo && spotted) {
+        spotted.setSpot({ on: 0, rect: { x0: 0, y0: 0, x1: 1, y1: 1 } });
+        spotted = null;
+        needsDraw = true;
+      }
 
       const moved = stateChanged(s);
       const canDraw = layout !== null && hostW > 0 && hostH > 0;
@@ -931,6 +1086,19 @@ export function createStageRuntime(
             l.artW && slot.width > 0 && slot.height > 0
               ? Math.min(1, l.artW / l.artH / (slot.width / slot.height))
               : 1;
+          const focused = fo !== null && slot.index === fo.ctx.index;
+          let fctx: FocusCtx | null = null;
+          if (fo) {
+            fctx = {
+              ...fo.ctx,
+              panel: { w: hostW, h: hostH },
+              anchorY: panel.anchorY,
+              backW: fo.details ? backW : 0,
+              fit,
+            };
+            ctx.focus = fctx;
+            ctx.focusTerm = fo.term;
+          }
           const fitted = fit < 1 ? { ...l, artH: l.artH * fit } : l;
           const slotX = l.cx + (slot.index - track) * l.step;
           const paint = (
@@ -977,13 +1145,22 @@ export function createStageRuntime(
             copiesDrawn++;
           }
           // The same fade as the CSS tiles: reach (the row's, in the spin) and the category switch.
-          const opacity = stageOpacity(s, slot.index, desktop, n, ctx);
+          const opacity =
+            stageOpacity(s, slot.index, desktop, n, ctx) *
+            (fo ? fo.term.opacity(s.focus, focused) : 1);
           if (opacity <= 0) {
             model.visible = false;
             continue;
           }
           const pose = poseAt(s, slot.index, l, desktop, slot.soldOut, ctx);
           paint(model, model.material, pose, opacity);
+          if (focused && fo && fctx) {
+            const sp = fo.spot(s.focus, fctx);
+            if (spotted && spotted !== model.material)
+              spotted.setSpot({ on: 0, rect: sp.rect });
+            model.material.setSpot(sp);
+            spotted = model.material;
+          }
           if (frustum.intersectsObject(model.mesh)) live.push(slot.id);
         }
         lastCopies = copiesDrawn;
@@ -1007,6 +1184,8 @@ export function createStageRuntime(
             (sl.wantFull && sl.full?.state !== 'uploaded' && !sl.fullFailed),
         ) ||
         promotionPending(promotion, track, promoteOn) ||
+        focusBack?.state === 'printing' ||
+        turning ||
         (needsDraw && canDraw);
       return { live: [...live], wantsFrame: pending };
     } catch {
@@ -1022,8 +1201,14 @@ export function createStageRuntime(
       textures: info?.memory.textures ?? 0,
       geometries: info?.memory.geometries ?? 0,
       programs: info?.programs?.length ?? 0,
+      // the focused back's print canvas counts until the upload frees it
       gpuBytesEstimate: stage
-        ? bufferBytes + stage.environmentBytes + uploadedBytes
+        ? bufferBytes +
+          stage.environmentBytes +
+          uploadedBytes +
+          (focusBack && focusBack.v.state !== 'disposed'
+            ? focusBack.v.handle.canvasBytes()
+            : 0)
         : 0,
     };
   };
@@ -1057,6 +1242,19 @@ export function createStageRuntime(
       copies: lastCopies,
       spinBand,
       bandH: band.h,
+      focusBack: focusBack
+        ? {
+            id: focusBack.slot.id,
+            state: focusBack.state,
+            bytes: focusBack.bytes,
+            transient: focusBack.transient,
+            canvasBytes:
+              focusBack.v.state === 'disposed'
+                ? 0
+                : focusBack.v.handle.canvasBytes(),
+            backW,
+          }
+        : null,
     };
   };
 
@@ -1088,6 +1286,7 @@ export function createStageRuntime(
     canvas.removeEventListener('webglcontextlost', onContextLost);
     const st = stage;
     const shared = st ? sharedTextures(st) : [];
+    dropFocusBack();
     for (const s of slots) disposeSlot(s);
     dropStaged();
     slots = [];
