@@ -52,9 +52,43 @@ describe('stage flow: the section table', () => {
     expect(t.r0).toBe(0);
     expect(t.rests).toEqual([1000, 2000, 3000, 4000, 5000, 6000]);
     expect(t.rl).toBe(7000);
-    expect(t.exitEnd).toBe(8000);
+    // the Lineup spacer (RL to RL + S), then the Exit spacer (to RL + 2 S)
+    expect(t.exitStart).toBe(8000);
+    expect(t.exitEnd).toBe(9000);
     expect(t.edge).toBe(7500);
     expect(flowStops(t)).toEqual([0, 1000, 2000, 3000, 4000, 5000, 6000, 7000]);
+  });
+
+  it('the stops are built once per table', () => {
+    const t = table();
+    expect(t.stops).toEqual([0, 1000, 2000, 3000, 4000, 5000, 6000, 7000]);
+    expect(flowStops(t)).toBe(flowStops(t));
+  });
+
+  it('a measured Exit spacer sets the exit; the computed one is only the fallback', () => {
+    const m = table({ exit: { top: 8100, height: 1100 } });
+    expect(m.exitStart).toBe(8100);
+    expect(m.exitEnd).toBe(9200);
+    expect(m.rise!.start).toBe(10720);
+    // the free part starts at the measured end
+    expect(flowAt(9200, m)).toEqual({ zone: 'free', span: 'exit', t: 1 });
+    expect(flowAt(9201, m).zone === 'free' && flowAt(9201, m)).toMatchObject({
+      span: 'free',
+    });
+    // the spacer as the CSS lays it (R0 + 8 S, one section tall) is the fallback
+    const css = table({ top: 120, exit: { top: 8120, height: 1000 } });
+    const fallback = table({ top: 120 });
+    expect([css.exitStart, css.exitEnd]).toEqual([
+      fallback.exitStart,
+      fallback.exitEnd,
+    ]);
+    // a spacer with no height yet (the flag is off): the fallback
+    const z = table({ exit: { top: 8100, height: 0 } });
+    expect([z.exitStart, z.exitEnd]).toEqual([8000, 9000]);
+    // never above the lineup rest
+    const up = table({ exit: { top: 6000, height: 500 } });
+    expect(up.exitStart).toBe(7000);
+    expect(up.exitEnd).toBe(7000);
   });
 
   it('starts from the flow top', () => {
@@ -87,7 +121,7 @@ describe('stage flow: the section table', () => {
     expect(noOdds.rests).toEqual([1000, 2667, 4333, 6000]);
     for (const t of [table(), capsule, noOdds]) {
       expect(t.rl).toBe(7000);
-      expect(t.exitEnd).toBe(8000);
+      expect(t.exitEnd).toBe(9000);
       expect(t.rests[0]).toBe(1000);
       expect(t.rests[t.rests.length - 1]).toBe(6000);
       for (const r of t.rests) expect(Number.isInteger(r)).toBe(true);
@@ -148,9 +182,12 @@ describe('stage flow: the flow position P', () => {
   });
 
   it('free: the named spans with their progress', () => {
-    expect(flowAt(7500, t)).toEqual({ zone: 'free', span: 'exit', t: 0.5 });
-    expect(flowAt(8000, t)).toEqual({ zone: 'free', span: 'exit', t: 1 });
-    const free = flowAt(9360, t);
+    // the lineup holds through its own section, then the exit plays
+    expect(flowAt(7500, t)).toEqual({ zone: 'free', span: 'lineup', t: 0.5 });
+    expect(flowAt(8000, t)).toEqual({ zone: 'free', span: 'lineup', t: 1 });
+    expect(flowAt(8500, t)).toEqual({ zone: 'free', span: 'exit', t: 0.5 });
+    expect(flowAt(9000, t)).toEqual({ zone: 'free', span: 'exit', t: 1 });
+    const free = flowAt(9860, t);
     expect(free.zone === 'free' && free.span).toBe('free');
     expect(free.zone === 'free' && free.t).toBeCloseTo(0.5, 6);
     expect(flowAt(11360, t)).toEqual({ zone: 'free', span: 'rise', t: 0.5 });
@@ -165,9 +202,9 @@ describe('stage flow: the flow position P', () => {
   });
 
   it('a page shorter than the rise start clamps the spans in order', () => {
-    const s = table({ telegram: { top: 7600, bottom: 8200 } });
-    expect(s.rise!.start).toBe(8000);
-    expect(s.rise!.end).toBe(8200);
+    const s = table({ telegram: { top: 8600, bottom: 9200 } });
+    expect(s.rise!.start).toBe(9000);
+    expect(s.rise!.end).toBe(9200);
     expect(s.ret!.start).toBeGreaterThanOrEqual(s.rise!.end);
   });
 
@@ -191,6 +228,7 @@ describe('stage flow: the flow position P', () => {
       { zone: 'paged', p: 3 },
       { zone: 'paged', p: 4.4 },
       { zone: 'paged', p: 7 },
+      { zone: 'free', span: 'lineup', t: 0.4 },
       { zone: 'free', span: 'exit', t: 0.3 },
       { zone: 'free', span: 'free', t: 0.5 },
       { zone: 'free', span: 'rise', t: 0.25 },
@@ -333,10 +371,16 @@ describe('stage flow: term weights', () => {
 
   it('free spans: exit on the lineup term, nothing drawn in free, then rise and return', () => {
     expect(flowTerms(flowAt(7600, t), 6)).toMatchObject({
+      exit: 0,
+      handoff: 1,
+      spread: 1,
+      weights: { lineup: 1 },
+    });
+    expect(flowTerms(flowAt(8600, t), 6)).toMatchObject({
       exit: 0.6,
       weights: { lineup: 1 },
     });
-    expect(flowTerms(flowAt(9000, t), 6).weights.empty).toBe(1);
+    expect(flowTerms(flowAt(9500, t), 6).weights.empty).toBe(1);
     expect(flowTerms(flowAt(11360, t), 6)).toMatchObject({
       rise: 0.5,
       weights: { rise: 1 },

@@ -5,7 +5,9 @@
  *
  * The page is one table of scroll positions. The paged part: the row rest
  * R0, the focused pack's stops spread over a band of six sections, and the
- * lineup rest RL. The free part: the lineup exit, the free content, the rise
+ * lineup rest RL. The free part: the lineup holding through its own section
+ * (the Lineup spacer), the lineup exit (the Exit spacer, ending where the
+ * opening line's top meets the viewport top), the free content, the rise
  * (keyed to the Telegram section), Return and Last. One value, the flow
  * position P, is read from the scroll; every pose and text switch is a
  * function of P only, so scrolling back retraces the way down exactly.
@@ -45,6 +47,13 @@ export type FlowGeometry = {
   stops: number;
   /** The viewport height (px) the rise start is a share of. */
   viewport: number;
+  /**
+   * The Exit spacer (plan 2.1: after Row S, the band 6 S and Lineup S); its
+   * bottom is the opening line's top, where the free part starts. Absent or
+   * zero height: computed as RL + S to RL + 2 S, the spacers' CSS heights.
+   * Same origin as `top` (document scroll pixels, as the caller derives R0).
+   */
+  exit?: { top: number; height: number } | null;
   /** The Telegram section; absent until it is measured. */
   telegram?: { top: number; bottom: number } | null;
   /** The Return spacer; absent or zero height until it is built. */
@@ -62,6 +71,10 @@ export type FlowTable = {
   /** The focused pack's rests, whole pixels, ascending. */
   rests: number[];
   rl: number;
+  /** The paged stops [R0, rests..., RL], built once per table. */
+  stops: readonly number[];
+  /** The lineup exit starts here (the Exit spacer's top). */
+  exitStart: number;
   /** The end of the lineup exit (the free part starts). */
   exitEnd: number;
   /** The paged zone ends here (RL + S / 2) [ours, plan 2.2]. */
@@ -72,7 +85,8 @@ export type FlowTable = {
   lastHeight: number;
 };
 
-export type FlowSpan = 'exit' | 'free' | 'rise' | 'ret' | 'last';
+/** `lineup`: the lineup at rest through its own section, before the exit. */
+export type FlowSpan = 'lineup' | 'exit' | 'free' | 'rise' | 'ret' | 'last';
 
 /** The flow position: paged (P, 0 = row, 1..n stops, n + 1 = lineup) or a free span's progress. */
 export type FlowAt =
@@ -100,7 +114,12 @@ export function flowTable(g: FlowGeometry): FlowTable | null {
   // whole pixels, as the focus kit rounds its stops
   const rests = flowSlots(g.stops).map((s) => Math.round(r0 + s * S));
   const rl = Math.round(r0 + FLOW_LINEUP_SLOT * S);
-  const exitEnd = Math.round(rl + S);
+  // the layout is the source of truth; the CSS heights are the fallback
+  const measured = !!g.exit && g.exit.height > 0;
+  const exitStart = measured ? Math.max(rl, g.exit!.top) : Math.round(rl + S);
+  const exitEnd = measured
+    ? Math.max(exitStart, g.exit!.top + g.exit!.height)
+    : Math.round(rl + 2 * S);
   const vp = Math.max(0, g.viewport);
   let after = exitEnd;
   let rise: FlowRange | null = null;
@@ -122,6 +141,8 @@ export function flowTable(g: FlowGeometry): FlowTable | null {
     r0,
     rests,
     rl,
+    stops: [r0, ...rests, rl],
+    exitStart,
     exitEnd,
     edge: rl + S / 2,
     rise,
@@ -131,9 +152,9 @@ export function flowTable(g: FlowGeometry): FlowTable | null {
   };
 }
 
-/** The paged stops: [R0, rests..., RL]. */
-export function flowStops(t: FlowTable): number[] {
-  return [t.r0, ...t.rests, t.rl];
+/** The paged stops: [R0, rests..., RL] (the table's own list; do not mutate). */
+export function flowStops(t: FlowTable): readonly number[] {
+  return t.stops;
 }
 
 /** The fractional index of y in an ascending list (clamped to its ends). */
@@ -164,13 +185,18 @@ const progress = (y: number, a: number, b: number): number =>
 
 /** The flow position at a scroll. */
 export function flowAt(scrollY: number, t: FlowTable): FlowAt {
-  if (scrollY <= t.rl)
-    return { zone: 'paged', p: indexAt(scrollY, flowStops(t)) };
+  if (scrollY <= t.rl) return { zone: 'paged', p: indexAt(scrollY, t.stops) };
+  if (scrollY <= t.exitStart)
+    return {
+      zone: 'free',
+      span: 'lineup',
+      t: progress(scrollY, t.rl, t.exitStart),
+    };
   if (scrollY <= t.exitEnd)
     return {
       zone: 'free',
       span: 'exit',
-      t: progress(scrollY, t.rl, t.exitEnd),
+      t: progress(scrollY, t.exitStart, t.exitEnd),
     };
   if (t.lastTop !== null && scrollY >= t.lastTop)
     return {
@@ -203,14 +229,16 @@ export function flowAt(scrollY: number, t: FlowTable): FlowAt {
  * rise the free span has no length, so its progress cannot be kept.
  */
 export function flowPosition(at: FlowAt, t: FlowTable): number {
-  if (at.zone === 'paged') return positionAt(at.p, flowStops(t));
+  if (at.zone === 'paged') return positionAt(at.p, t.stops);
   const x = clamp01(at.t);
   const along = (a: number, b: number) => a + (b - a) * x;
   const riseStart = t.rise?.start ?? t.exitEnd;
   const riseEnd = t.rise?.end ?? riseStart;
   switch (at.span) {
+    case 'lineup':
+      return along(t.rl, t.exitStart);
     case 'exit':
-      return along(t.rl, t.exitEnd);
+      return along(t.exitStart, t.exitEnd);
     case 'free':
       return along(t.exitEnd, riseStart);
     case 'rise':
@@ -274,83 +302,65 @@ export type FlowTerms = {
   spread: number;
 };
 
-const weights = (
-  on: FlowTerm,
-  w = 1,
-  other?: FlowTerm,
-): Record<FlowTerm, number> => {
-  const r: Record<FlowTerm, number> = {
-    focus: 0,
-    lineup: 0,
-    empty: 0,
-    rise: 0,
-    return: 0,
-  };
-  r[on] = w;
-  if (other) r[other] = 1 - w;
-  return r;
-};
-
-/** The terms at a flow position, for a pack with n stops. */
+/** The terms at a flow position, for a pack with n stops (one result object per call). */
 export function flowTerms(at: FlowAt, n: number): FlowTerms {
   const stops = Math.max(0, Math.floor(n));
-  const base = {
-    focus: 0,
-    handoff: 0,
-    exit: 0,
-    rise: 0,
-    ret: 0,
-    spread: FLOW_SPREAD_FROM,
-  };
-  if (at.zone === 'paged') {
-    const p = Math.min(stops + 1, Math.max(0, at.p));
-    if (p <= stops) return { ...base, weights: weights('focus'), focus: p };
-    const h = power1InOut(p - stops);
-    return {
-      ...base,
-      weights: weights('lineup', h, 'focus'),
-      focus: stops,
-      handoff: h,
-      spread: spreadAt(h),
-    };
-  }
-  const x = clamp01(at.t);
-  const lineupDone = {
-    ...base,
+  const r: FlowTerms = {
+    weights: { focus: 0, lineup: 0, empty: 0, rise: 0, return: 0 },
     focus: stops,
     handoff: 1,
+    exit: 1,
+    rise: 0,
+    ret: 0,
     spread: FLOW_SPREAD_TO,
   };
+  const w = r.weights;
+  if (at.zone === 'paged') {
+    const p = Math.min(stops + 1, Math.max(0, at.p));
+    r.exit = 0;
+    if (p <= stops) {
+      w.focus = 1;
+      r.focus = p;
+      r.handoff = 0;
+      r.spread = FLOW_SPREAD_FROM;
+      return r;
+    }
+    const h = power1InOut(p - stops);
+    w.lineup = h;
+    w.focus = 1 - h;
+    r.handoff = h;
+    r.spread = spreadAt(h);
+    return r;
+  }
+  const x = clamp01(at.t);
   switch (at.span) {
+    case 'lineup':
+      w.lineup = 1;
+      r.exit = 0;
+      return r;
     case 'exit':
-      return { ...lineupDone, weights: weights('lineup'), exit: x };
+      w.lineup = 1;
+      r.exit = x;
+      return r;
     case 'free':
-      return { ...lineupDone, weights: weights('empty'), exit: 1 };
+      w.empty = 1;
+      return r;
     case 'rise':
-      return {
-        ...lineupDone,
-        weights: weights('rise'),
-        exit: 1,
-        rise: x,
-        spread: FLOW_SPREAD_FROM,
-      };
+      w.rise = 1;
+      r.rise = x;
+      r.spread = FLOW_SPREAD_FROM;
+      return r;
     case 'ret':
-      return {
-        ...lineupDone,
-        weights: weights('return'),
-        exit: 1,
-        rise: 1,
-        ret: x,
-        spread: spreadAt(x),
-      };
+      w.return = 1;
+      r.rise = 1;
+      r.ret = x;
+      r.spread = spreadAt(x);
+      return r;
     case 'last':
-      return {
-        ...lineupDone,
-        weights: weights('return'),
-        exit: 1,
-        rise: 1,
-        ret: 1,
-      };
+      w.return = 1;
+      r.rise = 1;
+      r.ret = 1;
+      return r;
   }
 }
 

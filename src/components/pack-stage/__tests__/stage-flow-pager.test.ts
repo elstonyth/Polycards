@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { flowTable, type FlowGeometry } from '../stage-flow';
+import { WRAP_GUARD_MS, flowTable, type FlowGeometry } from '../stage-flow';
 import {
+  GLIDE_HANDOFF_PX,
   GLIDE_LERP,
   GLIDE_POWER,
   SNAP_MS,
@@ -22,7 +23,7 @@ import {
   createPager,
 } from '../stage-pager';
 
-// panel 800: S = 1000; rests 1000..6000, RL 7000, edge 7500, exit end 8000
+// panel 800: S = 1000; rests 1000..6000, RL 7000, edge 7500, exit end 9000
 const GEO: FlowGeometry = {
   top: 0,
   panel: 800,
@@ -54,6 +55,42 @@ function run(p: FlowPager, y0: number, from: number, to: number): number {
     if (f.scrollTo !== null) y = f.scrollTo;
   }
   return y;
+}
+/**
+ * A free flick: the finger moves `speed` px/s (positive: finger up, page
+ * down) for about `ms`, with frames every `dt` ms, then lets go; frames run
+ * on at the same rate. Returns the scroll at release, at rest, and the time
+ * from release to 90% of the glide.
+ */
+function flick(
+  p: FlowPager,
+  y0: number,
+  speed: number,
+  dt: number,
+  ms = 100,
+): { release: number; end: number; t90: number } {
+  let y = y0;
+  let now = 0;
+  let finger = 600;
+  p.touchStart(200, finger, y, now);
+  p.frame(y, now);
+  while (now + dt <= ms) {
+    now += dt;
+    finger -= (speed * dt) / 1000;
+    y = p.touchMove(200, finger, y, now).scrollTo ?? y;
+    p.frame(y, now);
+  }
+  const release = y;
+  p.touchEnd(y, now);
+  const seen: [number, number][] = [];
+  for (let t = now + dt; t <= now + 8000; t += dt) {
+    const f = p.frame(y, t);
+    if (f.scrollTo !== null) y = f.scrollTo;
+    seen.push([t - now, y]);
+  }
+  const goal = release + 0.9 * (y - release);
+  const hit = seen.find(([, v]) => (y > release ? v >= goal : v <= goal));
+  return { release, end: y, t90: hit ? hit[0] : Number.NaN };
 }
 /** A finger swipe in the paged zone: start, two moves, release. */
 function swipe(
@@ -93,7 +130,8 @@ describe('flow pager: numbers', () => {
   it('the stop list is [R0, rests, RL] with the exit end past it', () => {
     const t = tableFor();
     expect(t.stops).toEqual([0, 1000, 2000, 3000, 4000, 5000, 6000, 7000]);
-    expect(t.exitEnd).toBe(8000);
+    expect(t.exitEnd).toBe(9000);
+    expect(t.lastTop).toBe(13000);
     expect(t.edge).toBe(7500);
     expect(t.lineup).toBe(true);
     expect(tableFor({}, focusStops('capsule')).stops).toEqual([
@@ -179,7 +217,7 @@ describe('flow pager: wheel', () => {
     expect(p.busy()).toBe(false);
     swipe(p, 0, 500, 0, -80);
     expect(p.busy()).toBe(false);
-    expect(p.step(1, 0, 1000)).toBe(false);
+    expect(p.step(1, 0, 1000)).toBe('swallowed');
     p.setEntry(true);
     expect(p.wheel(100, 0, false, 0, 2000)).toBe(true);
     expect(p.busy()).toBe(true);
@@ -222,8 +260,8 @@ describe('flow pager: wheel', () => {
   it('from the lineup, down glides through the exit to the free part', () => {
     const p = make();
     p.wheel(100, 0, false, 7000, 0);
-    expect(run(p, 7000, 0, 1600)).toBe(8000);
-    expect(p.zone(8000)).toBe('free');
+    expect(run(p, 7000, 0, 1600)).toBe(9000);
+    expect(p.zone(9000)).toBe('free');
   });
 
   it('an up notch at RL + 0.4 S goes to RL, not to Closing', () => {
@@ -249,16 +287,33 @@ describe('flow pager: wheel', () => {
     expect(run(p, 7600, 2000, 3600)).toBe(7000);
   });
 
-  it('keys step and go to a stop; nothing while a move runs', () => {
+  it('keys step and go to a stop; swallowed while a move runs', () => {
     const p = make();
-    expect(p.step(1, 0, 0)).toBe(true);
-    expect(p.step(1, 100, 10)).toBe(false);
+    expect(p.step(1, 0, 0)).toBe('moved');
+    expect(p.step(1, 100, 10)).toBe('swallowed');
     expect(run(p, 0, 0, 1600)).toBe(1000);
-    expect(p.goTo(7, 1000, 2000)).toBe(true);
+    expect(p.goTo(7, 1000, 2000)).toBe('moved');
     expect(run(p, 1000, 2000, 3600)).toBe(7000);
-    expect(p.step(-1, 7000, 4000)).toBe(true);
+    expect(p.step(-1, 7000, 4000)).toBe('moved');
     expect(run(p, 7000, 4000, 5600)).toBe(6000);
-    expect(p.goTo(0, 0, 6000)).toBe(false); // already at the row
+    expect(p.goTo(0, 0, 6000)).toBe('swallowed'); // already at the row
+  });
+
+  it('keys: swallowed where nothing moves in the paged zone, so the browser never scrolls there', () => {
+    const p = make();
+    expect(p.step(-1, 0, 0)).toBe('swallowed'); // up at the row
+    p.setEntry(false);
+    expect(p.step(1, 0, 0)).toBe('swallowed'); // entry refused
+    expect(p.busy()).toBe(false);
+  });
+
+  it("keys in the free part are the browser's own (plan 2.10)", () => {
+    const p = make();
+    expect(p.step(-1, 20000, 0)).toBe('free');
+    expect(p.step(1, 9500, 0)).toBe('free');
+    expect(p.goTo(0, 20000, 0)).toBe('free');
+    expect(p.busy()).toBe(false);
+    expect(createFlowPager().step(1, 0, 0)).toBe('free'); // no table: no flow
   });
 });
 
@@ -298,6 +353,20 @@ describe('flow pager: touch in the paged zone', () => {
     expect(p.busy()).toBe(false);
     // nothing more happens afterwards
     expect(run(p, y, 1600, 3000)).toBe(2000);
+  });
+
+  it("a swipe that starts late in a move and ends after the landing leaves the page on the move's stop", () => {
+    const p = make();
+    p.wheel(100, 0, false, 2000, 0); // 1.5 s to 3000
+    let y = run(p, 2000, 0, 1392);
+    p.touchStart(200, 400, y, 1400);
+    p.touchMove(200, 340, y, 1416);
+    y = run(p, y, 1408, 1592);
+    expect(y).toBe(3000);
+    p.touchMove(200, 300, y, 1596);
+    p.touchEnd(y, 1600);
+    expect(run(p, y, 1600, 3500)).toBe(3000);
+    expect(p.busy()).toBe(false);
   });
 
   it('a diagonal at 46 and 60 degrees from vertical gives no scroll change (fault 2)', () => {
@@ -445,13 +514,15 @@ describe('flow pager: free touch and glide', () => {
     }
     expect(y).toBe(9160);
     p.touchEnd(y, 90);
+    // 32 px per 16 ms is 2000 px/s: 33.3 px per 60 Hz frame, gliding about 388 px
+    const glide = 388;
     // first frame of the glide: 7.5% of the way
     const g = p.frame(y, 96);
-    expect(g.scrollTo! - 9160).toBeGreaterThan(0.06 * 362);
-    expect(g.scrollTo! - 9160).toBeLessThan(0.09 * 362);
+    expect(g.scrollTo! - 9160).toBeGreaterThan(0.06 * glide);
+    expect(g.scrollTo! - 9160).toBeLessThan(0.09 * glide);
     const end = run(p, g.scrollTo!, 112, 4000);
-    expect(end).toBeGreaterThan(9160 + 350);
-    expect(end).toBeLessThan(9160 + 370);
+    expect(end).toBeGreaterThan(9160 + glide - 10);
+    expect(end).toBeLessThan(9160 + glide + 10);
 
     const q = make();
     y = 9000;
@@ -461,6 +532,64 @@ describe('flow pager: free touch and glide', () => {
     q.frame(y, 32); // the finger held still for a frame
     q.touchEnd(y, 40);
     expect(run(q, y, 48, 1000)).toBe(9100);
+  });
+
+  it('the glide is the same length at 120, 60 and 30 Hz frames (1920 px/s glides about 362 px)', () => {
+    const at = (dt: number) => {
+      const r = flick(make(), 9000, 1920, dt, 96);
+      return r.end - r.release;
+    };
+    const base = at(1000 / 60);
+    expect(base).toBeGreaterThan(352);
+    expect(base).toBeLessThan(372);
+    for (const dt of [8, 16, 33]) {
+      expect(Math.abs(at(dt) - base)).toBeLessThan(0.03 * base);
+    }
+  });
+
+  it('the glide eases over the same time at any frame rate', () => {
+    const t8 = flick(make(), 9000, 1920, 8, 96).t90;
+    const t33 = flick(make(), 9000, 1920, 33, 99).t90;
+    // lerp 0.075 per 60 Hz frame: 90% after about 30 frames (0.5 s)
+    expect(t8).toBeGreaterThan(450);
+    expect(t8).toBeLessThan(550);
+    expect(Math.abs(t33 - t8)).toBeLessThanOrEqual(33);
+  });
+
+  it('a re-measure that leaves the paged part alone keeps a free glide; a moved origin shifts it', () => {
+    const plain = flick(make(), 9000, 1920, 16, 96);
+    const glideOn = (g: Partial<FlowGeometry> | null) => {
+      const p = make();
+      let y = 9000;
+      let finger = 600;
+      p.touchStart(200, finger, y, 0);
+      for (let now = 16; now <= 96; now += 16) {
+        finger -= 30.72;
+        y = p.touchMove(200, finger, y, now).scrollTo ?? y;
+        p.frame(y, now);
+      }
+      p.touchEnd(y, 96);
+      y = run(p, y, 112, 240);
+      if (g) p.setTable(tableFor(g));
+      return run(p, y + (g?.top ?? 0), 256, 6000);
+    };
+    // a free section grew (an image loaded): same paged part, same glide
+    expect(glideOn({ telegram: { top: 11400, bottom: 12400 } })).toBeCloseTo(
+      plain.end,
+      6,
+    );
+    // something above the flow grew by 120 px: the glide moves with it
+    expect(glideOn({ top: 120 })).toBeCloseTo(plain.end + 120, 6);
+    // the paged part changed (a new panel height): the glide stops
+    const p = make();
+    let y = 9000;
+    p.touchStart(200, 600, y, 0);
+    y = p.touchMove(200, 552, y, 16).scrollTo!;
+    p.frame(y, 16);
+    p.touchEnd(y, 20);
+    y = run(p, y, 32, 100);
+    p.setTable(tableFor({ panel: 400 }));
+    expect(p.frame(y, 116).scrollTo).toBeNull();
   });
 
   it('a touch during the glide stops it', () => {
@@ -498,6 +627,42 @@ describe('flow pager: free touch and glide', () => {
     expect(min).toBe(7000);
   });
 
+  it('an up glide that reaches the edge pages to the lineup at once', () => {
+    const p = make();
+    let y = 8000;
+    p.touchStart(200, 300, y, 0);
+    for (let i = 1; i <= 6; i++) {
+      y = p.touchMove(200, 300 + 48 * i, y, i * 16).scrollTo ?? y;
+      p.frame(y, i * 16);
+    }
+    p.touchEnd(y, 100);
+    let near: number | null = null;
+    let landed: number | null = null;
+    for (let now = 112; now < 4000; now += 16) {
+      const f = p.frame(y, now);
+      if (f.scrollTo !== null) y = f.scrollTo;
+      if (near === null && y - 7500 <= GLIDE_HANDOFF_PX) {
+        near = now;
+        // the move to RL has begun by the frame that comes within a few px
+        expect(p.busy()).toBe(true);
+      }
+      if (landed === null && y === 7000) landed = now;
+    }
+    expect(near).not.toBeNull();
+    expect(landed! - near!).toBeLessThanOrEqual(SNAP_MS + 16);
+  });
+
+  it('released within a few px of the edge with an up flick: pages to the lineup on release', () => {
+    const p = make();
+    p.touchStart(200, 300, 7600, 0);
+    const y = p.touchMove(200, 397, 7600, 16).scrollTo!;
+    p.frame(y, 16);
+    expect(y).toBe(7503);
+    p.touchEnd(y, 20);
+    expect(p.busy()).toBe(true);
+    expect(run(p, y, 32, 1000)).toBe(7000);
+  });
+
   it('the finger itself is held at the paged edge', () => {
     const p = make();
     p.touchStart(200, 300, 7600, 0);
@@ -516,7 +681,7 @@ describe('flow pager: free touch and glide', () => {
       scrollTo: null,
     });
     p.touchEnd(y, 1050);
-    expect(run(p, y, 1016, 1600)).toBe(8000);
+    expect(run(p, y, 1016, 1600)).toBe(9000);
   });
 });
 
@@ -529,6 +694,87 @@ describe('flow pager: a re-measure', () => {
     p.setTable(tableFor({ panel: 400 }));
     y = run(p, 1000 * (y / 2000), 752, 1600);
     expect(y).toBe(1000);
+  });
+
+  it('mid-move: the move carries on from where it was on the new table', () => {
+    const p = make();
+    p.wheel(100, 0, false, 1000, 0);
+    const y = run(p, 1000, 0, 752); // 1000 -> 2000, half way in time
+    p.setTable(tableFor({ panel: 400 })); // stop 1 at 500, stop 2 at 1000
+    // the page keeps its place in the section: about y / 2, not the new target
+    const f = p.frame(y / 2, 768);
+    expect(f.scrollTo).toBeCloseTo(y / 2, -1);
+    expect(f.scrollTo! < 990).toBe(true);
+  });
+
+  it('a pack change mid-move keeps the target by role: up from the lineup still lands on Closing', () => {
+    const p = make(); // sleeve, six stops
+    p.wheel(-100, 0, false, 7000, 0); // to Closing
+    let y = run(p, 7000, 0, 288);
+    p.setTable(tableFor({}, focusStops('capsule'))); // five stops
+    let max = 0;
+    for (let now = 304; now <= 1600; now += 16) {
+      const f = p.frame(y, now);
+      if (f.scrollTo !== null) y = f.scrollTo;
+      max = Math.max(max, y);
+    }
+    expect(y).toBe(6000);
+    expect(max).toBeLessThan(7000);
+  });
+
+  it('a pack change mid-move: Closing to the lineup lands on the lineup, not past it', () => {
+    const p = make();
+    p.wheel(100, 0, false, 6000, 0);
+    const y = run(p, 6000, 0, 288);
+    p.setTable(tableFor({}, focusStops('noOdds'))); // four stops
+    expect(run(p, y, 304, 1600)).toBe(7000);
+  });
+
+  it('a pack change mid-move: the exit end stays the exit end; a pack stop keeps its distance from Closing', () => {
+    const a = make();
+    a.wheel(100, 0, false, 7000, 0);
+    let y = run(a, 7000, 0, 288);
+    a.setTable(tableFor({}, focusStops('capsule')));
+    expect(run(a, y, 304, 1600)).toBe(9000);
+    // sleeve: Buyback (4) up to Pull Odds (3), three before Closing; a
+    // capsule's stop three before Closing is its second (2250)
+    const b = make();
+    b.wheel(-100, 0, false, 4000, 0);
+    y = run(b, 4000, 0, 288);
+    b.setTable(tableFor({}, focusStops('capsule')));
+    expect(run(b, y, 304, 1600)).toBe(2250);
+    // sleeve: up to Front (five before Closing); four stops have no such
+    // stop: the nearest, Front
+    const c = make();
+    c.wheel(-100, 0, false, 2000, 0);
+    y = run(c, 2000, 0, 288);
+    c.setTable(tableFor({}, focusStops('noOdds')));
+    expect(run(c, y, 304, 1600)).toBe(1000);
+  });
+
+  it('a pack change mid-move with no lineup stop (the stops end at Closing): roles still hold', () => {
+    const t = (stops: number[]) => ({
+      stops,
+      kinds: focusStops('sleeve').slice(0, stops.length - 1),
+      exitEnd: 9000,
+      edge: 7500,
+      lineup: false,
+    });
+    const six = [0, 1000, 2000, 3000, 4000, 5000, 6000];
+    const five = [0, 1000, 2250, 3500, 4750, 6000];
+    const p = createFlowPager();
+    p.setTable(t(six));
+    p.wheel(100, 0, false, 6000, 0); // Closing to the exit end
+    let y = run(p, 6000, 0, 288);
+    p.setTable(t(five));
+    expect(run(p, y, 304, 1600)).toBe(9000);
+    // Buyback up to Pull Odds, three before Closing: the capsule's second stop
+    const q = createFlowPager();
+    q.setTable(t(six));
+    q.wheel(-100, 0, false, 4000, 0);
+    y = run(q, 4000, 0, 288);
+    q.setTable(t(five));
+    expect(run(q, y, 304, 1600)).toBe(2250);
   });
 
   it('a variant change leaves RL and the free part where they were', () => {
@@ -584,5 +830,112 @@ describe('flow pager: agrees with the focus pager at the rests', () => {
     });
     expect(b.wheel(100, 0, false, 1000, 0)).toBe(true);
     expect(b.busy()).toBe(false);
+  });
+});
+
+describe('flow pager: the wrap (plan 2.7)', () => {
+  it("a flick across Last's top wraps once to the overshoot, then the 1.2 s lock eases to the row", () => {
+    const p = make();
+    let y = 12800;
+    p.touchStart(200, 600, y, 0);
+    for (let i = 1; i <= 3; i++) {
+      y = p.touchMove(200, 600 - 48 * i, y, i * 16).scrollTo ?? y;
+      p.frame(y, i * 16);
+    }
+    expect(y).toBe(12944);
+    p.touchEnd(y, 50);
+    let wraps = 0;
+    let wrappedAt: number | null = null;
+    let after: number[] = [];
+    for (let now = 64; now < 4000; now += 16) {
+      const f = p.frame(y, now);
+      if (f.wrap === 0) {
+        wraps++;
+        wrappedAt = now;
+        expect(f.scrollTo!).toBeGreaterThan(0);
+        expect(f.scrollTo!).toBeLessThan(800);
+      }
+      if (f.scrollTo !== null) y = f.scrollTo;
+      if (wrappedAt !== null) after.push(y);
+    }
+    expect(wraps).toBe(1);
+    // never dragged back towards Last: it only falls to the row
+    for (let i = 1; i < after.length; i++)
+      expect(after[i]!).toBeLessThanOrEqual(after[i - 1]!);
+    expect(y).toBe(0);
+    after = [];
+  });
+
+  it("a native scroll across Last's top (scrollbar, End) wraps too, and the lock lands on the row in 1.2 s", () => {
+    const p = make();
+    p.frame(12990, 0);
+    const f = p.frame(13050, 16);
+    expect(f.scrollTo).toBe(50);
+    expect(f.wrap).toBe(0);
+    expect(p.busy()).toBe(true);
+    const mid = p.frame(50, 16 + 600);
+    expect(mid.scrollTo).toBeCloseTo(50 * 0.125, 6); // ease-out cubic at half time
+    expect(mid.wrap).toBe(600);
+    const end = p.frame(mid.scrollTo!, 16 + WRAP_GUARD_MS);
+    expect(end.scrollTo).toBe(0);
+    expect(p.busy()).toBe(false);
+    expect(p.frame(0, 2000).wrap ?? null).toBeNull();
+  });
+
+  it('a finger held through the wrap writes nothing, during the lock or after it', () => {
+    const p = make();
+    let y = 12900;
+    p.touchStart(200, 600, y, 0);
+    y = p.touchMove(200, 550, y, 16).scrollTo!;
+    p.frame(y, 16);
+    y = p.touchMove(200, 480, y, 32).scrollTo!;
+    expect(y).toBe(13020);
+    const w = p.frame(y, 32);
+    expect(w.scrollTo).toBe(20);
+    y = 20;
+    expect(p.touchMove(200, 400, y, 48).scrollTo).toBeNull();
+    for (let now = 48; now <= 32 + WRAP_GUARD_MS + 16; now += 16) {
+      const f = p.frame(y, now);
+      if (f.scrollTo !== null) y = f.scrollTo;
+    }
+    expect(y).toBe(0);
+    expect(p.touchMove(200, 300, y, 1400).scrollTo).toBeNull();
+    p.touchEnd(y, 1420);
+    expect(run(p, y, 1432, 3000)).toBe(0);
+  });
+
+  it('wheel, keys and touch paging are swallowed during the lock', () => {
+    const p = make();
+    p.frame(12990, 0);
+    let y = p.frame(13030, 16).scrollTo!;
+    expect(p.wheel(100, 0, false, y, 100)).toBe(true);
+    expect(p.step(1, y, 120)).toBe('swallowed');
+    expect(p.goTo(3, y, 130)).toBe('swallowed');
+    p.touchStart(200, 400, y, 140);
+    p.touchMove(200, 300, y, 156);
+    p.touchEnd(y, 170);
+    y = run(p, y, 32, 16 + WRAP_GUARD_MS + 16);
+    expect(y).toBe(0);
+    expect(run(p, y, 1300, 3000)).toBe(0);
+    // paging resumes after the lock
+    expect(p.wheel(100, 0, false, 0, 3200)).toBe(true);
+    expect(run(p, 0, 3200, 4800)).toBe(1000);
+  });
+
+  it("never upwards, and a re-measure that moves Last's top is not a crossing", () => {
+    const p = make();
+    p.frame(13300, 0);
+    expect(p.frame(12900, 16).scrollTo).toBeNull(); // up across it: nothing
+    const q = make();
+    q.frame(12990, 0);
+    q.setTable(tableFor({ last: { top: 12950, height: 801 } }));
+    expect(q.frame(12990, 16).scrollTo).toBeNull();
+    expect(q.busy()).toBe(false);
+  });
+
+  it('no Last in the table: no wrap', () => {
+    const p = make({ last: null });
+    p.frame(12990, 0);
+    expect(p.frame(13050, 16).scrollTo).toBeNull();
   });
 });

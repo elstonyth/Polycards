@@ -24,15 +24,28 @@
  *   ignored: the move always lands (the opposite of the reference's fault).
  * - Snap: at rest in the paged zone the scroll is always on a rest; a page
  *   left off one glides to the nearest after 150 ms of quiet, in 600 ms.
- * - Free part: the wheel is native, except an up notch that would cross the
- *   edge, which pages to RL. Touch follows the finger 1:1; on release it
- *   glides `sign * |v|^1.7` px (v: the scroll change in the last frame),
- *   eased by lerp 0.075 per 60 Hz frame. An up glide is held at the edge,
- *   then pages to RL: scrolling back always stops at the lineup.
+ * - Free part: the wheel and the keys are native, except an up notch that
+ *   would cross the edge, which pages to RL. Touch follows the finger 1:1; on
+ *   release it glides `sign * |v|^1.7` px (v: the scroll change in the last
+ *   frame, scaled to a 60 Hz frame), eased by lerp 0.075 per 60 Hz frame. An
+ *   up glide that comes within a few px of the edge pages to RL: scrolling
+ *   back always stops at the lineup. A re-measure keeps a glide unless the
+ *   paged part changed shape.
  * - Row: up at R0 does nothing; down at R0 enters stop 1 only while entry
  *   is allowed (a pack that cannot be focused swallows it).
+ * - Wrap (plan 2.7): crossing Last's top going down, by any means, jumps to
+ *   the overshoot and runs a locked 1.2 s ease-out scroll to R0; the pager
+ *   owns it, so no glide or held finger writes an old position after it, and
+ *   wheel, keys and touch are swallowed until it ends.
+ * - A re-measure or a new pack mid-move keeps the move's target by role
+ *   (row, a pack stop by its distance from the last one, lineup, exit end).
  */
-import { flowStops, indexAt, positionAt, type FlowTable } from './stage-flow';
+import {
+  WRAP_GUARD_MS,
+  wrapScrollAt,
+  wrapTarget,
+  type FlowTable,
+} from './stage-flow';
 import {
   AXIS_LOCK_PX,
   PAGE_MS,
@@ -52,6 +65,8 @@ export const SNAP_MS = 600;
 export const GLIDE_POWER = 1.7;
 /** ... eased by this lerp per frame [code, P §C], applied as a 60 Hz rate so frame time cannot change it [ours]. */
 export const GLIDE_LERP = 0.075;
+/** An up glide this close to the paged edge hands over to the move to RL [ours]. */
+export const GLIDE_HANDOFF_PX = 4;
 /** Positions this close count as the same. */
 const SAME_PX = 0.5;
 const FRAME_MS = 1000 / 60;
@@ -69,6 +84,8 @@ export type FlowPagerTable = {
   edge: number;
   /** The last stop is the lineup: a sideways touch there is the row's drag. */
   lineup: boolean;
+  /** Last's top, the wrap line; absent or null: no wrap. */
+  lastTop?: number | null;
 };
 
 /** The pager table for a flow table and the chosen pack's stop kinds. */
@@ -77,15 +94,16 @@ export function flowPagerTable(
   kinds: readonly string[],
 ): FlowPagerTable {
   return {
-    stops: flowStops(t),
+    stops: t.stops,
     kinds,
     exitEnd: t.exitEnd,
     edge: t.edge,
     lineup: true,
+    lastTop: t.lastTop,
   };
 }
 
-/** The free glide's length for a last-frame scroll change v (px). */
+/** The free glide's length for a last-frame scroll change v (px per 60 Hz frame). */
 export function glideDistance(v: number): number {
   return v === 0 ? 0 : Math.sign(v) * Math.pow(Math.abs(v), GLIDE_POWER);
 }
@@ -108,7 +126,20 @@ export type FlowPagerFrame = {
   /** At rest: the caller's loop may sleep. */
   idle: boolean;
   zone: FlowZone;
+  /**
+   * Ms since the wrap while its lock runs (0 on the wrap frame itself: set
+   * `track` to the chosen pack and hide the row UI; fade it in with
+   * `wrapUiOpacity`). Absent or null: no wrap running.
+   */
+  wrap?: number | null;
 };
+
+/**
+ * What a key did: `moved` (a move started) and `swallowed` (nothing to do
+ * here, or a move or the wrap lock runs): the caller cancels the key;
+ * `free`: the free part or no flow, the browser's own key.
+ */
+export type FlowKeyResult = 'moved' | 'swallowed' | 'free';
 
 export interface FlowPager {
   /** A new table (a re-measure or a new pack); a running move keeps its stop. */
@@ -124,10 +155,10 @@ export interface FlowPager {
     scrollY: number,
     now: number,
   ): boolean;
-  /** Keys: one stop that way. False when nothing moves. */
-  step(dir: 1 | -1, scrollY: number, now: number): boolean;
-  /** Keys and icons: straight to stop k. False when moving or already there. */
-  goTo(k: number, scrollY: number, now: number, ms?: number): boolean;
+  /** Keys: one stop that way. */
+  step(dir: 1 | -1, scrollY: number, now: number): FlowKeyResult;
+  /** Keys and icons: straight to stop k (the exit end is stops.length). */
+  goTo(k: number, scrollY: number, now: number, ms?: number): FlowKeyResult;
   /** `strip`: the touch started on the Top Hits strip. */
   touchStart(
     x: number,
@@ -157,6 +188,81 @@ type Touch = {
   prevFollow: number;
   v: number;
 };
+type Lock = { t0: number; from: number };
+
+/** The targets a move can have: the stops plus the exit end. */
+const targetsOf = (t: FlowPagerTable): number[] =>
+  t.exitEnd === null ? [...t.stops] : [...t.stops, t.exitEnd];
+/** The pack's stops in a table (between the row and the lineup or the end). */
+const packCount = (t: FlowPagerTable): number =>
+  Math.max(0, t.stops.length - 1 - (t.lineup ? 1 : 0));
+
+/**
+ * Stop k of table a, by role, in table b: the row stays the row, the lineup
+ * the lineup, the exit end the exit end; a pack stop keeps its distance from
+ * the last pack stop (Closing), or goes to the nearest pack stop b has.
+ */
+function sameRole(k: number, a: FlowPagerTable, b: FlowPagerTable): number {
+  const lastB = b.stops.length - 1;
+  if (k <= 0) return 0;
+  if (a.exitEnd !== null && k >= a.stops.length)
+    return b.exitEnd !== null ? b.stops.length : lastB;
+  if (a.lineup && k === a.stops.length - 1)
+    return b.lineup ? lastB : b.exitEnd !== null ? b.stops.length : lastB;
+  const pb = packCount(b);
+  if (pb === 0) return b.lineup ? lastB : 0;
+  return Math.max(1, Math.min(pb, pb - (packCount(a) - k)));
+}
+
+/** Positions that mean the same in both tables (row, Front, Closing, lineup, exit end), ascending. */
+function anchors(a: FlowPagerTable, b: FlowPagerTable): [number[], number[]] {
+  const xa: number[] = [];
+  const xb: number[] = [];
+  const add = (u: number | undefined, v: number | undefined) => {
+    if (u === undefined || v === undefined) return;
+    const n = xa.length;
+    if (n > 0 && (u <= xa[n - 1]! || v <= xb[n - 1]!)) return;
+    xa.push(u);
+    xb.push(v);
+  };
+  const pa = packCount(a);
+  const pb = packCount(b);
+  add(a.stops[0], b.stops[0]);
+  if (pa > 0 && pb > 0) {
+    add(a.stops[1], b.stops[1]);
+    add(a.stops[pa], b.stops[pb]);
+  }
+  if (a.lineup && b.lineup)
+    add(a.stops[a.stops.length - 1], b.stops[b.stops.length - 1]);
+  if (a.exitEnd !== null && b.exitEnd !== null) add(a.exitEnd, b.exitEnd);
+  return [xa, xb];
+}
+
+/** y on table a, at the same place on table b (piecewise linear between anchors). */
+function remap(y: number, a: FlowPagerTable, b: FlowPagerTable): number {
+  const [xa, xb] = anchors(a, b);
+  const n = xa.length;
+  if (n === 0) return y;
+  if (n === 1) return y + xb[0]! - xa[0]!;
+  let j = 0;
+  while (j < n - 2 && y > xa[j + 1]!) j++;
+  const u0 = xa[j]!;
+  const v0 = xb[j]!;
+  return v0 + ((y - u0) * (xb[j + 1]! - v0)) / (xa[j + 1]! - u0);
+}
+
+/** How far the paged part moved as a whole from a to b; null when it changed shape. */
+function pagedShift(a: FlowPagerTable, b: FlowPagerTable): number | null {
+  if (a.stops.length !== b.stops.length || a.lineup !== b.lineup) return null;
+  const d = (b.stops[0] ?? 0) - (a.stops[0] ?? 0);
+  const same = (u: number, v: number) => Math.abs(v - u - d) < SAME_PX;
+  for (let j = 0; j < a.stops.length; j++)
+    if (!same(a.stops[j]!, b.stops[j]!)) return null;
+  if (!same(a.edge, b.edge)) return null;
+  if ((a.exitEnd === null) !== (b.exitEnd === null)) return null;
+  if (a.exitEnd !== null && !same(a.exitEnd, b.exitEnd!)) return null;
+  return d;
+}
 
 export function createFlowPager(): FlowPager {
   let table: FlowPagerTable | null = null;
@@ -167,15 +273,20 @@ export function createFlowPager(): FlowPager {
   let move: Move | null = null;
   let glide: Glide | null = null;
   let touch: Touch | null = null;
+  /** The wrap's locked scroll to the row. */
+  let lock: Lock | null = null;
   let quiet = false;
   let lastWheel = Number.NEGATIVE_INFINITY;
   let lastAbs = 0;
   let seenY: number | null = null;
   let changedAt = 0;
   let lastFrame: number | null = null;
+  /** The scroll the last frame ended on (read or written): the wrap's "before". */
+  let prevY: number | null = null;
 
   const zoneOf = (y: number): FlowZone =>
     table && y <= table.edge ? 'paged' : 'free';
+  const locked = () => move !== null || lock !== null;
   const nearest = (y: number): number => {
     const s = table?.stops ?? [];
     let k = 0;
@@ -205,8 +316,7 @@ export function createFlowPager(): FlowPager {
   const begin = (y: number, k: number, now: number, ms?: number): boolean => {
     const to = ext[k];
     if (to === undefined || Math.abs(to - y) < SAME_PX) return false;
-    const fromK = Math.round(indexAt(y, table?.stops ?? []));
-    move = { t0: now, from: y, k, ms: ms ?? duration(fromK, k) };
+    move = { t0: now, from: y, k, ms: ms ?? duration(nearest(y), k) };
     glide = null;
     return true;
   };
@@ -215,27 +325,82 @@ export function createFlowPager(): FlowPager {
     const rl = table.stops[table.stops.length - 1]!;
     return Math.abs(y - rl) <= table.edge - rl;
   };
+  /** A key or icon: the browser's own in the free part, swallowed while locked. */
+  const key = (
+    scrollY: number,
+    k: () => number | null,
+    now: number,
+    ms?: number,
+  ): FlowKeyResult => {
+    if (!table) return 'free';
+    if (locked()) return 'swallowed';
+    if (zoneOf(scrollY) === 'free') return 'free';
+    const to = k();
+    return to !== null && begin(scrollY, to, now, ms) ? 'moved' : 'swallowed';
+  };
+  const out = (
+    scrollTo: number | null,
+    target: number | null,
+    animating: boolean,
+    idle: boolean,
+    zone: FlowZone,
+    wrap: number | null = null,
+  ): FlowPagerFrame => {
+    if (scrollTo !== null) prevY = scrollTo;
+    return { scrollTo, target, animating, idle, zone, wrap };
+  };
+  /** The wrap: to the overshoot now, then the locked scroll to R0. */
+  const startWrap = (overshoot: number, now: number): FlowPagerFrame => {
+    glide = null;
+    move = null;
+    lock = { t0: now, from: overshoot };
+    const t = touch;
+    if (t) {
+      // a held finger belongs to the lock now: rebased, and it writes nothing
+      t.start = t.follow = t.prevFollow = overshoot;
+      t.y0 = t.y;
+      t.v = 0;
+      t.free = false;
+      t.ignored = true;
+    }
+    return out(overshoot, 0, true, false, zoneOf(overshoot), 0);
+  };
 
   return {
     setTable(t) {
-      if (move && t) {
-        // keep the move's place: its start by fractional index, its stop by number
-        const next =
-          t.exitEnd === null ? [...t.stops] : [...t.stops, t.exitEnd];
-        move.from = positionAt(indexAt(move.from, ext), next);
-        move.k = Math.min(move.k, next.length - 1);
+      const old = table;
+      if (old && t) {
+        if (move) {
+          // keep the move's place: its start where it means the same, its stop by role
+          move.from = remap(move.from, old, t);
+          move.k = sameRole(move.k, old, t);
+        }
+        if (lock) lock.from = remap(lock.from, old, t);
+        const d = pagedShift(old, t);
+        if (d === null) glide = null;
+        else if (d !== 0) {
+          // the scroll origin moved: everything below it moved with it
+          if (glide) {
+            glide.y += d;
+            glide.target += d;
+          }
+          if (touch && touch.free) {
+            touch.start += d;
+            touch.follow += d;
+            touch.prevFollow += d;
+          }
+          if (prevY !== null) prevY += d;
+        }
       }
       table = t;
-      ext = t
-        ? t.exitEnd === null
-          ? [...t.stops]
-          : [...t.stops, t.exitEnd]
-        : [];
+      ext = t ? targetsOf(t) : [];
       duration = t ? durationFor(t.kinds) : () => PAGE_MS;
-      glide = null;
       if (!t) {
         move = null;
+        glide = null;
         touch = null;
+        lock = null;
+        prevY = null;
       }
     },
     setEntry(allowed) {
@@ -250,7 +415,7 @@ export function createFlowPager(): FlowPager {
       const rise = abs > lastAbs;
       lastWheel = now;
       lastAbs = abs;
-      if (move) {
+      if (locked()) {
         quiet = true;
         return true;
       }
@@ -273,13 +438,12 @@ export function createFlowPager(): FlowPager {
       return true;
     },
     step(dir, scrollY, now) {
-      if (!table || move) return false;
-      const k = targetFrom(scrollY, dir);
-      return k !== null && begin(scrollY, k, now);
+      return key(scrollY, () => targetFrom(scrollY, dir), now);
     },
     goTo(k, scrollY, now, ms) {
-      if (!table || move || ext.length === 0) return false;
-      return begin(scrollY, Math.max(0, Math.min(ext.length - 1, k)), now, ms);
+      const pick = () =>
+        ext.length === 0 ? null : Math.max(0, Math.min(ext.length - 1, k));
+      return key(scrollY, pick, now, ms);
     },
     touchStart(x, y, scrollY, _now, o) {
       if (!table) {
@@ -293,7 +457,7 @@ export function createFlowPager(): FlowPager {
         y,
         start: scrollY,
         axis: null,
-        ignored: move !== null,
+        ignored: locked(),
         free: zoneOf(scrollY) === 'free',
         strip: !!o?.strip,
         follow: scrollY,
@@ -324,7 +488,7 @@ export function createFlowPager(): FlowPager {
     touchEnd(scrollY, now) {
       const t = touch;
       touch = null;
-      if (!t || !table || t.ignored || t.axis !== 'y' || move) return;
+      if (!t || !table || t.ignored || t.axis !== 'y' || locked()) return;
       if (!t.free) {
         const moved = t.y0 - t.y; // > 0: finger up, page down
         if (Math.abs(moved) <= TOUCH_PAGE_PX) return;
@@ -334,7 +498,7 @@ export function createFlowPager(): FlowPager {
       }
       const target = scrollY + glideDistance(t.v);
       if (target <= table.edge) {
-        if (Math.abs(scrollY - table.edge) < SAME_PX) {
+        if (scrollY - table.edge <= GLIDE_HANDOFF_PX) {
           const k = targetFrom(scrollY, -1);
           if (k !== null) begin(scrollY, k, now, SNAP_MS);
         } else glide = { y: scrollY, target: table.edge, toEdge: true };
@@ -344,16 +508,37 @@ export function createFlowPager(): FlowPager {
     frame(scrollY, now) {
       const dt = lastFrame === null ? FRAME_MS : Math.max(0, now - lastFrame);
       lastFrame = now;
-      if (!table)
+      if (!table) {
+        prevY = null;
         return {
           scrollTo: null,
           target: null,
           animating: false,
           idle: true,
           zone: 'free',
+          wrap: null,
         };
-      if (touch && touch.free && !touch.ignored) {
-        touch.v = touch.follow - touch.prevFollow;
+      }
+      const r0 = table.stops[0] ?? 0;
+      const lastTop = table.lastTop ?? null;
+      if (lock) {
+        const elapsed = now - lock.t0;
+        if (elapsed >= WRAP_GUARD_MS) {
+          lock = null;
+          seenY = r0;
+          changedAt = now;
+          return out(r0, 0, false, true, zoneOf(r0));
+        }
+        const y = wrapScrollAt(elapsed, lock.from, r0);
+        return out(y, 0, true, false, zoneOf(y), elapsed);
+      }
+      // a crossing by any other means (scrollbar, End, the wheel, a finger)
+      const crossed = wrapTarget(prevY ?? scrollY, scrollY, lastTop);
+      if (crossed !== null) return startWrap(crossed, now);
+      prevY = scrollY;
+      if (touch && touch.free && !touch.ignored && dt > 0) {
+        // px per 60 Hz frame, so the glide is the same at any frame rate
+        touch.v = ((touch.follow - touch.prevFollow) * FRAME_MS) / dt;
         touch.prevFollow = touch.follow;
       }
       if (move) {
@@ -364,55 +549,34 @@ export function createFlowPager(): FlowPager {
           move = null;
           seenY = to;
           changedAt = now;
-          return {
-            scrollTo: to,
-            target: m.k,
-            animating: false,
-            idle: true,
-            zone: zoneOf(to),
-          };
+          return out(to, m.k, false, true, zoneOf(to));
         }
         const y = m.from + (to - m.from) * easeOutCubic(t);
-        return {
-          scrollTo: y,
-          target: m.k,
-          animating: true,
-          idle: false,
-          zone: zoneOf(y),
-        };
+        return out(y, m.k, true, false, zoneOf(y));
       }
       if (glide) {
         const g = glide;
         g.y += (g.target - g.y) * (1 - Math.exp((-GLIDE_LERP * dt) / FRAME_MS));
-        if (Math.abs(g.target - g.y) < SAME_PX) {
+        const over = wrapTarget(scrollY, g.y, lastTop);
+        if (over !== null) return startWrap(over, now);
+        if (g.toEdge && g.y - g.target <= GLIDE_HANDOFF_PX) {
+          // close enough: the move to RL takes over instead of a long crawl
+          glide = null;
+          const k = targetFrom(g.y, -1);
+          if (k === null || !begin(g.y, k, now, SNAP_MS)) g.y = g.target;
+        } else if (Math.abs(g.target - g.y) < SAME_PX) {
           g.y = g.target;
           glide = null;
-          if (g.toEdge) {
-            const k = targetFrom(g.y, -1);
-            if (k !== null) begin(g.y, k, now, SNAP_MS);
-          }
         }
-        return {
-          scrollTo: g.y,
-          target: null,
-          animating: glide !== null || move !== null,
-          idle: glide === null && move === null,
-          zone: zoneOf(g.y),
-        };
+        const busy = glide !== null || move !== null;
+        return out(g.y, null, busy, !busy, zoneOf(g.y));
       }
       const zone = zoneOf(scrollY);
       if (touch || seenY === null || seenY !== scrollY) {
         seenY = scrollY;
         changedAt = now;
       }
-      if (zone === 'free')
-        return {
-          scrollTo: null,
-          target: null,
-          animating: false,
-          idle: !touch,
-          zone,
-        };
+      if (zone === 'free') return out(null, null, false, !touch, zone);
       const k = nearest(scrollY);
       const off = Math.abs(scrollY - table.stops[k]!) > SAME_PX;
       if (
@@ -421,21 +585,9 @@ export function createFlowPager(): FlowPager {
         now - changedAt >= SNAP_QUIET_MS &&
         begin(scrollY, k, now, SNAP_MS)
       )
-        return {
-          scrollTo: null,
-          target: k,
-          animating: true,
-          idle: false,
-          zone,
-        };
-      return {
-        scrollTo: null,
-        target: k,
-        animating: false,
-        idle: !off && !touch,
-        zone,
-      };
+        return out(null, k, true, false, zone);
+      return out(null, k, false, !off && !touch, zone);
     },
-    busy: () => move !== null,
+    busy: locked,
   };
 }
