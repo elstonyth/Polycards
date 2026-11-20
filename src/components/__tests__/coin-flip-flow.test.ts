@@ -662,7 +662,9 @@ describe('coin flip confirmation and recovery', () => {
       expect(mocks.quote).toHaveBeenCalledExactlyOnceWith(['p1'], 'head', 5);
       const dialog = document.querySelector('[role=dialog]')!.textContent;
       expect(dialog).toContain('Put this card and 5 tickets on the line?');
-      expect(dialog).toContain('withdrawable Credit');
+      // A win is Credit; withdrawals keep their own gate, so the copy never promises cash.
+      expect(dialog).toContain(' Credit');
+      expect(dialog).not.toContain('withdrawable');
       expect(dialog).toContain('5 tickets more');
       expect(dialog).toContain('permanently forfeited');
       expect(dialog).toContain('All 5 tickets you flipped are gone');
@@ -1099,9 +1101,17 @@ describe('coin flip confirmation and recovery', () => {
       expect(named('Flip again')).toBe(false);
     });
     it.each([
-      ['no_topup', 'Top up once to play Coin Flip.', 'unlock deliveries'],
+      [
+        'no_topup',
+        'Top up at least RM 50 in total to play Coin Flip.',
+        'unlock deliveries',
+      ],
       // No code (an older backend): the server's own text, as before.
-      [undefined, 'unlock deliveries', 'Top up once to play Coin Flip.'],
+      [
+        undefined,
+        'unlock deliveries',
+        'Top up at least RM 50 in total to play Coin Flip.',
+      ],
     ])(
       'words a refusal with code %s as Coin Flip copy',
       async (code, shown, hidden) => {

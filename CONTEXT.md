@@ -13,7 +13,7 @@ word is canonical.
 ## Opening a pack
 
 **Coin Flip**:
-A separately confirmed Vault round on one toss, staking cards, Lucky Draw tickets or both. A win keeps the Pulls, adds normal Credit equal to their confirmed MYR market value and adds the staked number of tickets again; a loss marks the Pulls `forfeited` and takes the staked tickets. A round is an immutable settlement receipt after acceptance, identified independently of the Pull so repeated wins remain distinct. It shares effective player groups/odds-set IDs with packs, with coin-specific actual rates and independently configured published odds. Only DEFAULT (or no group) must have topped up to flip; any other player group flips without a top-up. Members of a withdrawal-blocked group also skip the playthrough, since nothing they win can leave the account. See [operator guide](docs/operations/vault-coin-flip.md).
+A separately confirmed Vault round on one toss, staking cards, Lucky Draw tickets or both. A win keeps the Pulls, adds normal Credit equal to their confirmed MYR market value and adds the staked number of tickets again; a loss marks the Pulls `forfeited` and takes the staked tickets. A round is an immutable settlement receipt after acceptance, identified independently of the Pull so repeated wins remain distinct. It shares effective player groups/odds-set IDs with packs, with coin-specific actual rates and independently configured published odds. Only DEFAULT (or no group) must have topped up to flip: RM 50 in total, spent on packs or not (owner, 2026-11-21); any other player group flips without a top-up. See [operator guide](docs/operations/vault-coin-flip.md).
 
 **Forfeited Pull**:
 A card lost in a coin flip. It is outside the customer's Vault, cannot be sold/delivered/flipped by that customer, and is not automatically restocked.
@@ -300,8 +300,8 @@ settlement pays); past results, replays and pull-gap rows show it as
 a disabled account receives nothing (`assertMayReceive`), while refunds of
 its own money stay open and Lucky Draw ticket refunds stay removed. Plays:
 `playRefusal` per game. A disabled account plays nothing; Coin Flip refuses
-any freeze; only the DEFAULT group (or no group) must have topped up; a
-withdrawal-blocked group flips without the playthrough. The SQL twins
+any freeze; only the DEFAULT group (or no group) must have topped up
+(Lucky Draw any top-up, Coin Flip RM 50 in total). The SQL twins
 (`disabledAccountSql`, `realGroupMemberSql`, `EFFECTIVE_GROUP_SQL`) are
 pinned to the JS readers by `eligibility.integration.spec.ts`.
 Automation-list accounts rank and get paid like any player (#875), and IP or

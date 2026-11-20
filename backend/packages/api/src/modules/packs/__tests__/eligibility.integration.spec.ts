@@ -131,7 +131,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
       const [soft] = await service.listCustomerAccountStates({ customer_id: 'c_soft_disabled' });
       await service.softDeleteCustomerAccountStates([soft.id]);
       await service.createCreditTransactions([
-        { customer_id: 'c_topup', amount: 10, reason: 'topup', external_funded_cents: 1000 },
+        // RM 50 topped up and never spent: Coin Flip asks for the top-up only.
+        { customer_id: 'c_topup', amount: 50, reason: 'topup', external_funded_cents: 5000 },
         { customer_id: 'c_played', amount: 10, reason: 'topup', external_funded_cents: 1000 },
         { customer_id: 'c_played', amount: -10, reason: 'pack_open', external_funded_cents: -1000 },
         { customer_id: 'c_negative', amount: -5, reason: 'topup' },
@@ -233,14 +234,18 @@ moduleIntegrationTestRunner<PacksModuleService>({
       for (const id of CUSTOMERS) {
         const wallet = await service.walletSummary(id);
         const g = jsGroup(all, id);
+        // Coin Flip's bar in JS: the normal part of positive top-up rows.
+        const topupSen = (await service.listCreditTransactions({ customer_id: id, reason: 'topup' }))
+          .filter((r) => Math.round(Number(r.amount) * 100) > 0)
+          .reduce((sum, r) => sum + Math.round(Number(r.amount) * 100) - Number(r.bonus_cents ?? 0), 0);
         const coin = {
           disabled: await service.isAccountDisabled(id),
           frozen: wallet.isFrozen,
-          hasTopup: wallet.hasTopup,
-          playthroughRemaining: wallet.playthrough.remaining,
+          hasTopup: topupSen > 0,
+          topupMyr: topupSen / 100,
           group: g ? groupPolicyOf(g) : null,
         };
-        // Lucky Draw keeps hasTopUp; Coin Flip keeps the wallet's topup sum.
+        // Lucky Draw keeps hasTopUp.
         const lucky = { ...coin, hasTopup: await service.hasTopUp(id) };
         const got: [string | null, string | null] = [
           await mayPlay(service, id, 'coin_flip', ctx()),
@@ -263,8 +268,8 @@ moduleIntegrationTestRunner<PacksModuleService>({
         c_soft_disabled: ['no_topup', 'no_topup'],
         c_frozen_manual: ['frozen', null], // the play gate reads no freeze for Lucky Draw
         c_frozen_auto: ['frozen', 'no_topup'],
-        c_topup: ['playthrough', null],
-        c_played: [null, null],
+        c_topup: [null, null],
+        c_played: ['no_topup', null], // RM 10 opens Lucky Draw, not Coin Flip
         c_negative: ['no_topup', 'no_topup'],
         c_subsen: ['no_topup', 'no_topup'],
       });

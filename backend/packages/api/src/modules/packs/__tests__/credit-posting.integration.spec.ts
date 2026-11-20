@@ -383,9 +383,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
           await configure(win);
           await card(c);
           const p = await pull(c, c, 0);
+          // Coin Flip's RM 50 top-up bar, spent so the wallet stays 0.
           await seed([
-            { customer_id: c, amount: 10, reason: 'topup', external_funded_cents: 1000 },
-            { customer_id: c, amount: -10, reason: 'pack_open', external_funded_cents: -1000 },
+            { customer_id: c, amount: 50, reason: 'topup', external_funded_cents: 5000 },
+            { customer_id: c, amount: -50, reason: 'pack_open', external_funded_cents: -5000 },
           ]);
           const q = await service.quoteCoinFlip({ customerId: c, pullIds: [p], chosenSide: 'head' });
           expect(await service.acceptCoinFlip({ customerId: c, roundId: q.id })).toMatchObject({
@@ -1260,60 +1261,45 @@ const GOLDEN: Record<string, unknown> = {
     "credits": [
       {
         "customer_id": "cus_g_cf_loss",
-        "amount": "-10",
+        "amount": "-50",
         "reason": "pack_open",
         "pull_id": null,
         "reference": null,
-        "external_funded_cents": -1000,
+        "external_funded_cents": -5000,
         "source_transaction_id": null,
         "bonus_cents": null,
         "raw_amount": {
-          "value": "-10",
+          "value": "-50",
           "precision": 20
         },
         "deleted": false
       },
       {
         "customer_id": "cus_g_cf_loss",
-        "amount": "10",
+        "amount": "50",
         "reason": "topup",
         "pull_id": null,
         "reference": null,
-        "external_funded_cents": 1000,
+        "external_funded_cents": 5000,
         "source_transaction_id": null,
         "bonus_cents": null,
         "raw_amount": {
-          "value": "10",
+          "value": "50",
           "precision": 20
         },
         "deleted": false
       },
       {
         "customer_id": "cus_g_cf_win",
-        "amount": "-10",
+        "amount": "-50",
         "reason": "pack_open",
         "pull_id": null,
         "reference": null,
-        "external_funded_cents": -1000,
+        "external_funded_cents": -5000,
         "source_transaction_id": null,
         "bonus_cents": null,
         "raw_amount": {
-          "value": "-10",
-          "precision": 20
-        },
-        "deleted": false
-      },
-      {
-        "customer_id": "cus_g_cf_win",
-        "amount": "10",
-        "reason": "topup",
-        "pull_id": null,
-        "reference": null,
-        "external_funded_cents": 1000,
-        "source_transaction_id": null,
-        "bonus_cents": null,
-        "raw_amount": {
-          "value": "10",
+          "value": "-50",
           "precision": 20
         },
         "deleted": false
@@ -1329,6 +1315,21 @@ const GOLDEN: Record<string, unknown> = {
         "bonus_cents": 0,
         "raw_amount": {
           "value": "100",
+          "precision": 20
+        },
+        "deleted": false
+      },
+      {
+        "customer_id": "cus_g_cf_win",
+        "amount": "50",
+        "reason": "topup",
+        "pull_id": null,
+        "reference": null,
+        "external_funded_cents": 5000,
+        "source_transaction_id": null,
+        "bonus_cents": null,
+        "raw_amount": {
+          "value": "50",
           "precision": 20
         },
         "deleted": false

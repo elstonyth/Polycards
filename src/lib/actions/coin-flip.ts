@@ -7,6 +7,7 @@ import {
   CoinFlipHistorySchema,
   CoinFlipReceiptSchema,
   CoinFlipSettingsSchema,
+  COIN_FLIP_NO_TOPUP,
   type CoinFlipFailure,
   type CoinSide,
 } from '@/lib/coin-flip';
@@ -31,11 +32,7 @@ const rules: readonly ErrorRule[] = [
     'Your cards or coin flip settings changed. Review your flip again.',
   ],
   [/paused|not configured/i, 'Coin flip is currently paused.'],
-  [/playthrough/i, 'Complete your deposit playthrough before flipping a card.'],
-  [
-    /top.up|deposit/i,
-    'Complete a top-up and its playthrough before flipping a card.',
-  ],
+  [/top.up|deposit|playthrough/i, COIN_FLIP_NO_TOPUP],
   [/phone/i, 'Verify your phone number before flipping a card.'],
   [
     /not available|under review|unavailable/i,

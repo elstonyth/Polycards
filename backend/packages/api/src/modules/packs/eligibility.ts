@@ -7,6 +7,7 @@ import {
   EFFECTIVE_GROUP_SQL,
 } from './odds-sets';
 import { groupPolicyOf, type GroupPolicy } from './group-policy';
+import { normalSenSql } from './bonus-credit';
 
 /**
  * Player eligibility: who may show, receive or play (owner rules #1036, #993,
@@ -82,15 +83,24 @@ export function topShown<T>(
 }
 
 export type Game = 'lucky_draw' | 'coin_flip';
-export type PlayRefusal = 'unavailable' | 'frozen' | 'no_topup' | 'playthrough';
+export type PlayRefusal = 'unavailable' | 'frozen' | 'no_topup';
+
+/** What DEFAULT (or no group) must have topped up, in total, to play Coin
+ *  Flip. Spending it on packs is not asked (owner, 2026-11-21): withdrawals
+ *  keep their own spend-first gate, so a flip win still cannot leave before
+ *  the top-up has gone through packs. */
+export const COIN_FLIP_MIN_TOPUP_MYR = 50;
+
 export type PlayFacts = {
   disabled: boolean;
   frozen: boolean;
+  /** Any positive top-up ever: Lucky Draw's bar. */
   hasTopup: boolean;
-  playthroughRemaining: number;
+  /** Lifetime real top-ups (MYR, normal part): Coin Flip's bar. */
+  topupMyr: number;
   /** The effective player group's policy; null for DEFAULT or no group. A
    *  topped-up Lucky Draw player may pass null unread: the group only matters
-   *  without a top-up. Lucky Draw likewise reads no freeze or playthrough. */
+   *  without a top-up. Lucky Draw likewise reads no freeze. */
   group: GroupPolicy | null;
 };
 
@@ -99,24 +109,20 @@ export type PlayFacts = {
  *  1. a disabled account plays nothing;
  *  2. Coin Flip: any freeze, manual or auto (Lucky Draw entry checks only a
  *     manual one, through its own assertNotFrozen);
- *  3. Coin Flip: a withdrawal-blocked group can never cash out, so its members
- *     skip both cash-out gates below;
- *  4. only DEFAULT (or no group) must have topped up (owner 2026-11-02/04);
- *  5. Coin Flip: the deposit playthrough must be done (a non-finite remainder
- *     refuses).
+ *  3. only DEFAULT (or no group) must have topped up (owner 2026-11-02/04):
+ *     Lucky Draw any top-up, Coin Flip COIN_FLIP_MIN_TOPUP_MYR in total (a
+ *     non-finite total refuses).
  */
 export function playRefusal(game: Game, f: PlayFacts): PlayRefusal | null {
   if (f.disabled) return 'unavailable';
   if (game === 'coin_flip' && f.frozen) return 'frozen';
-  if (game === 'coin_flip' && f.group?.withdrawals_blocked) return null;
-  if (!f.group && !f.hasTopup) return 'no_topup';
-  if (
-    game === 'coin_flip' &&
-    (!Number.isFinite(f.playthroughRemaining) || f.playthroughRemaining > 0)
-  ) {
-    return 'playthrough';
+  if (f.group) return null;
+  if (game === 'coin_flip') {
+    return Number.isFinite(f.topupMyr) && f.topupMyr >= COIN_FLIP_MIN_TOPUP_MYR
+      ? null
+      : 'no_topup';
   }
-  return null;
+  return f.hasTopup ? null : 'no_topup';
 }
 
 const manager = (ctx: Context): LedgerSqlManager =>
@@ -138,6 +144,21 @@ export async function effectiveGroupPolicy(
   return row ? groupPolicyOf(row) : null;
 }
 
+/** Lifetime real top-ups (MYR): the normal part of positive topup rows, the
+ *  rows the check-in bar and topup_myr goals count. Admin credit and bonus
+ *  never count, and a later clawback does not subtract. */
+export async function realTopupMyr(
+  customerId: string,
+  ctx: Context,
+): Promise<number> {
+  const [row] = await manager(ctx).execute<{ sen: string | null }[]>(
+    `SELECT COALESCE(SUM(${normalSenSql()}), 0)::bigint AS sen FROM credit_transaction ` +
+      "WHERE customer_id = ? AND reason = 'topup' AND amount > 0 AND deleted_at IS NULL",
+    [customerId],
+  );
+  return row?.sen == null ? 0 : Number(row.sen) / 100;
+}
+
 /** playRefusal over the live facts, read on the caller's context. */
 export async function mayPlay(
   svc: PacksModuleService,
@@ -147,25 +168,24 @@ export async function mayPlay(
 ): Promise<PlayRefusal | null> {
   const disabled = await svc.isAccountDisabled(customerId, ctx);
   if (game === 'lucky_draw') {
-    // Lucky Draw reads no freeze or playthrough, and a top-up makes the group
-    // moot. It keeps hasTopUp; Coin Flip keeps the wallet's topup sum.
+    // Lucky Draw reads no freeze, and a top-up makes the group moot.
     const hasTopup = await svc.hasTopUp(customerId, ctx);
     const group = hasTopup ? null : await effectiveGroupPolicy(customerId, ctx);
     return playRefusal(game, {
       disabled,
       frozen: false,
       hasTopup,
-      playthroughRemaining: 0,
+      topupMyr: 0,
       group,
     });
   }
   const group = await effectiveGroupPolicy(customerId, ctx);
-  const wallet = await svc.walletSummary(customerId, undefined, ctx);
+  const topupMyr = await realTopupMyr(customerId, ctx);
   return playRefusal(game, {
     disabled,
-    frozen: wallet.isFrozen,
-    hasTopup: wallet.hasTopup,
-    playthroughRemaining: wallet.playthrough.remaining,
+    frozen: await svc.isFrozen(customerId, ctx),
+    hasTopup: topupMyr > 0,
+    topupMyr,
     group,
   });
 }
@@ -175,6 +195,5 @@ export async function mayPlay(
 export const COIN_FLIP_REFUSAL: Readonly<Record<PlayRefusal, string>> = {
   unavailable: 'This account is unavailable.',
   frozen: 'Coin flips are unavailable while your account is under review.',
-  no_topup: 'Top up once to play Coin Flip.',
-  playthrough: 'Complete your deposit playthrough before flipping a card.',
+  no_topup: `Top up at least RM ${COIN_FLIP_MIN_TOPUP_MYR} in total to play Coin Flip.`,
 };
