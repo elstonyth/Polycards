@@ -931,7 +931,9 @@ medusaIntegrationTestRunner({
             image: IMAGE,
           },
         ]);
-        expect(detail.data.published_odds).toEqual(published);
+        // The store pack responses name the odds `pull_odds`.
+        expect(detail.data.pull_odds).toEqual(published);
+        expect(detail.data).not.toHaveProperty('published_odds');
         // One row per tier, so set 3's split would be each amount's real rate.
         expect(detail.data.demo_odds).toBeNull();
 

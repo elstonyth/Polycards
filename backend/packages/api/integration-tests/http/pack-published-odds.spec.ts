@@ -160,7 +160,9 @@ medusaIntegrationTestRunner({
           api.get(`/store/packs/${SLUG}`, { headers: storeHeaders }),
         );
         expect(store.status).toBe(200);
-        expect(store.data.published_odds).toEqual(expected);
+        // The store pack responses name the odds `pull_odds`.
+        expect(store.data.pull_odds).toEqual(expected);
+        expect(store.data).not.toHaveProperty('published_odds');
       });
 
       it('null still clears and an emptied tiers map persists', async () => {
