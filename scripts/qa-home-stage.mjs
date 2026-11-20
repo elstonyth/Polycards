@@ -8,6 +8,7 @@
 // Usage:
 //   node scripts/qa-home-stage.mjs [baseUrl]      (default http://localhost:4300, or PW_BASE)
 //   ONLY=align,context-loss node scripts/qa-home-stage.mjs
+//   NEXT_DIST_DIR=.next/qa ...    (the build folder of the server under test, for the js-size line)
 //   HEADED=1 node scripts/qa-home-stage.mjs       (visitor pass in system Chrome, no ?stage=)
 //   SHOTS=0 / VIDEO=0                             (skip the owner's screenshots / recordings)
 //   node scripts/qa-home-stage.mjs --self-test    (pixel maths only, no server)
@@ -1322,9 +1323,10 @@ async function recordVisit(label, profile) {
 }
 
 async function jsSizes() {
-  const nextDir = join(ROOT, '.next');
+  // NEXT_DIST_DIR: the build folder the server under test runs from.
+  const nextDir = join(ROOT, process.env.NEXT_DIST_DIR ?? '.next');
   if (!existsSync(nextDir)) {
-    skip('js-size', 'no .next folder next to this script');
+    skip('js-size', `no ${nextDir} folder next to this script`);
     return;
   }
   const size = async (path) => {
@@ -3528,6 +3530,129 @@ function writeSpinMemory() {
   writeFileSync(file, JSON.stringify({ ...prev, ...spinMemory }, null, 2));
 }
 
+// ---------------------------------------------------------------------------
+// The page below the stage (full-flow plan 1, WP1): the section order and one
+// footer, at rest, under reduced motion and while a pack is focused.
+
+/** What the page below the stage shows (run in the page). */
+function sectionsProbe() {
+  const shown = (e) => {
+    if (!e) return false;
+    const s = getComputedStyle(e);
+    return (
+      s.display !== 'none' &&
+      s.visibility !== 'hidden' &&
+      e.getBoundingClientRect().height > 0
+    );
+  };
+  const q = (sel) => document.querySelector(sel);
+  const jp = q('[data-flow-section="just-pulled"]');
+  const tg = q('[data-flow-section="telegram"]');
+  const feet = [...document.querySelectorAll('footer[data-site-chrome]')];
+  return {
+    order: [...document.querySelectorAll('[data-flow-section]')]
+      .map((e) => e.getAttribute('data-flow-section'))
+      .join(','),
+    feet: feet.filter(shown).length,
+    footInTelegram: shown(tg?.querySelector('footer[data-site-chrome]')),
+    collectors: !!jp?.querySelector('#game-heading'),
+    justPulled: /JUST PULLED/i.test(jp?.textContent ?? ''),
+    telegram: !!tg?.querySelector('a[href="https://t.me/polycardsgg"]'),
+    trust: !!tg?.querySelector('#trust-heading'),
+    banner: /YOUR CHASE/.test(document.body.textContent ?? ''),
+  };
+}
+
+async function checkSections(label, profile) {
+  for (const reduced of [false, true]) {
+    const tag = reduced ? `${label}-reduced` : label;
+    const { ctx, page } = await newPage(
+      profile,
+      reduced ? { reducedMotion: 'reduce' } : {},
+    );
+    try {
+      await page.goto(stageUrl(forced({ loader: 'never' })), {
+        waitUntil: 'load',
+      });
+      await dismissChrome(page);
+      const r = await page.evaluate(sectionsProbe);
+      pass(
+        `sections-order-${tag}`,
+        r.order === 'opening,just-pulled,telegram' &&
+          r.justPulled &&
+          r.collectors &&
+          r.telegram &&
+          r.trust &&
+          !r.banner,
+        `order ${r.order}; Just Pulled ${r.justPulled}, collectors ${r.collectors}, Telegram link ${r.telegram}, trust ${r.trust}, closing banner ${r.banner}`,
+      );
+      pass(
+        `sections-one-footer-${tag}`,
+        r.feet === 1 && r.footInTelegram,
+        `${r.feet} visible site footer(s); the one in the Telegram section shown: ${r.footInTelegram}`,
+      );
+      if (reduced) continue;
+      // Focused: everything after the pin hides, the layout's footer stays.
+      await page.waitForFunction(
+        () =>
+          window.__packStage?.ready?.() &&
+          typeof window.__packStage.focus === 'function',
+        null,
+        { timeout: 40000 },
+      );
+      const art = page
+        .locator(
+          '[data-stage-panel]:not([hidden]) [data-stage-tile] [data-stage-art]',
+        )
+        .first();
+      const id = await page
+        .locator('[data-stage-panel]:not([hidden]) [data-stage-tile]')
+        .first()
+        .getAttribute('data-pack-id');
+      await centreOn(page, id);
+      const box = await art.boundingBox();
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await page.waitForFunction(() => window.__packStage.focus()?.on, null, {
+        timeout: 10000,
+      });
+      const f = await page.evaluate(sectionsProbe);
+      // The focused view still reaches its last stop (the page is long
+      // enough with the layout's footer kept while focused).
+      const kinds = await page.evaluate(() => window.__packStage.focus().kinds);
+      // Stop 1 first: a key during the tap's move is swallowed by design.
+      let landed = 0;
+      for (let k = 1; k <= kinds.length; k++) {
+        if (k > 1) await page.keyboard.press('ArrowDown');
+        const ok = await page
+          .waitForFunction(
+            (kk) => {
+              const s = window.__packStage.focus();
+              return s && !s.busy && Math.abs(s.focus - kk) < 1e-3;
+            },
+            k,
+            { timeout: 8000 },
+          )
+          .then(() => true)
+          .catch(() => false);
+        if (!ok) break;
+        landed = k;
+      }
+      pass(
+        `sections-focus-reaches-last-stop-${tag}`,
+        landed === kinds.length,
+        `landed on stop ${landed} of ${kinds.length} (${kinds.join(',')})`,
+      );
+      pass(
+        `sections-one-footer-focused-${tag}`,
+        f.feet === 1,
+        `${f.feet} visible site footer(s) while a pack is focused`,
+      );
+    } finally {
+      await ctx.close();
+    }
+  }
+}
+
 async function main() {
   if (SELF_TEST) {
     selfTest();
@@ -3568,6 +3693,8 @@ async function main() {
     for (const [key, profile] of Object.entries(PROFILES)) {
       const l = label(key);
       await run('live', `3d-live-${l}`, () => checkChunkAndLive(l, profile));
+      if (!HEADED && !WEBKIT)
+        await run('sections', `sections-${l}`, () => checkSections(l, profile));
       if (!HEADED) {
         await run('never', `reduced-motion-${l}`, () =>
           checkNever3d(l, profile, 'reduced-motion', {

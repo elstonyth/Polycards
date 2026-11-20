@@ -10,12 +10,8 @@ import {
   type ReactNode,
 } from 'react';
 import { flushSync } from 'react-dom';
-import Link from 'next/link';
-import { ArrowUpRight, Truck } from 'lucide-react';
 import PackCategoryTabs from '@/components/PackCategoryTabs';
-import { HeroFreePack } from '@/components/home/HeroFreePack';
 import { useShelfCategory } from '@/components/home/ShelfCategory';
-import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
 import type { PackTab } from '@/lib/packs-data';
 import { usePrefersReducedMotion } from '@/lib/use-reveal';
 import { cn } from '@/lib/utils';
@@ -64,13 +60,10 @@ const nounOf = (packs: readonly StagePack[]): 'pack' | 'capsule' =>
 export default function PackStage({
   categories,
   tabs,
-  freePackPromo,
   children,
 }: {
   categories: StageCategory[];
   tabs: PackTab[];
-  /** A free welcome pack is on offer to a new visitor (getFreePackPromo). */
-  freePackPromo: boolean;
   /**
    * The page below the stage. It is laid out from the pin's end and scrolls
    * up OVER the stuck panel during the exit (as Ciao's FAQ scrolls over its
@@ -270,7 +263,7 @@ export default function PackStage({
   const noun = category ? nounOf(category.packs) : 'pack';
 
   return (
-    <div ref={flowRef} className={styles.flow}>
+    <div ref={flowRef} data-home-flow="" className={styles.flow}>
       <StageLoader onLeave={onLoaderLeave} />
       {/* The pin: the panel sticks through the spin and the exit. */}
       <div
@@ -413,29 +406,8 @@ export default function PackStage({
       </div>
 
       {/* After the pin: laid out from its end, it rises over the stuck panel
-          during the exit. The free pack offer and the trust line were below
-          the first screen in step 1 too; the panel is one screen now. */}
+          during the exit. The page's server-rendered sections, in order. */}
       <div data-spin-after="" className={styles.spinAfter}>
-        {!empty && (
-          <div className="px-fluid flex flex-col items-center">
-            <HeroFreePack promo={freePackPromo} />
-          </div>
-        )}
-        <p className="px-fluid mt-6 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 pb-8 text-[11px] text-neutral-400 lg:pb-10 lg:text-xs">
-          <span className="flex items-center gap-1.5">
-            <Truck className="h-3.5 w-3.5" aria-hidden />
-            Ships to Malaysia &amp; Singapore
-          </span>
-          <span className="h-3 border-l border-white/15" aria-hidden />
-          <span>{BUYBACK_RATE_LABEL} vault buyback</span>
-          <span className="h-3 border-l border-white/15" aria-hidden />
-          <Link
-            href="/how-it-works"
-            className="flex min-h-11 items-center gap-1 font-semibold text-neutral-300 transition-colors hover:text-white"
-          >
-            How it works <ArrowUpRight className="h-3.5 w-3.5" aria-hidden />
-          </Link>
-        </p>
         {children}
       </div>
     </div>

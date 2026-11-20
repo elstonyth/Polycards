@@ -9,17 +9,13 @@ import { getLeaderboard } from '@/lib/data/leaderboard';
 import { getFreePackPromo } from '@/lib/data/free-pack';
 import { cached } from '@/lib/ttl-cache';
 import { packTabs, type PackCard } from '@/lib/packs-data';
-import PullsMarquee from '@/components/home/PullsMarquee';
 import { ShelfCategoryProvider } from '@/components/home/ShelfCategory';
-import RecentPullsSection from '@/components/RecentPullsSection';
-import TheGame from '@/components/home/TheGame';
-import TrustBoard from '@/components/home/TrustBoard';
-import FinalCta from '@/components/home/FinalCta';
 import PackStage from '@/components/pack-stage/PackStage';
 import { Stage3dProvider } from '@/components/pack-stage/Stage3dProvider';
 import { StageNoScript } from '@/components/pack-stage/StageNoScript';
 import { toStageCategories } from '@/components/pack-stage/stage-packs';
 import { flowSeedFromHighlights } from '@/components/pack-flow/flow-seed';
+import { FlowSections } from '@/components/pack-flow/FlowSections';
 import { FOCUS_SEEDS_ID } from '@/components/pack-stage/stage-focus-seeds';
 import type {
   GateMode,
@@ -116,6 +112,7 @@ export default async function HomePreviewPage({
       ]),
     ),
   );
+  const stageCategories = toStageCategories(categories, chaseByPack);
   // The first-visit loader's pre-paint gate is in the root layout's <head>
   // (stage-loader-script.ts, STAGE_LOADER_PATHS); it reads ?loader= itself.
   return (
@@ -130,20 +127,16 @@ export default async function HomePreviewPage({
       />
       <ShelfCategoryProvider categories={packTabs(categories)}>
         <Stage3dProvider override={stage} debug={debug}>
-          {/* The page below the stage rises over its pinned panel during the
-              spin's exit, so PackStage lays it out after the pin. */}
-          <PackStage
-            categories={toStageCategories(categories, chaseByPack)}
-            tabs={packTabs(categories)}
-            freePackPromo={freePackPromo}
-          >
-            <PullsMarquee pulls={feed.pulls} />
-
-            <RecentPullsSection initial={feed} />
-
-            <TheGame topRippers={topRippers} />
-            <TrustBoard />
-            <FinalCta />
+          {/* The page below the stage, in the flow's order (full-flow plan 1):
+              PackStage lays it out after the pin, and it rises over the
+              pinned panel during the spin's exit. */}
+          <PackStage categories={stageCategories} tabs={packTabs(categories)}>
+            <FlowSections
+              feed={feed}
+              topRippers={topRippers}
+              freePackPromo={freePackPromo}
+              showOffer={stageCategories.length > 0}
+            />
           </PackStage>
         </Stage3dProvider>
       </ShelfCategoryProvider>

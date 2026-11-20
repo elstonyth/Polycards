@@ -1,0 +1,48 @@
+/* The preview's page below the stage (full-flow plan 1.2 and 2.1). */
+
+/* ---- Spacers: the flow's scroll length --------------------------------- */
+
+/* Zero height until the flow chunk sets data-flow-on on the flow root: no
+   JavaScript, reduced motion or a chunk that never loads leaves a plain
+   document. Taps pass through them to the stage below. One section is 1.25
+   panels (FLOW_SECTION_PANELS); --panel is set on the flow root. */
+.spacer {
+  height: 0;
+  pointer-events: none;
+}
+
+:global([data-home-flow][data-flow-on]) .spacer[data-flow-spacer='row'],
+:global([data-home-flow][data-flow-on]) .spacer[data-flow-spacer='lineup'],
+:global([data-home-flow][data-flow-on]) .spacer[data-flow-spacer='exit'] {
+  height: calc(var(--panel) * 1.25);
+}
+
+/* The detail band: six sections, Front to Closing, for every variant. */
+:global([data-home-flow][data-flow-on]) .spacer[data-flow-spacer='band'] {
+  height: calc(var(--panel) * 1.25 * 6);
+}
+
+/* Return and Last each get their height with their own package's flag. */
+:global([data-home-flow][data-flow-on][data-flow-return])
+  .spacer[data-flow-spacer='return'] {
+  height: calc(var(--panel) * 1.25);
+}
+
+/* Large viewport, so the wrap line at its top is always reachable. */
+:global([data-home-flow][data-flow-on][data-flow-last])
+  .spacer[data-flow-spacer='last'] {
+  height: calc(100lvh + 1px);
+}
+
+/* ---- One footer: the copy inside the Telegram section ------------------ */
+
+/* The layout renders the site footer as a child of <body>; on this page the
+   Telegram section renders the same footer, so the layout's copy is hidden
+   (display: none also takes it out of the accessibility tree). While a pack
+   is focused the section is hidden with everything after the pin, and the
+   focused view's last stop needs the layout footer's length on phones, so the
+   layout's copy stays then. Browsers without :has() show both footers. */
+:global(body):has(.telegram):not(:has([data-focus-on]))
+  > :global(footer[data-site-chrome]) {
+  display: none;
+}
