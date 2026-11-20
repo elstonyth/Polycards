@@ -6,11 +6,12 @@
  * - `focusOnFor` builds the focus declaration (`StageFocusOn`) the runtime
  *   and the CSS tiles read from the stage state: the pack's keys for this
  *   size, the focus term and the spotlight.
- * - `createFocusRun` is the focused view itself. The spin chunk's one set of
- *   listeners hands it the wheel, touch and keys while a pack is focused
- *   (the hand-off: a tap on the centred pack pages from the row to Front;
- *   paging back past Front, "All packs", Escape or browser Back pages from
- *   Front to the row, which ends the focus and gives the input back).
+ * - `createFocusRun` is the focused view itself: the declaration, the stop
+ *   blocks, the address and the leave. It owns no input and no pager: the
+ *   spin chunk's flow pager moves the page, and each frame hands it the
+ *   focus value read from the scroll (a tap or a down gesture at the row
+ *   pages to Front; paging back past Front, "All packs", Escape or browser
+ *   Back pages from Front to the row, which ends the focus).
  */
 import { createElement, startTransition, type ReactNode } from 'react';
 import {
@@ -36,7 +37,6 @@ import {
 } from './stage-focus-keys';
 import { readFocusSeeds } from './stage-focus-seeds';
 import { STAGE_DESKTOP_QUERY } from './stage-gate';
-import { createPager, durationFor } from './stage-pager';
 
 export { FOCUS_DURATIONS, FOCUS_WINDOW } from './stage-focus-keys';
 export { blockAt, power1InOut } from './stage-focus';
@@ -103,27 +103,49 @@ export type FocusRunDeps = {
   ui(node: ReactNode): void;
   /** Wakes the spin chunk's frame loop. */
   loop(): void;
-  /** The site header's height (the panel sticks under it). */
-  top(): number;
+  /**
+   * Pages to stop k (0: the row); `from`: jump there first. False: a move
+   * is playing, or the page is already there.
+   */
+  go(k: number, o?: { from?: number; ms?: number }): boolean;
+  /** A move is playing. */
+  busy(): boolean;
+  /** The paged stops: the row, then the pack's rests. */
+  stops(): readonly number[];
   /** Repaints the row's CSS tiles from the state (focus included). */
   paint(): void;
   /** The focus ended: the spin chunk takes the input back. */
   ended(): void;
 };
 
+/** What the flow hands the focused view each frame. */
+export type FocusFrame = {
+  /** The focus value F (0 the row, k a stop), read from the scroll. */
+  focus: number;
+  /** The stop a move heads to or rests on (null: none, the free part). */
+  target: number | null;
+  animating: boolean;
+  idle: boolean;
+};
+
 export type FocusRun = {
   active(): boolean;
-  /** Focus the pack at `index` of the shown row; false: not focusable here. */
-  enter(index: number, fromEntry?: string): boolean;
+  /** The leave is under way (input is swallowed until it ends). */
+  leaving(): boolean;
+  /** The stop kinds the pack at `index` would have; null: not focusable. */
+  kindsAt(index: number): FocusStopKind[] | null;
+  /** The focused pack's stop kinds. */
+  kinds(): readonly FocusStopKind[];
+  /**
+   * Focus the pack at `index` of the shown row; false: not focusable here.
+   * `page`: page to its first stop (false: the flow is already paging).
+   */
+  enter(index: number, fromEntry?: string, page?: boolean): boolean;
   /** "All packs" (and Escape, browser Back). */
   leave(fromHistory?: boolean): void;
-  wheel(e: WheelEvent): void;
-  touchStart(e: TouchEvent): void;
-  touchMove(e: TouchEvent): void;
-  touchEnd(): void;
   key(e: KeyboardEvent): void;
   /** One frame; true when at rest. */
-  frame(now: number): boolean;
+  frame(now: number, f: FocusFrame): boolean;
   /** The page shows a focus entry of ours (Back from the reel, Forward): focus that pack. */
   resume(): boolean;
   /** Debug: the stops and timing of the last moves. */
@@ -134,16 +156,8 @@ export type FocusRun = {
 const MARK = '__flow';
 /** The stop a focus entry rests on (restored on Forward and Back). */
 const stopKey = (entry: string) => `pack-flow:stop:${entry}`;
-/** A page left off a stop (scrollbar, a pinch) snaps back after this quiet. */
-const SNAP_QUIET_MS = 150;
-const SNAP_MS = 600;
-/** ?debug=1: QA scrubbing a move by scroll holds the snap-back. */
-const snapHeld = () =>
-  !!(window as unknown as { __packStage?: { holdSnap?: boolean } }).__packStage
-    ?.holdSnap;
 
 export function createFocusRun(d: FocusRunDeps): FocusRun {
-  const pager = createPager();
   const seeds = readFocusSeeds<FlowSeed>();
   // The focused pack's live data is validated with the lazy schemas: load and
   // evaluate them at idle now, so that chunk never runs inside a tap's zoom.
@@ -156,7 +170,6 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
   let leftRow = false;
   let leaving = false;
   let kinds: FocusStopKind[] = [];
-  let stops: number[] = [];
   let decl: StageFocusOn | null = null;
   let seed: FlowSeed | null = null;
   let entry: string | null = null;
@@ -188,7 +201,7 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
         };
       },
       go: (k: number) => {
-        if (pager.goTo(k, window.scrollY, now())) d.loop();
+        if (d.go(k)) d.loop();
       },
       leave: () => run.leave(),
       onBack: (back: PackBackDetails | null) => {
@@ -221,18 +234,6 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
     d.wake();
   };
 
-  const measureStops = () => {
-    const panel = d.src.panel;
-    const P = panel.offsetHeight;
-    const top = d.top();
-    const wrapTop = d.src.wrap.getBoundingClientRect().top + window.scrollY;
-    const s0 = Math.max(0, Math.round(wrapTop - top));
-    stops = [s0];
-    for (let k = 1; k <= kinds.length; k++)
-      stops.push(Math.round(s0 + k * STOP_PANELS * P));
-    pager.setStops(stops);
-  };
-
   const end = () => {
     on = false;
     leftRow = false;
@@ -251,7 +252,6 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
     decl = null;
     d.wake();
     d.ui(null);
-    pager.setStops(null);
     subs.clear();
     lastF = -1;
     d.paint();
@@ -294,29 +294,40 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
     );
     return tile ? run.enter(Number(tile.dataset.index), mark) : false;
   };
-  let lastScrollAt = 0;
   let savedK = 0;
-  const onScroll = () => {
-    lastScrollAt = performance.now();
-  };
   window.addEventListener('popstate', onPop);
+  /** The pack at `index` of the shown row, with its seed (null: not focusable). */
+  const packAt = (index: number) => {
+    const tile = d.src.panel.querySelector<HTMLElement>(
+      `[data-stage-panel]:not([hidden]) [data-stage-tile][data-index="${index}"]`,
+    );
+    const id = tile?.dataset.packId;
+    const s = id ? seeds[id] : undefined;
+    return tile && id && s ? { tile, id, s } : null;
+  };
+  const kindsOf = (s: FlowSeed): FocusStopKind[] =>
+    focusStops(
+      focusVariant({ capsule: s.shape === 'capsule', back: s.back }),
+    ) as FocusStopKind[];
 
   const run: FocusRun = {
     active: () => on,
-    enter(index, fromEntry) {
+    leaving: () => leaving,
+    kindsAt(index) {
+      const p = packAt(index);
+      return p ? kindsOf(p.s) : null;
+    },
+    kinds: () => kinds,
+    enter(index, fromEntry, page = true) {
       if (on) return false;
       const panel = d.src.panel;
-      const tile = panel.querySelector<HTMLElement>(
-        `[data-stage-panel]:not([hidden]) [data-stage-tile][data-index="${index}"]`,
-      );
-      const id = tile?.dataset.packId;
-      const s = id ? seeds[id] : undefined;
-      if (!tile || !id || !s) return false;
+      const p = packAt(index);
+      if (!p) return false;
+      const { tile, id, s } = p;
       seed = s;
       desktop = window.matchMedia(STAGE_DESKTOP_QUERY).matches;
       const capsule = s.shape === 'capsule';
-      const variant = focusVariant({ capsule, back: s.back });
-      kinds = focusStops(variant) as FocusStopKind[];
+      kinds = kindsOf(s);
       const host = panel.querySelector<HTMLElement>('[data-stage-canvas]');
       const w = host?.clientWidth ?? panel.clientWidth;
       const h = host?.clientHeight ?? panel.clientHeight;
@@ -352,8 +363,6 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
         );
       }
       d.src.wrap.setAttribute('data-focus-on', '');
-      measureStops();
-      pager.setDuration(durationFor(kinds));
       on = true;
       leftRow = false;
       leaving = false;
@@ -370,17 +379,6 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       // the row's motion values repaint the tiles; the focus repaints after
       for (const v of Object.values(d.values))
         offs.push(v.on('change', () => requestAnimationFrame(d.paint)));
-      const ro = new ResizeObserver(() => {
-        if (on && !pager.busy()) {
-          const k = Math.round(pager.focusAt(window.scrollY));
-          measureStops();
-          window.scrollTo(0, stops[k] ?? stops[0] ?? 0);
-        }
-      });
-      ro.observe(panel);
-      offs.push(() => ro.disconnect());
-      window.addEventListener('scroll', onScroll, { passive: true });
-      offs.push(() => window.removeEventListener('scroll', onScroll));
       render(true);
       // Forward or Back to an entry: the stop it rested on
       let at = 1;
@@ -392,7 +390,7 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
           // storage blocked: Front
         }
       savedK = at;
-      pager.goTo(at, window.scrollY, now());
+      if (page) d.go(at);
       trace.push([now(), -1, 1]);
       d.loop();
       return true;
@@ -400,7 +398,7 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
     leave(fromHistory = false) {
       if (!on || leaving) return;
       if (fromHistory) entry = null; // the address already moved
-      if (pager.busy()) {
+      if (d.busy()) {
         // mid-move: leave once it lands
         setTimeout(() => {
           if (on) run.leave(fromHistory);
@@ -408,7 +406,7 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
         d.loop();
         return;
       }
-      const k = Math.round(pager.focusAt(window.scrollY));
+      const k = Math.round(Math.max(0, lastF));
       // The text goes first, from any stop; `leaving` holds every block hidden
       // until the focus ends, so no block (Front's included) shows on the way.
       leaving = true;
@@ -426,44 +424,9 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       setTimeout(() => {
         if (!on) return;
         // the active block has faded: from a later stop, jump to Front first
-        const from = k > 1 ? (stops[1] ?? 0) : window.scrollY;
-        if (k > 1) window.scrollTo(0, from);
-        pager.goTo(0, from, now());
+        d.go(0, k > 1 ? { from: d.stops()[1] ?? 0 } : undefined);
         d.loop();
       }, LEAVE_FADE_MS);
-    },
-    wheel(e) {
-      if (leaving) {
-        e.preventDefault();
-        return;
-      }
-      const dy =
-        e.deltaMode === 1
-          ? e.deltaY * 16
-          : e.deltaMode === 2
-            ? e.deltaY * window.innerHeight
-            : e.deltaY;
-      if (pager.wheel(dy, e.deltaX, e.shiftKey, window.scrollY, now())) {
-        e.preventDefault();
-        if (pager.busy()) trace.push([now(), -2, dy]);
-      }
-      d.loop();
-    },
-    touchStart(e) {
-      const p = e.touches[0];
-      if (!p || e.touches.length > 1) return;
-      pager.touchStart(p.clientX, p.clientY, now());
-    },
-    touchMove(e) {
-      const p = e.touches[0];
-      if (!p || e.touches.length > 1) return;
-      if (pager.touchMove(p.clientX, p.clientY) && e.cancelable)
-        e.preventDefault();
-    },
-    touchEnd() {
-      if (leaving) return;
-      pager.touchEnd(window.scrollY, now());
-      d.loop();
     },
     key(e) {
       if (leaving) return;
@@ -480,7 +443,7 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
         run.leave();
         return;
       }
-      const k = Math.round(pager.focusAt(window.scrollY));
+      const k = Math.round(Math.max(0, lastF));
       const n = kinds.length;
       let to: number | null = null;
       if (e.key === 'ArrowDown' || e.key === 'PageDown') to = k + 1;
@@ -498,13 +461,10 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
         run.leave();
         return;
       }
-      if (pager.goTo(Math.min(n, to), window.scrollY, now())) d.loop();
+      if (d.go(Math.min(n, to))) d.loop();
     },
-    frame(t) {
+    frame(t, f) {
       if (!on) return true;
-      const f = pager.frame(window.scrollY, t);
-      if (f.scrollTo !== null && Math.abs(f.scrollTo - window.scrollY) >= 0.5)
-        window.scrollTo(0, f.scrollTo);
       if (f.focus > 0.001) leftRow = true;
       // paged back past Front by a gesture: a leave too (text out, the
       // neighbours back over its last part)
@@ -531,16 +491,10 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
         settled = true;
         publish();
       }
-      if (f.idle && !leaving && stops.length > 0) {
-        const k = Math.round(pager.focusAt(window.scrollY));
-        const off = Math.abs(window.scrollY - (stops[k] ?? window.scrollY));
-        if (off > 0.5) {
-          // native scroll moved the page (scrollbar, a pinch): back on a stop
-          if (t - lastScrollAt > SNAP_QUIET_MS && !snapHeld())
-            pager.goTo(k, window.scrollY, t, SNAP_MS);
-          return false;
-        }
-        if (k >= 1 && k !== savedK && entry) {
+      // the stop this entry rests on, for Back and Forward
+      const k = f.target;
+      if (f.idle && !leaving && entry && k !== null && k >= 1) {
+        if (k !== savedK && k <= kinds.length) {
           savedK = k;
           try {
             window.sessionStorage.setItem(stopKey(entry), String(k));
@@ -555,9 +509,9 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
     debug: () => ({
       on,
       kinds,
-      stops,
+      stops: d.stops(),
       focus: lastF,
-      busy: pager.busy(),
+      busy: d.busy(),
       trace,
     }),
     stop() {

@@ -4,19 +4,18 @@
  * (never under reduced motion) and shares it with the CSS tiles, so the first
  * load carries only the observables, the markup and the composition shell.
  *
- * The row is Ciao's packshot row (owner, 2026-11-20: "Ciao look"): fronts
- * only, the pitch ramp seen through Ciao's camera, repeated to run off both
- * edges, leaving through the camera move. The driver is Ciao's paging by
- * only behaviour (owner: one version): one wheel notch or swipe plays one
- * 1.5 s ease-out cubic move, input locked meanwhile, the page never following
- * a held finger.
+ * The page is one flow (full-flow plan 2.1 to 2.3): the panel sticks for the
+ * whole flow root and everything after it scrolls over it. One pager pages
+ * the row, the focused pack's stops and the move from Closing into the free
+ * part: one wheel notch or swipe plays one 1.5 s ease-out cubic move, input
+ * locked meanwhile, the page never following a held finger. A down gesture
+ * at the row focuses the centred pack.
  */
 import type { ReactNode } from 'react';
 import type {
   ComposeCtx,
   FocusKey,
   SpinPanel,
-  SpinRange,
   StageSpinKit,
   StageSpinSource,
   StageState,
@@ -26,16 +25,10 @@ import { STAGE_DESKTOP_QUERY } from './stage-gate';
 import { tileVars } from './StageTile';
 import { cancelFrame, frame, type FrameData } from './stage-motion';
 import { poseAt, stageOpacity } from './stage-pose';
-import {
-  CAPSULE_LEAN,
-  LEAN,
-  spinFlags,
-  spinRangeOf,
-  type SpinFlags,
-} from './stage-spin-math';
+import { CAPSULE_LEAN, LEAN } from './stage-spin-math';
 import { composePose } from './stage-pose-compose';
 import { ciaoCopies, ciaoOpacity, ciaoPose } from './stage-spin';
-import { createSpinDriver, type SpinFrame } from './stage-spin-driver';
+import { createFlowInput, type FlowInputFrame } from './stage-flow-input';
 
 /**
  * The measured stage a CSS row is projected into (host px; the art box is
@@ -187,7 +180,7 @@ export const SPIN_KIT: StageSpinKit = {
 export type SpinHost = {
   /**
    * The stage: its state and wake (the focused view drives them) and its
-   * motion values (the driver writes the spin and the exit; back to 0 on stop).
+   * motion values (the row's spin and exit stay at 0 on this page).
    */
   stage: {
     state: StageState;
@@ -202,13 +195,10 @@ export type SpinHost = {
 };
 
 export type SpinControl = {
-  /** The page's pin, or null (unbound). */
+  /** The page's flow, or null (unbound). */
   bind(src: StageSpinSource | null): void;
   wake(): void;
   stop(): void;
-  last(): SpinFrame | null;
-  range(): SpinRange | null;
-  looping(): boolean;
 };
 
 /** A wheel delta in px, whatever unit the device reports. */
@@ -219,37 +209,34 @@ function wheelPx(e: WheelEvent): number {
 }
 
 /**
- * Starts the spin's driver: non-passive wheel and touch listeners (paging
+ * Starts the flow's driver: non-passive wheel and touch listeners (paging
  * cancels the native scroll), one frame loop that reads the scroll, writes it
- * while a move plays, and sets the spin and the exit; it sleeps at rest. For
- * the bound pin it measures the range (the site header's and the tab bar's
- * heights make the panel one screen), sets the panel's CSS flags, and brings
- * keyboard focus landing in the row mid-spin back to the pin's start.
+ * while a move plays and hands the focus value to the focused view; it
+ * sleeps at rest. For the bound flow it measures the table (the site
+ * header's and the tab bar's heights make the panel one screen) and sets
+ * data-flow-on, which pins the panel and gives the spacers their height.
  */
 export function startSpin(host: SpinHost): SpinControl {
-  const d = createSpinDriver({
-    mode: 'paged',
-    reducedMotion: false,
-    // Ciao's row: the spin IS the scroll's progress (no remap).
-    pagedRemap: false,
-  });
   const rmq = window.matchMedia('(prefers-reduced-motion: reduce)');
   let src: StageSpinSource | null = null;
-  let range: SpinRange | null = null;
-  let flags: SpinFlags = { spinning: false, text: false, head: false };
-  let key = '';
   let looping = false;
   let wokeAt = 0;
-  let last: SpinFrame | null = null;
   let unbindPage: (() => void) | null = null;
   const now = () => performance.now();
-  const setSpin = (spin: number, exit: number) => {
-    host.stage.values.spin.set(spin);
-    host.stage.values.exit.set(exit);
-  };
+  const stage = host.stage;
+  stage.values.spin.set(0);
+  stage.values.exit.set(0);
   /** The focused view (its chunk loads at idle after this one, or at a tap). */
   let focus: FocusRun | null = null;
   let focusLoad: Promise<FocusRun | null> | null = null;
+  const centre = () => Math.round(stage.state.track);
+  const input = createFlowInput({
+    centreKinds: () => focus?.kindsAt(centre()) ?? null,
+    focused: () => !!focus?.active(),
+    kinds: () => focus?.kinds() ?? [],
+    enter: () => !!focus?.enter(centre(), undefined, false),
+  });
+  const flowOn = () => !!src?.flow.hasAttribute('data-flow-on');
 
   const measure = () => {
     if (!src) return;
@@ -259,88 +246,95 @@ export function startSpin(host: SpinHost): SpinControl {
     const bottom = tabBar && tabBar.offsetHeight > 0 ? tabBar.offsetHeight : 0;
     src.flow.style.setProperty('--flow-top', `${top}px`);
     src.flow.style.setProperty('--flow-bottom', `${bottom}px`);
-    // The pin exists only while this driver runs (the CSS reads
-    // data-spin-on). It is switched on only while the visitor is still on
-    // the stage, so a page already scrolled down never jumps.
-    // focused: the focus owns the scroll (no spin range)
-    if (focus?.active()) {
-      range = null;
-      wake();
-      return;
-    }
-    const wrapTop = src.wrap.getBoundingClientRect().top + window.scrollY;
-    const was = src.wrap.hasAttribute('data-spin-on');
+    // The flow is switched on only while the visitor is still at the row,
+    // so a page already scrolled down never jumps.
+    const r0 = Math.max(
+      0,
+      Math.round(src.flow.getBoundingClientRect().top + window.scrollY - top),
+    );
+    const panel = src.panel.getBoundingClientRect().height;
+    const was = flowOn();
     const on =
-      !rmq.matches &&
-      !src.empty &&
-      (was || window.scrollY <= wrapTop - top + src.panel.offsetHeight / 2);
-    if (on !== was) src.wrap.toggleAttribute('data-spin-on', on);
-    range = on ? spinRangeOf(wrapTop, top, src.panel.offsetHeight) : null;
+      !rmq.matches && !src.empty && (was || window.scrollY <= r0 + panel / 2);
+    if (on !== was) src.flow.toggleAttribute('data-flow-on', on);
+    // the Exit spacer, measured: its bottom is where the free part starts
+    const ex = on
+      ? src.flow
+          .querySelector<HTMLElement>("[data-flow-spacer='exit']")
+          ?.getBoundingClientRect()
+      : undefined;
+    const exit =
+      ex && ex.height > 0
+        ? { top: ex.top + window.scrollY - top, height: ex.height }
+        : null;
+    const keep = input.measure(
+      on ? { top: r0, panel, viewport: window.innerHeight, exit } : null,
+      window.scrollY,
+    );
+    if (keep !== null) window.scrollTo(0, keep);
     wake();
   };
 
-  const setFlags = (spin: number, exit: number) => {
-    const el = src?.panel;
-    const next = spinFlags(flags, spin, exit);
-    if (el) {
-      const set = (k: string, on: boolean, was: boolean) => {
-        if (on === was) return;
-        if (on) el.setAttribute(k, '');
-        else el.removeAttribute(k);
-      };
-      set('data-spinning', next.spinning, flags.spinning);
-      set('data-spin-text', next.text, flags.text);
-      set('data-spin-head', next.head, flags.head);
+  /** The panel past Closing: the focused pack fades, and is hidden in the free part. */
+  let shownFade = -1;
+  let hidden = false;
+  const setFade = (f: FlowInputFrame, y: number) => {
+    const panel = src?.panel;
+    const t = input.table();
+    if (!panel || !t) return;
+    const fade = Math.round(f.fade * 1000) / 1000;
+    if (fade !== shownFade) {
+      shownFade = fade;
+      if (fade > 0) panel.style.setProperty('--flow-fade', String(1 - fade));
+      else panel.style.removeProperty('--flow-fade');
     }
-    flags = next;
+    const free = y >= t.exitEnd - 0.5;
+    if (free !== hidden) {
+      hidden = free;
+      src?.flow.toggleAttribute('data-flow-free', free);
+    }
   };
 
-  // Keyboard users keep Open (nothing is inert): focus landing in the row or
-  // the info block mid-spin brings the page back to the pin's start (10.4).
-  const onFocusIn = (e: FocusEvent) => {
-    const t = e.target as HTMLElement | null;
-    if (!range || !flags.spinning || !t?.closest) return;
-    if (!t.closest('[data-stage-viewport],[data-stage-info]')) return;
-    d.reset(last?.spin ?? 0);
-    window.scrollTo({ top: range.start, behavior: 'smooth' });
-  };
-
-  // Only gestures inside the pin (or on the bare page or the site header)
-  // page the spin: sheets, dialogs and the tab bar keep their own scrolling.
+  // Only gestures inside the flow (or on the bare page or the site header)
+  // page it: sheets, dialogs and the tab bar keep their own scrolling.
+  // While a pack is focused every gesture outside a dialog is the flow's.
   const armed = (t: EventTarget | null): boolean => {
+    if (inDialog(t)) return false;
+    if (focus?.active()) return true;
     if (!(t instanceof Node)) return false;
-    if (src?.wrap.contains(t)) return true;
+    if (src?.flow.contains(t)) return true;
     if (t === document.body || t === document.documentElement) return true;
     const e = t instanceof Element ? t : t.parentElement;
-    return !!e?.closest('header') && !e.closest('[role="dialog"]');
+    return !!e?.closest('header');
   };
 
-  /** ?debug=1 only: [time, scrollY after the write, spin] per frame, and gesture times. */
+  /** ?debug=1 only: [time, scrollY after the write, P] per frame, and gesture times. */
   let trace: number[][] | null = null;
   let gestures: number[] | null = null;
 
   const tick = (data: FrameData) => {
-    if (focus?.active()) {
-      const rest = focus.frame(data.timestamp);
-      setSpin(0, 0);
-      if (rest && data.timestamp - wokeAt > 250) stopLoop();
+    const t = data.timestamp;
+    if (!src || !flowOn()) {
+      if (t - wokeAt > 250) stopLoop();
       return;
     }
-    const r = src ? range : null;
-    const k = r ? `${r.start}|${r.length}|${r.exit}` : '';
-    if (k !== key) {
-      key = k;
-      d.setRange(r);
-    }
-    const f = d.frame(window.scrollY, data.timestamp);
+    const f = input.frame(window.scrollY, t);
     if (f.scrollTo !== null && Math.abs(f.scrollTo - window.scrollY) >= 0.5)
       window.scrollTo(0, f.scrollTo);
-    last = f;
-    if (trace && trace.push([data.timestamp, window.scrollY, f.spin]) > 4000)
-      trace.splice(0, 2000);
-    setSpin(f.spin, f.exit);
-    setFlags(f.spin, f.exit);
-    if (f.idle && data.timestamp - wokeAt > 250) stopLoop();
+    const y = window.scrollY;
+    const p =
+      f.at === null ? 0 : f.at.zone === 'paged' ? f.at.p : f.focus + f.fade;
+    if (trace && trace.push([t, y, p]) > 4000) trace.splice(0, 2000);
+    setFade(f, y);
+    const rest = focus?.active()
+      ? focus.frame(t, {
+          focus: f.focus,
+          target: f.target,
+          animating: f.animating,
+          idle: f.idle,
+        })
+      : true;
+    if (f.idle && rest && t - wokeAt > 250) stopLoop();
   };
   const stopLoop = () => {
     if (!looping) return;
@@ -354,50 +348,61 @@ export function startSpin(host: SpinHost): SpinControl {
     frame.update(tick, true);
   }
 
-  /** Focused: input that belongs to a dialog (the card overlay, a sheet). */
-  const inDialog = (t: EventTarget | null): boolean =>
-    !!(t instanceof Element && t.closest('[role="dialog"]')) ||
-    !!document.querySelector('[role="dialog"][aria-modal="true"]');
+  /** Input that belongs to a dialog (the card overlay, a sheet). */
+  function inDialog(t: EventTarget | null): boolean {
+    return (
+      !!(t instanceof Element && t.closest('[role="dialog"]')) ||
+      !!document.querySelector('[role="dialog"][aria-modal="true"]')
+    );
+  }
+  /** The focused view is leaving: every gesture waits for it. */
+  const held = () => !!focus?.leaving();
   const onWheel = (e: WheelEvent) => {
-    if (focus?.active()) {
-      if (!e.ctrlKey && !inDialog(e.target)) focus.wheel(e);
+    if (!flowOn() || e.ctrlKey || !armed(e.target)) return;
+    if (held()) {
+      e.preventDefault();
       return;
     }
-    if (e.ctrlKey || !armed(e.target)) return;
+    // a down notch at the row before the focused view has loaded: load it
+    if (!focus) void loadFocus();
     gestures?.push(now());
-    if (d.wheel(wheelPx(e), window.scrollY, now())) e.preventDefault();
+    if (input.wheel(wheelPx(e), e.deltaX, e.shiftKey, window.scrollY, now()))
+      e.preventDefault();
     wake();
   };
   const onTouchStart = (e: TouchEvent) => {
     const p = e.touches[0];
-    if (focus?.active()) {
-      if (!inDialog(e.target)) focus.touchStart(e);
+    if (!flowOn() || !p || e.touches.length > 1 || !armed(e.target)) {
+      touching = false;
       return;
     }
-    if (!p || e.touches.length > 1 || !armed(e.target)) return;
-    d.touchStart(p.clientX, p.clientY, window.scrollY, now());
+    touching = true;
+    if (!focus) void loadFocus();
+    const el = e.target instanceof Element ? e.target : null;
+    // a sideways touch on the Top Hits strip, or on the row at rest, is theirs
+    const strip =
+      !!el?.closest('[data-focus-strip]') ||
+      (!focus?.active() && !!el?.closest('[data-stage-viewport]'));
+    input.touchStart(p.clientX, p.clientY, window.scrollY, now(), { strip });
     wake();
   };
+  let touching = false;
   const onTouchMove = (e: TouchEvent) => {
     const p = e.touches[0];
-    if (focus?.active()) {
-      if (!inDialog(e.target)) focus.touchMove(e);
-      return;
-    }
-    if (!p || e.touches.length > 1) return;
+    if (!touching || !p || e.touches.length > 1) return;
     if (
-      d.touchMove(p.clientX, p.clientY, window.scrollY, now()) &&
+      (held() ||
+        input.touchMove(p.clientX, p.clientY, window.scrollY, now())) &&
       e.cancelable
     )
       e.preventDefault();
   };
   const onTouchEnd = () => {
-    if (focus?.active()) {
-      focus.touchEnd();
-      return;
-    }
+    if (!touching) return;
+    touching = false;
+    if (held()) return;
     gestures?.push(now());
-    d.touchEnd(window.scrollY, now());
+    input.touchEnd(window.scrollY, now());
     wake();
   };
   const active = { passive: false } as const;
@@ -411,11 +416,10 @@ export function startSpin(host: SpinHost): SpinControl {
   window.addEventListener('resize', measure, quiet);
   rmq.addEventListener('change', measure);
 
-  // ---- The focused view: the same listeners, handed over while focused ----
-  const stage = host.stage;
+  // ---- The focused view ----
   const paintRow = () => {
     const panel = src?.panel;
-    if (!panel || !stage) return;
+    if (!panel) return;
     const row = panel.querySelector<HTMLElement>(
       '[data-stage-panel]:not([hidden]) [data-stage-row]',
     );
@@ -432,8 +436,16 @@ export function startSpin(host: SpinHost): SpinControl {
       a && a.height > 0 ? (a.top + a.height / 2 - h.top) / a.height : 0;
     SPIN_KIT.paintTiles(row, panel, packs, stage.state, cyArt);
   };
+  const go = (k: number, o?: { from?: number; ms?: number }): boolean => {
+    if (input.busy()) return false;
+    const from = o?.from ?? window.scrollY;
+    if (o?.from !== undefined) window.scrollTo(0, from);
+    const ok = input.goTo(k, from, now(), o?.ms);
+    wake();
+    return ok;
+  };
   const loadFocus = (): Promise<FocusRun | null> => {
-    if (!stage || !host.ui) return Promise.resolve(null);
+    if (!host.ui) return Promise.resolve(null);
     focusLoad ??= import(
       /* webpackChunkName: "pack-stage-focus" */ './stage-focus-kit'
     ).then(
@@ -449,10 +461,12 @@ export function startSpin(host: SpinHost): SpinControl {
           >[0]['values'],
           ui: host.ui,
           loop: wake,
-          top: () => document.querySelector('header')?.offsetHeight ?? 0,
+          go,
+          busy: () => input.busy(),
+          stops: () => input.stops(),
           paint: paintRow,
           ended: () => {
-            d.reset(0);
+            shownFade = -1;
             measure();
           },
         });
@@ -462,26 +476,27 @@ export function startSpin(host: SpinHost): SpinControl {
     );
     return focusLoad;
   };
+  /** The page rests on the row (where a tap on the centred pack focuses it). */
+  const atRow = () => {
+    const t = input.table();
+    return (
+      !!t && !input.busy() && Math.abs(window.scrollY - t.r0) < 1 && flowOn()
+    );
+  };
   // A plain tap on the centred pack focuses it (the row at rest only).
   const onTap = (e: MouseEvent) => {
     if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
       return;
     const t = e.target as HTMLElement | null;
     const tile = t?.closest?.<HTMLElement>('[data-stage-tile]');
-    if (!tile || !stage) return;
+    if (!tile || !flowOn()) return;
     if (focus?.active()) {
       e.preventDefault();
       e.stopPropagation();
       return;
     }
     const index = Number(tile.dataset.index);
-    if (
-      index !== Math.round(stage.state.track) ||
-      (last?.spin ?? 0) >= 0.02 ||
-      (last?.target ?? 0) >= 0.02 ||
-      flags.spinning
-    )
-      return;
+    if (index !== centre() || !atRow()) return;
     e.preventDefault();
     e.stopPropagation();
     if (tapping) return;
@@ -493,15 +508,15 @@ export function startSpin(host: SpinHost): SpinControl {
       if (!f || !f.enter(index)) {
         const a = tile.querySelector<HTMLAnchorElement>('a[href]');
         if (a) window.location.assign(a.href);
-        return;
       }
-      measure();
     });
   };
   let tapping = false;
   const preload = () => void loadFocus();
   const onKey = (e: KeyboardEvent) => {
-    if (focus?.active()) focus.key(e);
+    const t = input.table();
+    // the stops' keys, while the page is in the paged part
+    if (focus?.active() && t && window.scrollY <= t.edge) focus.key(e);
   };
   window.addEventListener('keydown', onKey);
   const idleLoad = setTimeout(() => void loadFocus(), 2500);
@@ -515,7 +530,7 @@ export function startSpin(host: SpinHost): SpinControl {
     );
   };
   const resume = () => {
-    if (!atEntry()) return;
+    if (!atEntry() || !flowOn()) return;
     void loadFocus().then((f) => f?.resume());
   };
 
@@ -524,29 +539,28 @@ export function startSpin(host: SpinHost): SpinControl {
     unbindPage?.();
     unbindPage = null;
     if (src) {
-      src.wrap.removeAttribute('data-spin-on');
-      setFlags(0, 0);
-      flags = { spinning: false, text: false, head: false };
+      src.flow.removeAttribute('data-flow-on');
+      src.flow.removeAttribute('data-flow-free');
+      src.panel.style.removeProperty('--flow-fade');
+      shownFade = -1;
+      hidden = false;
     }
     src = next;
-    range = null;
     if (next) {
       const ro = new ResizeObserver(measure);
-      ro.observe(next.wrap);
+      ro.observe(next.flow);
       ro.observe(next.panel);
-      next.panel.addEventListener('focusin', onFocusIn);
       next.panel.addEventListener('click', onTap, { capture: true });
       // a press loads the focused view ahead of its tap (when idle has not yet)
       next.panel.addEventListener('pointerdown', preload, quiet);
       setTimeout(resume, 0);
       unbindPage = () => {
         ro.disconnect();
-        next.panel.removeEventListener('focusin', onFocusIn);
         next.panel.removeEventListener('click', onTap, { capture: true });
         next.panel.removeEventListener('pointerdown', preload);
       };
       measure();
-    }
+    } else input.measure(null, window.scrollY);
     wake();
   };
 
@@ -560,25 +574,20 @@ export function startSpin(host: SpinHost): SpinControl {
     dbg.focusKit = () =>
       import(/* webpackChunkName: "pack-stage-focus" */ './stage-focus-kit');
     dbg.focus = () => focus?.debug() ?? null;
-  }
-  if (dbg)
-    dbg.spin = () => ({
-      kit: true,
+    dbg.flow = () => ({
+      on: flowOn(),
       bound: src !== null,
       looping,
-      range,
-      frame: last,
-      flags,
+      table: input.table(),
+      stops: input.stops(),
+      busy: input.busy(),
     });
+  }
 
   return {
     bind,
     wake,
-    last: () => last,
-    range: () => range,
-    looping: () => looping,
     stop() {
-      setSpin(0, 0);
       clearTimeout(idleLoad);
       focus?.stop();
       window.removeEventListener('keydown', onKey);

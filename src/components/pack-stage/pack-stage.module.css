@@ -14,7 +14,7 @@
  * image, under the pose.
  */
 
-/* ---- The pin (step 2): one screen, stuck through the spin and the exit -- */
+/* ---- The pin: one screen, stuck for the whole flow ---------------------- */
 
 /* The flow: the site header's and the phone tab bar's heights (measured by
    PackStage; these defaults are today's) give the panel, exactly one screen. */
@@ -30,12 +30,13 @@
   }
 }
 
-/* The panel is one screen. The pin exists only while the spin's driver runs
-   (the lazily loaded spin chunk sets data-spin-on): without it (no
-   JavaScript, reduced motion, the chunk failing, a visitor already down the
-   page) the page below simply follows the panel. On: panel + the pin (1.75
-   panels) + the exit (1.25 panels), stage-spin-math's SPIN_PIN_PANELS and
-   SPIN_EXIT_PANELS. */
+/* The panel is one screen. The pin exists only while the flow's driver runs
+   (the lazily loaded spin chunk sets data-flow-on on the flow root): without
+   it (no JavaScript, reduced motion, the chunk failing, a visitor already
+   down the page) the page below simply follows the panel. On, the pin holds
+   the panel under the site header for the whole flow root, and the page
+   below (its spacers first: full-flow plan 2.1) starts at the panel's top and
+   scrolls over it, as Ciao's sections scroll over its fixed canvas. */
 .spinWrap {
   position: relative;
 }
@@ -44,40 +45,36 @@
   height: var(--panel);
 }
 
-.spinWrap[data-spin-on] {
-  height: calc(var(--panel) * 4);
-}
-
-.spinWrap[data-spin-on] .stage.panel {
+.flow[data-flow-on] .spinWrap {
   position: sticky;
   top: var(--flow-top);
 }
 
-/* The page below starts at the pin's end and rises over the stuck panel
-   during the exit (Ciao's FAQ over its fixed canvas); positioned, so it
-   paints over the panel by document order (no z-index: overlays inside it
-   keep their own stacking). */
+/* Positioned, so it paints over the pinned panel by document order (no
+   z-index: overlays inside it keep their own stacking). It takes no taps
+   itself (nor do the spacers), so the tabs, the tiles and the stop blocks
+   take them through it; the page's sections take their own. */
 .spinAfter {
   position: relative;
 }
 
-.spinWrap[data-spin-on] + .spinAfter {
+.flow[data-flow-on] .spinAfter {
   margin-top: calc(var(--panel) * -1);
+  pointer-events: none;
 }
 
-/* Focused (the spin chunk sets data-focus-on): the panel sticks through one
-   stop per 1.25 panels (Ciao's sections), the page below waits. */
-.spinWrap[data-focus-on] {
-  height: calc(var(--panel) * (1 + 1.25 * var(--focus-n, 6)));
+.flow[data-flow-on] .spinAfter [data-flow-section] {
+  pointer-events: auto;
 }
 
-.spinWrap[data-focus-on] .stage.panel {
-  position: sticky;
-  top: var(--flow-top);
+/* Past Closing the focused pack fades out with the scroll (--flow-fade, set
+   by the spin chunk), and the panel is hidden once the free part starts. */
+.flow[data-flow-on] .stage.panel {
+  opacity: var(--flow-fade, 1);
 }
 
-.spinWrap[data-focus-on] + .spinAfter {
-  display: none;
+.flow[data-flow-free] .stage.panel {
+  visibility: hidden;
 }
 
 /* The row's own UI leaves with the tap's move (its first 40%, as the
@@ -601,7 +598,10 @@
 
 @media (prefers-reduced-motion: reduce) {
   /* No pin, no scrub: the page reads as step 1. */
-  .spinWrap {
+  .spinWrap,
+  .flow[data-flow-on] .spinWrap {
+    position: relative;
+    top: auto;
     height: auto;
   }
   .stage.panel {
@@ -609,8 +609,10 @@
     top: auto;
     height: auto;
   }
-  .spinAfter {
+  .spinAfter,
+  .flow[data-flow-on] .spinAfter {
     margin-top: 0;
+    pointer-events: auto;
   }
   .sway {
     animation: none;

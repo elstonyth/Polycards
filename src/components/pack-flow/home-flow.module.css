@@ -38,11 +38,8 @@
 
 /* The layout renders the site footer as a child of <body>; on this page the
    Telegram section renders the same footer, so the layout's copy is hidden
-   (display: none also takes it out of the accessibility tree). While a pack
-   is focused the section is hidden with everything after the pin, and the
-   focused view's last stop needs the layout footer's length on phones, so the
-   layout's copy stays then. Browsers without :has() show both footers. */
-:global(body):has(.telegram):not(:has([data-focus-on]))
-  > :global(footer[data-site-chrome]) {
+   in every state (display: none also takes it out of the accessibility
+   tree). Browsers without :has() show both footers. */
+:global(body):has(.telegram) > :global(footer[data-site-chrome]) {
   display: none;
 }

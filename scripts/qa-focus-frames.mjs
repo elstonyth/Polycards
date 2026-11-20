@@ -24,7 +24,11 @@
 // - (--headed) a frame of any move takes longer than 33 ms;
 // - a block's heading is hidden while the rest of its block still shows
 //   (a block fades as one piece, both ways);
-// - the Front block shows while leaving from another stop.
+// - the Front block shows while leaving from another stop;
+// - (full-flow WP3a) a scroll entry at the row strays from the tap's curve;
+//   past Closing, the panel's opacity rises, another pack shows, or the move
+//   does not land on the free part's start; an up wheel there does not come
+//   back to rest on Closing.
 import { chromium } from 'playwright';
 
 const args = process.argv.slice(2);
@@ -156,7 +160,25 @@ function sampler() {
             r.width,
           ]);
       }
+      const root = w.__light
+        ? null
+        : document.querySelector('[data-stage-root]');
+      const rcs = root ? getComputedStyle(root) : null;
       w.__frames.push({
+        // the panel's own opacity (the fade past Closing), 0 once hidden
+        panelOp: rcs
+          ? rcs.visibility === 'hidden'
+            ? 0
+            : Number(rcs.opacity)
+          : 1,
+        y: scrollY,
+        // the page's first section below the stage, against the viewport
+        openTop: w.__light
+          ? null
+          : (document
+              .querySelector('[data-flow-section="opening"]')
+              ?.getBoundingClientRect().top ?? null),
+        vh: innerHeight,
         // the frame time the stage posed this frame with
         t: ts,
         // the frame time the canvas posed what it drew (its own clock)
@@ -578,6 +600,22 @@ for (const size of ['phone', 'desktop']) {
     window.__focusIndex = i;
   }, index);
 
+  // enter by scroll: one notch or swipe at the row focuses the centred pack
+  // on the tap's curve (full-flow WP3a)
+  const scrollIn = await frames(async () => {
+    await page.waitForTimeout(300);
+    await next();
+    await page.waitForFunction(() => window.__packStage.focus()?.on, null, {
+      timeout: 8000,
+    });
+    await settle(page, 1);
+  });
+  judge(`${size}-scroll-entry`, scrollIn, 'enter');
+  await wiggle();
+  await page.keyboard.press('Escape');
+  await left(page);
+  await page.waitForTimeout(600);
+
   // enter and walk every stop by one gesture each
   let kinds = [];
   const zoom = await frames(async () => {
@@ -603,6 +641,81 @@ for (const size of ['phone', 'desktop']) {
     }
   });
   judge(`${size}-stops`, walk);
+  // past Closing (full-flow WP3a): one gesture pages to the free part's
+  // start while the panel fades out with the scroll, and is then hidden; an
+  // up wheel from there comes back to rest on Closing
+  const past = await frames(async () => {
+    await next();
+    await page.waitForFunction(
+      () => document.querySelector('[data-home-flow][data-flow-free]'),
+      null,
+      { timeout: 8000 },
+    );
+    await page.waitForTimeout(400);
+  });
+  {
+    const moving = past.filter((fr) => fr.on);
+    let back = 0;
+    for (let i = 1; i < moving.length; i++)
+      if (moving[i].panelOp > moving[i - 1].panelOp + 0.02) back++;
+    const end = moving.at(-1);
+    const flow = await page.evaluate(() => window.__packStage.flow?.());
+    report(
+      `${size}-past-closing-fades-out`,
+      back === 0 &&
+        !!end &&
+        end.panelOp === 0 &&
+        !!flow?.table &&
+        Math.abs(end.y - flow.table.exitEnd) < 1,
+      `${moving.length} frames, opacity rose in ${back}; last: opacity ${end?.panelOp}, scroll ${end?.y} vs exit end ${flow?.table?.exitEnd}`,
+    );
+    const over = moving.filter(
+      (fr) => fr.panelOp > 0.01 && fr.openTop !== null && fr.openTop < fr.vh,
+    );
+    report(
+      `${size}-past-closing-no-content-over-the-pack`,
+      over.length === 0,
+      `frames with the page's content in view while the pack shows: ${over.length}${over[0] ? `; first: opacity ${over[0].panelOp}, content top ${over[0].openTop}` : ''}`,
+    );
+    report(
+      `${size}-past-closing-no-other-pack`,
+      moving.every((fr) => fr.css.length === 0 && fr.drawn.length === 0),
+      `frames with another pack shown: ${moving.filter((fr) => fr.css.length || fr.drawn.length).length}`,
+    );
+  }
+  // the free part's wheel is the browser's own until a notch crosses the
+  // paged edge (half a section below the lineup rest), which pages to Closing
+  for (let i = 0; i < 30; i++) {
+    await page.mouse.move(V.width / 2, V.height / 2);
+    await page.mouse.wheel(0, -120);
+    await page.waitForTimeout(250);
+    const paging = await page.evaluate(() => {
+      const fl = window.__packStage.flow();
+      return fl.busy || Math.abs(scrollY - fl.stops.at(-1)) < 1;
+    });
+    if (paging) break;
+  }
+  const backAt = await page
+    .waitForFunction(
+      () => {
+        const fl = window.__packStage.flow();
+        return !fl.busy && Math.abs(scrollY - fl.stops.at(-1)) < 1;
+      },
+      null,
+      { timeout: 10000 },
+    )
+    .then(() => settle(page, kinds.length))
+    .then(() => true)
+    .catch(() => false);
+  const at = await page.evaluate(() => ({
+    y: scrollY,
+    closing: window.__packStage.flow().stops.at(-1),
+  }));
+  report(
+    `${size}-up-from-the-free-part-rests-on-closing`,
+    backAt,
+    `scroll ${at.y}, Closing rest ${at.closing}`,
+  );
   // leave from every stop (the last one with its "All" button)
   for (let k = kinds.length; k >= 1; k--) {
     if (k !== kinds.length) {

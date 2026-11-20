@@ -115,8 +115,21 @@ const wanted = (group) => ONLY.size === 0 || ONLY.has(group);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const r1 = (v) => Math.round(v * 10) / 10;
 
+/**
+ * Groups whose behaviour the page no longer has: each check reports SKIP with
+ * the reason. The scroll spin (the row paging to the tilted row) was replaced
+ * by the flow pager in full-flow work package 3a; WP10 removes these checks.
+ */
+const RETIRED = {
+  spin: 'the scroll spin is retired: a down gesture at the row now enters the focused view (full-flow WP3a); removed in WP10',
+};
+
 async function run(group, name, fn) {
   if (!wanted(group)) return;
+  if (RETIRED[group]) {
+    skip(name, RETIRED[group]);
+    return;
+  }
   try {
     await fn();
   } catch (e) {
@@ -3592,7 +3605,8 @@ async function checkSections(label, profile) {
         `${r.feet} visible site footer(s); the one in the Telegram section shown: ${r.footInTelegram}`,
       );
       if (reduced) continue;
-      // Focused: everything after the pin hides, the layout's footer stays.
+      // Focused: the page below stays laid out over the pinned panel (full-flow
+      // WP3a), so the footer is still the Telegram section's one.
       await page.waitForFunction(
         () =>
           window.__packStage?.ready?.() &&
@@ -3616,8 +3630,8 @@ async function checkSections(label, profile) {
         timeout: 10000,
       });
       const f = await page.evaluate(sectionsProbe);
-      // The focused view still reaches its last stop (the page is long
-      // enough with the layout's footer kept while focused).
+      // The focused view still reaches its last stop (the spacers give the
+      // page its length).
       const kinds = await page.evaluate(() => window.__packStage.focus().kinds);
       // Stop 1 first: a key during the tap's move is swallowed by design.
       let landed = 0;
@@ -3644,8 +3658,8 @@ async function checkSections(label, profile) {
       );
       pass(
         `sections-one-footer-focused-${tag}`,
-        f.feet === 1,
-        `${f.feet} visible site footer(s) while a pack is focused`,
+        f.feet === 1 && f.footInTelegram,
+        `${f.feet} visible site footer(s) while a pack is focused; the one in the Telegram section: ${f.footInTelegram}`,
       );
     } finally {
       await ctx.close();

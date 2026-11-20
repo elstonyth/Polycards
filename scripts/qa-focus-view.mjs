@@ -5,6 +5,8 @@
 //   node scripts/qa-focus-view.mjs [baseUrl]   (default http://localhost:4300)
 //
 // Checks, on a phone (390x844) and a desktop (1440x900) profile:
+// - a down gesture at the row (a swipe, a wheel notch) focuses the centred
+//   pack and lands on Front;
 // - the buy dock at Front takes taps (phone);
 // - a sideways swipe over the row while focused leaves the row alone;
 // - a page moved off a stop by native scroll snaps back onto one;
@@ -144,8 +146,76 @@ async function swipe(page, cdp, x0, y0, x1, y1) {
 for (const size of ['phone', 'desktop']) {
   const { ctx, page } = await stage(size);
   const cdp = size === 'phone' ? await ctx.newCDPSession(page) : null;
+
+  // a down gesture at the row focuses the centred pack (full-flow WP3a)
+  if (cdp) await swipe(page, cdp, 200, 600, 200, 380);
+  else {
+    await page.mouse.move(720, 450);
+    await page.mouse.wheel(0, 120);
+  }
+  const entered = await page
+    .waitForFunction(
+      () => {
+        const f = window.__packStage.focus();
+        return f && f.on && !f.busy && Math.abs(f.focus - 1) < 1e-3;
+      },
+      null,
+      { timeout: 8000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+  const se = await page.evaluate(() => ({
+    path: location.pathname,
+    id: window.__packStage.state.focusOn?.id ?? null,
+  }));
+  report(
+    `scroll-entry-${size}`,
+    entered && se.id === SLUG,
+    `landed on Front: ${entered}; focused ${se.id}; address ${se.path}`,
+  );
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !window.__packStage.focus()?.on, null, {
+    timeout: 8000,
+  });
+  await page.waitForTimeout(900);
+
+  // a native scroll of a pixel or forty at the row (a key, the scrollbar)
+  // goes back to the row unfocused, with the row's heading showing
+  for (const by of [1, 40]) {
+    await page.evaluate((b) => window.scrollBy(0, b), by);
+    await page.waitForTimeout(1500);
+    const nb = await page.evaluate(() => ({
+      y: scrollY,
+      on: !!window.__packStage.focus()?.on,
+      head: Number(
+        getComputedStyle(document.querySelector('[data-stage-head]')).opacity,
+      ),
+    }));
+    report(
+      `row-nudge-${by}px-${size}`,
+      nb.y === 0 && !nb.on && nb.head > 0.99,
+      `scroll ${nb.y}, focused ${nb.on}, heading opacity ${nb.head}`,
+    );
+  }
+
   await tapCentre(page);
   await settle(page, 1);
+
+  if (cdp) {
+    // a swipe that starts on the tab bar while focused is the flow's: the
+    // page never follows the finger and ends on a rest
+    await swipe(page, cdp, 200, 820, 200, 600);
+    await page.waitForTimeout(2200);
+    const tb = await focusOf(page);
+    const offTb = Math.min(...tb.stops.map((y) => Math.abs(y - tb.y)));
+    report(
+      `tab-bar-swipe-${size}`,
+      tb.on && offTb < 1,
+      `focused ${tb.on}, off a rest by ${offTb} px (focus ${tb.focus})`,
+    );
+    await page.keyboard.press('Home');
+    await settle(page, 1);
+  }
 
   if (size === 'phone') {
     const dock = page.locator('[data-testid="focus-stops"]');
