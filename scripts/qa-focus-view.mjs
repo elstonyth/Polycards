@@ -228,6 +228,8 @@ for (const size of ['phone', 'desktop']) {
   );
 
   // Back then Forward: the stop the entry rested on (Pull Odds or the next)
+  // (the overlay gave focus back to its tile, where the arrows scroll the strip)
+  await page.evaluate(() => document.activeElement?.blur());
   await page.keyboard.press('ArrowDown');
   await settle(page, 3);
   await page.waitForTimeout(400);
@@ -315,9 +317,8 @@ for (const size of ['phone', 'desktop']) {
   });
   await page.waitForTimeout(900);
   let loads = 0;
-  page.on('framenavigated', (fr) => {
-    if (fr === page.mainFrame()) loads++;
-  });
+  // a document load (pushState to /slots/<id> is not one)
+  page.on('load', () => loads++);
   await tapCentre(page);
   await page.waitForTimeout(150);
   await tapCentre(page).catch(() => {});
@@ -341,7 +342,7 @@ for (const size of ['phone', 'desktop']) {
   await reject(page);
   await page.waitForTimeout(1500);
   const kinds = await page.evaluate(() =>
-    [...document.querySelectorAll('[data-testid="focus-stops"] section')].map(
+    [...document.querySelectorAll('[data-testid="focus-stops"] > section')].map(
       (s) => s.getAttribute('data-kind'),
     ),
   );
@@ -355,29 +356,34 @@ for (const size of ['phone', 'desktop']) {
     .first()
     .click();
   await page.waitForURL(/\/home-preview/, { timeout: 15000 });
-  // the float-in moves the packs up into place: sample the art's top
+  // the float-in: the tiles' vertical offset (in art heights) eases to 0
+  const key = size === 'phone' ? '--m-dy' : '--d-dy';
   const samples = [];
-  for (let i = 0; i < 14; i++) {
+  for (let i = 0; i < 16; i++) {
     samples.push(
-      await page.evaluate(() => {
-        const arts = [
+      await page.evaluate((k) => {
+        const t = [
           ...document.querySelectorAll(
-            '[data-stage-panel]:not([hidden]) [data-stage-art]',
+            '[data-stage-panel]:not([hidden]) [data-stage-tile]',
           ),
         ];
-        return arts.length
-          ? Math.min(...arts.map((el) => el.getBoundingClientRect().top))
+        return t.length
+          ? Math.max(
+              ...t.map((el) =>
+                Math.abs(Number(el.style.getPropertyValue(k)) || 0),
+              ),
+            )
           : null;
-      }),
+      }, key),
     );
-    await page.waitForTimeout(60);
+    await page.waitForTimeout(50);
   }
-  const tops = samples.filter((v) => v !== null);
-  const moved = tops.length > 2 && Math.max(...tops) - Math.min(...tops) > 4;
+  const dys = samples.filter((v) => v !== null);
+  const played = dys.length > 2 && dys[0] > 0.05 && dys.at(-1) < 0.01;
   report(
     `all-packs-arrival-${size}`,
-    moved,
-    `art top over 0.8 s: ${tops.map((v) => Math.round(v)).join(' ')}`,
+    played,
+    `largest tile offset over 0.8 s: ${dys.map((v) => v.toFixed(3)).join(' ')}`,
   );
   await ctx.close();
 }
