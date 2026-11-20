@@ -136,6 +136,10 @@ const stopKey = (entry: string) => `pack-flow:stop:${entry}`;
 /** A page left off a stop (scrollbar, a pinch) snaps back after this quiet. */
 const SNAP_QUIET_MS = 150;
 const SNAP_MS = 600;
+/** ?debug=1: QA scrubbing a move by scroll holds the snap-back. */
+const snapHeld = () =>
+  !!(window as unknown as { __packStage?: { holdSnap?: boolean } }).__packStage
+    ?.holdSnap;
 
 export function createFocusRun(d: FocusRunDeps): FocusRun {
   const pager = createPager();
@@ -483,7 +487,7 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
         const off = Math.abs(window.scrollY - (stops[k] ?? window.scrollY));
         if (off > 0.5) {
           // native scroll moved the page (scrollbar, a pinch): back on a stop
-          if (t - lastScrollAt > SNAP_QUIET_MS)
+          if (t - lastScrollAt > SNAP_QUIET_MS && !snapHeld())
             pager.goTo(k, window.scrollY, t, SNAP_MS);
           return false;
         }
