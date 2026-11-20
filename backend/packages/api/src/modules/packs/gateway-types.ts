@@ -11,7 +11,8 @@
 // isPaymentGateway (and therefore gatewayConfigFor, resolveActiveGateway and
 // the admin switch), plus the registry entry's own `configured` /
 // `configFromEnv`.
-export type PaymentGateway = 'tgpay' | 'the7pay' | 'a3pay' | 'gp365' | 'fake';
+export type PaymentGateway =
+  'tgpay' | 'the7pay' | 'a3pay' | 'gmpay' | 'gp365' | 'fake';
 
 /** What a deposit or payout has come to, in our terms. */
 export type SettlementState = 'success' | 'failed' | 'pending';
@@ -104,6 +105,11 @@ export type SubmitDepositInput = {
   gatewayAmount?: number;
   /** Name on the PAYING bank account, for gateways that match it (A3Pay). */
   payerName?: string;
+  /**
+   * The PAYING bank account itself (canonical bank id, banks.ts), for
+   * gateways that require it on every pay-in (GMpay).
+   */
+  payerBank?: { bankCode: string; accountNumber: string };
   /** The payer's name/email/phone, for gateways whose checkout needs it. */
   customer?: {
     name: string;

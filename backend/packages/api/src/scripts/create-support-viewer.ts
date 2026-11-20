@@ -14,7 +14,11 @@ import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils';
 // API refuses any edit even if a button is clicked. `store:read` is for the
 // dashboard shell (its header throws on a 403 there). No `stats:read`: the
 // dashboard's money figures stay with staff; the role lands on Players.
-export const SUPPORT_VIEWER_ROLE = 'Support viewer';
+// Renamed "Customer support" and widened on prod 2026-11-19 (owner's chat
+// request): full bank numbers and linked browsers (customer_bank_account), the
+// pages customers ask about, and the support fixes (real name, saved banks)
+// through customer_support:update, never customer:update.
+export const SUPPORT_VIEWER_ROLE = 'Customer support';
 export const SUPPORT_VIEWER_POLICIES = [
   'store',
   'customer',
@@ -25,10 +29,27 @@ export const SUPPORT_VIEWER_POLICIES = [
   'pull',
   'pack_gift',
   'lucky_draw',
+  'customer_bank_account',
+  'referral',
+  'task',
+  'challenge',
+  'daily_reward',
+  'vip_level',
+  'coin_flip',
+  // The Rewards menu that holds Tasks, Weekly challenge, VIP and Lucky Draw
+  // (it asks rewards_setting:read), and what those pages load: the card list
+  // and the avatar frames.
+  'rewards_setting',
+  'card',
+  'avatar_frame',
 ]
   .map((resource) => ({ resource, operation: 'read' as 'read' | 'update' }))
-  // Unban through the admin assistant (owner, 2026-11-03): its one write.
-  .concat([{ resource: 'assistant_unban', operation: 'update' }]);
+  .concat([
+    // Unban through the admin assistant (owner, 2026-11-03).
+    { resource: 'assistant_unban', operation: 'update' },
+    // Real name and saved banks (owner, 2026-11-19).
+    { resource: 'customer_support', operation: 'update' },
+  ]);
 
 /** The role, created on first use and linked to the DECLARED policy rows.
  *  Never creates a policy: the boot sync soft-deletes undeclared ones
@@ -58,7 +79,7 @@ export async function supportViewerRoleId(
     (await rbac.createRbacRoles({
       name: SUPPORT_VIEWER_ROLE,
       description:
-        'View-only support: players, payments, orders. Cannot change anything.',
+        'Customer support: players, payments, orders, banks. Fixes real names and saved banks; no money changes.',
     }));
   for (const policy of policies) {
     const [link] = await rbac.listRbacRolePolicies(
@@ -75,7 +96,7 @@ export async function supportViewerRoleId(
   return role.id as string;
 }
 
-/** Creates one admin user with the Support viewer role and an email +
+/** Creates one admin user with the Customer support role and an email +
  *  password login (create-automation-operator.ts's flow). Refuses an email
  *  that already has an admin user: it never changes an existing login.
  *  Run: VIEWER_EMAIL=… VIEWER_PASSWORD=… medusa exec ./src/scripts/create-support-viewer.ts */

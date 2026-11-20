@@ -25,7 +25,7 @@ import type { PackDetail } from '@/lib/data/packs';
 const detailA: PackDetail = {
   topHits: [],
   pool: [],
-  publishedOdds: null,
+  pullOdds: null,
 };
 
 beforeAll(async () => {
@@ -132,10 +132,10 @@ it.each([
         spriteImage: null,
       },
     ],
-    publishedOdds: null,
+    pullOdds: null,
   },
-  { topHits: [], pool: [null], publishedOdds: null },
-  { topHits: 'broken', pool: [], publishedOdds: null },
+  { topHits: [], pool: [null], pullOdds: null },
+  { topHits: 'broken', pool: [], pullOdds: null },
 ])(
   'retains seed and last-good detail when a poll is incompatible: %j',
   async (incompatible) => {
@@ -153,7 +153,7 @@ it.each([
           spriteImage: null,
         },
       ],
-      publishedOdds: { tiers: { Rare: 100 } },
+      pullOdds: { tiers: { Rare: 100 } },
     };
     const fetcher = vi
       .fn()

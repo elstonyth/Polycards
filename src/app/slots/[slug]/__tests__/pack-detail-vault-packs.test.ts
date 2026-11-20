@@ -64,8 +64,8 @@ vi.mock('../PoolByRarity', () => ({
   PoolByRarity: () => createElement('div'),
 }));
 vi.mock('../OddsSheet', () => ({
-  PublishedOddsList: () => createElement('div'),
-  hasPublishedOddsContent: () => false,
+  PullOddsList: () => createElement('div'),
+  hasPullOddsContent: () => false,
 }));
 
 const PackDetailClient = (await import('../PackDetailClient')).default;

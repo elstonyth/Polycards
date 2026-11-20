@@ -41,7 +41,7 @@ function loadGeometry(cfg) {
  * The geometry's dynamic print zones as integer pixel rectangles, half-open:
  * columns [x0, x1), rows [y0, y1). `set` picks which zones: 'live' (the zones
  * the live text replaces) or 'no-odds' (those plus the ones blanked only when a
- * pack has no published odds).
+ * pack has no pull odds).
  */
 function zoneRects(geo, W, H, set = 'live') {
   const zones = geo?.printZones?.zones ?? [];

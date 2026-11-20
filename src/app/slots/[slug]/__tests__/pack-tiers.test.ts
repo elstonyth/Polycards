@@ -28,7 +28,7 @@ const { PackTiersResponseSchema, parseOne } =
 const { clearTtlCache } = await import('@/lib/ttl-cache');
 const { OddsBoard } = await import('../OddsBoard');
 const { PackPullOdds } = await import('../PackDetailSections');
-const { hasPublishedOddsContent } = await import('../OddsSheet');
+const { hasPullOddsContent } = await import('../OddsSheet');
 const fmt = await import('@/lib/packs-format');
 const { ticketCard } = await import('@/lib/packs-data');
 type PackCard = import('@/lib/packs-data').PackCard;
@@ -66,7 +66,7 @@ const POOL = [
 const ODDS = {
   tiers: { Immortal: 0.2, Legendary: 2.4, Mythical: 3.4, Rare: 22, Common: 72 },
 };
-const CARDS: PackDetail = { topHits: [], pool: POOL, publishedOdds: ODDS };
+const CARDS: PackDetail = { topHits: [], pool: POOL, pullOdds: ODDS };
 const TICKETS: PackDetail = {
   topHits: [],
   pool: [
@@ -75,19 +75,17 @@ const TICKETS: PackDetail = {
     ticketCard(50, 'Rare'),
     ticketCard(10, 'Common'),
   ],
-  publishedOdds: { tiers: { Immortal: 0.5, Rare: 19.5, Common: 80 } },
+  pullOdds: { tiers: { Immortal: 0.5, Rare: 19.5, Common: 80 } },
 };
 
 /** What PackDetailClient derived for the board before the projection. */
 function boardFromPool(detail: PackDetail, tickets: boolean) {
   const oddsPool = tickets ? fmt.ticketOddsPool(detail.pool) : detail.pool;
   return {
-    odds: detail.publishedOdds
-      ? fmt.publishedOddsRows(detail.publishedOdds)
-      : null,
+    odds: detail.pullOdds ? fmt.pullOddsRows(detail.pullOdds) : null,
     range: fmt.poolValueRange(oddsPool),
-    ev: detail.publishedOdds
-      ? fmt.poolExpectedValue(oddsPool, detail.publishedOdds.tiers)
+    ev: detail.pullOdds
+      ? fmt.poolExpectedValue(oddsPool, detail.pullOdds.tiers)
       : null,
     tierRanges: fmt.tierValueRanges(oddsPool),
   };
@@ -100,7 +98,7 @@ describe('packTierRows: the odds board numbers', () => {
   ] as const)('%s: chances, ranges and expected value match', (_n, d, t) => {
     const rows = packTierRows(d, t);
     const board = boardFromPool(d, t);
-    expect(fmt.publishedOddsRows({ tiers: pullOddsOf(rows.tiers) })).toEqual(
+    expect(fmt.pullOddsRows({ tiers: pullOddsOf(rows.tiers) })).toEqual(
       board.odds,
     );
     expect(rows.ev).toBe(board.ev);
@@ -184,14 +182,14 @@ describe('packTierRows: the odds board numbers', () => {
   });
 
   it('no pull odds: no chance, no expected value, no pack range', () => {
-    const rows = packTierRows({ ...CARDS, publishedOdds: null }, false);
+    const rows = packTierRows({ ...CARDS, pullOdds: null }, false);
     expect(rows.tiers.every((t) => t.chance === null)).toBe(true);
     expect(rows.ev).toBeNull();
     expect(rows.range).toBeNull();
     // And so the board stays hidden, by the board's own rule.
     expect(
-      hasPublishedOddsContent(
-        fmt.publishedOddsRows({ tiers: pullOddsOf(rows.tiers) }),
+      hasPullOddsContent(
+        fmt.pullOddsRows({ tiers: pullOddsOf(rows.tiers) }),
         rows.range,
       ),
     ).toBe(false);
@@ -218,10 +216,10 @@ describe('PackPullOdds renders the board PackDetailClient rendered', () => {
   it.each([
     ['cards', CARDS, false],
     ['tickets', TICKETS, true],
-    ['odds with no tiers', { ...CARDS, publishedOdds: { tiers: {} } }, false],
+    ['odds with no tiers', { ...CARDS, pullOdds: { tiers: {} } }, false],
     [
       'odds that do not add up',
-      { ...CARDS, publishedOdds: { tiers: { Immortal: 1 } } },
+      { ...CARDS, pullOdds: { tiers: { Immortal: 1 } } },
       false,
     ],
   ] as const)('%s', (_n, d, t) => {
@@ -257,7 +255,7 @@ describe('PackPullOdds renders the board PackDetailClient rendered', () => {
       htmlOf(
         createElement(PackPullOdds, {
           pack: {},
-          tiers: packTierRows({ ...CARDS, publishedOdds: null }, false),
+          tiers: packTierRows({ ...CARDS, pullOdds: null }, false),
         }),
       ),
     ).toBe('');
@@ -311,7 +309,7 @@ describe('getPackTiers and GET /api/pack-tiers/<slug>', () => {
         image: '/r.webp',
       },
     ],
-    published_odds: { tiers: { Immortal: 1, Common: 99 } },
+    pull_odds: { tiers: { Immortal: 1, Common: 99 } },
   };
   const serve = (packs: unknown[], detail: unknown = detailBody) =>
     backend({
@@ -365,7 +363,7 @@ describe('getPackTiers and GET /api/pack-tiers/<slug>', () => {
               spriteImage: null,
             },
           ],
-          publishedOdds: { tiers: { Immortal: 1, Common: 99 } },
+          pullOdds: { tiers: { Immortal: 1, Common: 99 } },
         },
       ),
     );
@@ -391,7 +389,7 @@ describe('getPackTiers and GET /api/pack-tiers/<slug>', () => {
             image: '/t.webp',
           },
         ],
-        published_odds: { tiers: { Immortal: 100 } },
+        pull_odds: { tiers: { Immortal: 100 } },
       },
     );
     const tiers = await getPackTiers('gold-capsule');
@@ -401,7 +399,7 @@ describe('getPackTiers and GET /api/pack-tiers/<slug>', () => {
   });
 
   it('a pack without pull odds sends no chance at all', async () => {
-    serve([catalog()], { ...detailBody, published_odds: null });
+    serve([catalog()], { ...detailBody, pull_odds: null });
     const tiers = await getPackTiers('gold-pack');
     expect(tiers?.tiers.map((t) => t.chance)).toEqual([null, null]);
     expect(tiers?.ev).toBeNull();

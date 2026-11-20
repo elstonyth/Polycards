@@ -35,7 +35,7 @@ export const PackPollResponseSchema = z.object({
   detail: z.object({
     topHits: z.array(pollPackCard),
     pool: z.array(pollPackCard),
-    publishedOdds: pollOdds,
+    pullOdds: pollOdds,
   }),
 });
 /** GET /api/pack-tiers/<slug> — the slim per-tier view (lib/pack-tiers). */

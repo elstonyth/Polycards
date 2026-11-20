@@ -9,9 +9,9 @@
  *   the pack and its `getPackHighlights` projection; the tier view and the
  *   pull history are fetched on the client at intent or focus.
  *
- * Odds come only from the staff-entered field: `detail.publishedOdds` (today's
- * name of the existing parser's output) on the pack page, `highlights.pullOdds`
- * on the homepage. Never derived.
+ * Odds come only from the staff-entered field: `detail.pullOdds` (the
+ * existing parser's output) on the pack page, `highlights.pullOdds` on the
+ * homepage. Never derived.
  */
 import type { PackPageData } from '@/lib/data/pack-page';
 import type { PackHighlights } from '@/lib/data/packs';
@@ -22,7 +22,7 @@ import type { FlowPullOdds, FlowSeed } from './types';
 
 /** The pack page's seed. */
 export function flowSeed(data: PackPageData): FlowSeed {
-  const entered = data.detail?.publishedOdds ?? null;
+  const entered = data.detail?.pullOdds ?? null;
   const pullOdds: FlowPullOdds | null = entered
     ? { tiers: { ...entered.tiers } }
     : null;

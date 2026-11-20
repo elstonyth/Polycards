@@ -74,7 +74,7 @@ const card: PackCard = {
   pokemonDex: null,
   spriteImage: null,
 };
-const DETAIL: PackDetail = { topHits: [], pool: [card], publishedOdds: null };
+const DETAIL: PackDetail = { topHits: [], pool: [card], pullOdds: null };
 
 beforeEach(() => {
   m.customer = null;

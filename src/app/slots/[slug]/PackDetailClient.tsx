@@ -360,7 +360,8 @@ export default function PackDetailClient({
 
           {/* Top Hits — Immortal/Legendary/Mythical only, as a swipeable
               rail whose expand button opens a dialog of the SAME top-tier
-              subset (rarest first, per-tier pull chance when published) —
+              subset (rarest first, per-tier pull chance when the pack has
+              Pull Odds) —
               operator decision 2026-08-08; lower tiers are catalogue noise
               in the expanded view too. The odds panel below still quotes
               value ranges over the FULL pool — a deliberate,
@@ -383,9 +384,9 @@ export default function PackDetailClient({
       {/* ===== Pull Odds, then Recent Pulls (below the fold) =====
           Two full-width boards, each a side column (its heading and headline
           figures) beside its content; on a phone the side column simply comes
-          first. The odds board renders ONLY the admin-published rates from the
-          backend; a pack with no published odds shows no board at all. Nor does
-          a pack whose published odds carry no per-tier rows AND nothing priced:
+          first. The odds board renders ONLY the staff-entered Pull Odds from the
+          backend; a pack with no Pull Odds shows no board at all. Nor does
+          a pack whose Pull Odds carry no per-tier rows AND nothing priced:
           that would be a bare heading over an empty box. */}
       <div className="mb-10 mt-14 flex flex-col gap-14 lg:mt-24 lg:gap-24">
         <PackPullOdds pack={active} tiers={tiers} />

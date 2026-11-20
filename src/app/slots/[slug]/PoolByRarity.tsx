@@ -34,8 +34,8 @@ import {
  * the round-8 display-truth pass closed: the odds panel below still quotes
  * value ranges over the FULL pool, including tiers the dialog doesn't list.
  * Operator preference wins; don't "fix" one side without asking.)
- * Group headers carry the rarity dot + count and, when the admin published
- * odds, that tier's pull chance (the same data the odds panel shows; nothing
+ * Group headers carry the rarity dot + count and, when staff set Pull Odds,
+ * that tier's pull chance (the same data the odds panel shows; nothing
  * invented).
  *
  * A pack with no top-tier cards has an EMPTY rail but a non-empty `full`
@@ -60,7 +60,7 @@ export function PoolByRarity({
   /** FULL pack pool (every tier) — the dialog's zero-top-hit fallback only; with
    *  a non-empty `rail` the dialog shows `rail` (operator decision, header note). */
   full: PackCard[];
-  /** Admin-published per-tier chances; null = this pack has no published odds. */
+  /** Pull Odds per-tier chances; null = this pack has no Pull Odds. */
   tierChances: Partial<Record<Rarity, number>> | null;
   onOpen: (card: PackCard) => void;
   /** false in a non-Pokémon pack: badges show only the cards' own sprites. */

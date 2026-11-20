@@ -110,7 +110,7 @@ const POOL = [
 const DETAIL: PackDetail = {
   topHits: [],
   pool: POOL,
-  publishedOdds: {
+  pullOdds: {
     tiers: { Immortal: 0.2, Legendary: 1, Mythical: 3.8, Common: 95 },
   },
 };
@@ -190,7 +190,7 @@ describe('PackTierWalk', () => {
     show(
       createElement(PackTierWalk, {
         pack: GOLD,
-        tiers: packTierRows({ ...DETAIL, publishedOdds: null }, false),
+        tiers: packTierRows({ ...DETAIL, pullOdds: null }, false),
         onOpenCard: vi.fn(),
       }),
     );
@@ -206,7 +206,7 @@ describe('PackTierWalk', () => {
         ticketCard(300, 'Immortal'),
         ticketCard(5, 'Common'),
       ],
-      publishedOdds: { tiers: { Immortal: 1, Common: 99 } },
+      pullOdds: { tiers: { Immortal: 1, Common: 99 } },
     };
     show(
       createElement(PackTierWalk, {
@@ -228,7 +228,7 @@ describe('PackTierWalk', () => {
       packTierRows(
         {
           pool: [ticketCard(5, 'Common'), ticketCard(50, 'Rare')],
-          publishedOdds: null,
+          pullOdds: null,
         },
         true,
       ).tiers,

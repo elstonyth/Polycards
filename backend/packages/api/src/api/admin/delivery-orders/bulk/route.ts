@@ -29,7 +29,8 @@ export async function POST(
   req: AuthenticatedMedusaRequest,
   res: MedusaResponse,
 ): Promise<void> {
-  const { ids, status } = coerceBulkStatusBody(req.body);
+  const { ids, status, pile_checked_ids } = coerceBulkStatusBody(req.body);
+  const pileChecked = new Set(pile_checked_ids);
   const packs: PacksModuleService = req.scope.resolve(PACKS_MODULE);
   const updated: string[] = [];
   const skipped: { id: string; reason: string }[] = [];
@@ -58,6 +59,10 @@ export async function POST(
         input: {
           order_id: id,
           status,
+          // Only for the orders the admin's confirm named: a move out of the
+          // ship pile is refused without it, and lands in `skipped` with the
+          // refusal (incident 2026-11-03).
+          pile_checked: pileChecked.has(id),
           audit: {
             adminId: req.auth_context.actor_id,
             action: 'bulk_status' as const,

@@ -197,8 +197,7 @@ describe('TopUpSheet — choose a currency first', () => {
     );
   });
 
-  // A3Pay matches a payment ONLY by its exact amount, and may ask for a few
-  // cents more than the sheet showed (S$100 -> S$100.01).
+  // The S$ rail (GMpay) matches a payment by its exact amount.
   it('tells an S$ payer to transfer the exact amount the next page shows', async () => {
     await mount(WITH_SGD);
     await act(async () => button('Singapore Dollar')!.click());

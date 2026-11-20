@@ -36,7 +36,7 @@ const row = (tickets: unknown, rarity: string) => ({
 const TICKET_DETAIL = {
   prize_type: 'tickets',
   odds: [row(10, 'Common'), row(1000, 'Immortal')],
-  published_odds: { tiers: { Immortal: 0.1, Common: 99.9 } },
+  pull_odds: { tiers: { Immortal: 0.1, Common: 99.9 } },
 };
 
 const serve = (body: unknown) =>
@@ -52,7 +52,22 @@ describe('getPackDetail — ticket pack', () => {
       [1000, 'Immortal', null],
     ]);
     expect(d?.pool[0]?.spriteImage).toBe(TICKET_ART);
-    expect(d?.publishedOdds).toEqual({
+    expect(d?.pullOdds).toEqual({
+      tiers: { Immortal: 0.1, Common: 99.9 },
+    });
+  });
+
+  // An older backend sends this key under its previous name; the loader reads
+  // both, and `pull_odds` wins when both are present.
+  it('reads the Pull Odds from an older backend key too', async () => {
+    const { pull_odds, ...rest } = TICKET_DETAIL;
+    serve({ ...rest, published_odds: pull_odds });
+    expect((await getPackDetail('lucky-pack'))?.pullOdds).toEqual({
+      tiers: { Immortal: 0.1, Common: 99.9 },
+    });
+    clearTtlCache();
+    serve({ ...TICKET_DETAIL, published_odds: { tiers: { Common: 100 } } });
+    expect((await getPackDetail('lucky-pack'))?.pullOdds).toEqual({
       tiers: { Immortal: 0.1, Common: 99.9 },
     });
   });

@@ -252,7 +252,7 @@ describe('pack back details (from the pack page data)', () => {
     group: 'RAW',
     psa10: false,
   };
-  const published = {
+  const pullOdds = {
     tiers: {
       Immortal: 0.1,
       Legendary: 1.4,
@@ -264,11 +264,11 @@ describe('pack back details (from the pack page data)', () => {
   };
 
   it('maps 151 to exactly what the approved back prints', () => {
-    expect(packBackDetails(pack151, published)).toEqual(DETAILS_151);
+    expect(packBackDetails(pack151, pullOdds)).toEqual(DETAILS_151);
   });
 
   it('follows the instant rate into a Lossless window; the vault rule stays flat', () => {
-    const d = packBackDetails({ ...pack151, buybackPercent: 100 }, published);
+    const d = packBackDetails({ ...pack151, buybackPercent: 100 }, pullOdds);
     expect(d.buyback?.headline).toBe('100% instant buyback');
     expect(d.buyback?.rule).toContain('changes buyback to 90% of card value');
     expect(buybackHeadline({})).toBe('90% instant buyback');
@@ -277,19 +277,19 @@ describe('pack back details (from the pack page data)', () => {
   it('prints no price or buyback for the free pack, and no buyback for a ticket pack', () => {
     const free = packBackDetails(
       { ...pack151, categoryId: 'free_welcome' },
-      published,
+      pullOdds,
     );
     expect(free.price).toBeNull();
     expect(free.buyback).toBeNull();
     const ticket = packBackDetails(
       { ...pack151, prizeType: 'tickets' },
-      published,
+      pullOdds,
     );
     expect(ticket.buyback).toBeNull();
     expect(ticket.odds).toHaveLength(6);
   });
 
-  it('prints no odds when none are published or passed', () => {
+  it('prints no odds when none are entered or passed', () => {
     expect(packBackDetails(pack151, null).odds).toBeNull();
     expect(packBackDetails(pack151, undefined).odds).toBeNull();
     expect(packBackDetails(pack151, { tiers: {} }).odds).toBeNull();

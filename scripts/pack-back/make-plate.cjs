@@ -8,7 +8,7 @@
 // <outDir>/<pack>-back-geometry.json (printZones), and writes
 //   <pack>-back-plate.png          zones with plate "live" blanked
 //   <pack>-back-plate-no-odds.png  those plus the "no-odds" zones (the fixed
-//                                  odds heading), for a pack with no published odds
+//                                  odds heading), for a pack with no pull odds
 //
 // Inside each zone the painted ink is found (bright text on dark foil, then
 // whatever still stands above the rebuilt foil) and the foil under it is

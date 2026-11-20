@@ -1,5 +1,5 @@
 // Who may unban a bank number the player never held, found on the ban list
-// (security review): admins, not the Support viewer. So may freeing a number
+// (security review): admins, not the Customer support role. So may freeing a number
 // from other accounts and clearing a shared name (owner, 2026-11-04: admins
 // only): they change other accounts, or let a name past them. One rule for
 // the player page's unban-number route and the assistant's bank tools.

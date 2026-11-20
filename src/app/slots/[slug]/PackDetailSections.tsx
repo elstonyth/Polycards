@@ -17,14 +17,14 @@ import {
   type Rarity,
 } from '@/lib/packs-data';
 import {
-  publishedOddsRows,
+  pullOddsRows,
   ticketTopHits,
   type PoolValueRange,
 } from '@/lib/packs-format';
 import { pullOddsOf, type PackTierRows } from '@/lib/pack-tiers';
 import { isTopRarity } from '@/lib/rarity';
 import { isPokemonPack } from '@/lib/resolve-card-pokemon';
-import { hasPublishedOddsContent } from './OddsSheet';
+import { hasPullOddsContent } from './OddsSheet';
 import { OddsBoard } from './OddsBoard';
 import { PoolByRarity } from './PoolByRarity';
 
@@ -89,7 +89,7 @@ export function PackTopHits({
   );
   // Read into a local: see the note on `expectedValue` in PackDetailClient's
   // history (the React Compiler and property dependencies).
-  const pullOdds = detail?.publishedOdds?.tiers ?? null;
+  const pullOdds = detail?.pullOdds?.tiers ?? null;
   if (pool.length === 0) return null;
   return (
     <Section bare={bare}>
@@ -110,7 +110,7 @@ export function PackTopHits({
  * Pull Odds (by rarity): the board of staff-entered rates, from the tier
  * projection (lib/pack-tiers). A pack without pull odds shows no board, nor
  * does one whose odds carry no tier rows AND nothing priced (a bare heading
- * over an empty box): `hasPublishedOddsContent`. The projection leaves the
+ * over an empty box): `hasPullOddsContent`. The projection leaves the
  * pack's range null without pull odds, which is what keeps that rule here.
  *
  * `counts` adds each tier's card count (the homepage flow's summary rows);
@@ -129,8 +129,8 @@ export function PackPullOdds({
 }) {
   if (!tiers) return null;
   const tickets = isTicketPack(pack);
-  const rows = publishedOddsRows({ tiers: pullOddsOf(tiers.tiers) });
-  if (!hasPublishedOddsContent(rows, tiers.range)) return null;
+  const rows = pullOddsRows({ tiers: pullOddsOf(tiers.tiers) });
+  if (!hasPullOddsContent(rows, tiers.range)) return null;
   const tierRanges: Partial<Record<Rarity, PoolValueRange>> = {};
   const tierCounts: Partial<Record<Rarity, number>> = {};
   for (const t of tiers.tiers) {

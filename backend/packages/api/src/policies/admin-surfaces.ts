@@ -23,7 +23,7 @@ export const adminSurfacePolicies = definePolicies(
 
 // The secret-bearing GETs' own read policies (api/admin-rbac.ts SECRET_READS):
 // partner passwords and full bank account numbers. Roles holding them: `*:*`
-// staff and the `*:read` desk bots; the Support viewer does not.
+// staff, the `*:read` desk bots and, for bank numbers, the Customer support role.
 export const secretReadPolicies = definePolicies(
   [...new Set(SECRET_READS.map((s) => s.resource))].map((resource) => ({
     name: `Polycards read ${resource}`,

@@ -35,8 +35,13 @@ import {
   isShippableCountry,
   isShippablePostcode,
   customerCancelRefusal,
+  shipPileExitRefusal,
+  shipPileClearVerdict,
+  SHIP_PILE_EXITS,
+  SHIP_PILE_STATUSES,
   type AddressSnapshot,
   type DeliveryStatus,
+  type ShipPileExitRow,
 } from './delivery';
 import { rewardsRedemptionEnabled } from './rewards-gate';
 import {
@@ -12012,6 +12017,13 @@ class PacksModuleService extends MedusaService({
       /** ISO delivered_at for a move to completed (the shipment tracker
        *  passes the carrier's time). Omitted or unparsable = now. */
       deliveredAt?: string;
+      /**
+       * The admin says the parcel was pulled from the ship pile. Required
+       * (with `audit`) to cancel, or step back to processed, an order the
+       * under-lock read finds in ready_to_ship or pending_ship: see
+       * shipPileExitRefusal.
+       */
+      pileChecked?: boolean;
     },
     @MedusaContext() sharedContext: Context = {},
   ): Promise<{ status: DeliveryStatus; pullVersions: Record<string, number>; previous: { status: DeliveryStatus; tracking_number: string | null; shipped_at: Date | null; delivered_at: Date | null } }> {
@@ -12058,6 +12070,16 @@ class PacksModuleService extends MedusaService({
           ? customerCancelRefusal(order.status)
           : `Cannot move a ${order.status} order to ${input.to}.`,
       );
+    }
+    // Ship pile (incident 2026-11-03): judged on the UNDER-LOCK
+    // status, so a stock run that moved the order into the pile after the
+    // caller read it is caught here too. Before any write.
+    const pileRefusal = shipPileExitRefusal(order.status, input.to, {
+      pileChecked: input.pileChecked === true,
+      audited: !!input.audit,
+    });
+    if (pileRefusal) {
+      throw new MedusaError(MedusaError.Types.NOT_ALLOWED, pileRefusal);
     }
     const trackingNumber =
       input.trackingNumber === undefined
@@ -12251,6 +12273,124 @@ class PacksModuleService extends MedusaService({
       );
     }
     return { status: input.to, previous, pullVersions: Object.fromEntries(versions.map(p => [p.id, p.flip_version + (input.to === 'completed' || input.to === 'canceled' ? 1 : 0)])) };
+  }
+
+  // Ship pile (incident 2026-11-03): each order's newest move out of the
+  // pile without shipping (cancelled, or stepped back to processed), newest
+  // first, with whether the packer has marked its parcel pulled since. Read
+  // from the delivery_order audit rows, which every such move must write
+  // (shipPileExitRefusal refuses one without), so there is no migration and no
+  // backfill. A "parcel pulled" row clears every move before it. `orderIds`
+  // narrows to one page of the Orders table; `openOnly` to the parcels not yet
+  // marked pulled. Uses IDX_admin_action_audit_entity's leading column.
+  @InjectManager()
+  async listShipPileExits(
+    opts: { orderIds?: string[]; openOnly?: boolean; limit?: number } = {},
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<ShipPileExitRow[]> {
+    if (opts.orderIds && opts.orderIds.length === 0) return [];
+    const em = (sharedContext.transactionManager ??
+      sharedContext.manager) as unknown as LedgerSqlManager;
+    const marks = (list: readonly unknown[]) => list.map(() => '?').join(',');
+    const params: unknown[] = [...SHIP_PILE_STATUSES, ...SHIP_PILE_EXITS];
+    let idClause = '';
+    if (opts.orderIds) {
+      idClause = ` AND a.entity_id IN (${marks(opts.orderIds)})`;
+      params.push(...opts.orderIds);
+    }
+    params.push(Math.min(Math.max(opts.limit ?? 200, 1), 1000));
+    return em.execute<ShipPileExitRow[]>(
+      `SELECT * FROM (
+         SELECT DISTINCT ON (a.entity_id)
+                a.entity_id AS order_id, d.customer_id,
+                a.before->>'status' AS from_status,
+                a.after->>'status' AS to_status,
+                a.admin_id AS moved_by, a.created_at AS moved_at,
+                c.admin_id AS cleared_by, c.created_at AS cleared_at
+           FROM admin_action_audit a
+           JOIN delivery_order d ON d.id = a.entity_id AND d.deleted_at IS NULL
+           LEFT JOIN LATERAL (
+             SELECT k.admin_id, k.created_at FROM admin_action_audit k
+              WHERE k.entity_type = 'delivery_order' AND k.entity_id = a.entity_id
+                AND k.deleted_at IS NULL AND k.after->>'ship_pile' = 'cleared'
+                AND k.created_at >= a.created_at
+              ORDER BY k.created_at LIMIT 1
+           ) c ON true
+          WHERE a.entity_type = 'delivery_order' AND a.deleted_at IS NULL
+            AND a.before->>'status' IN (${marks(SHIP_PILE_STATUSES)})
+            AND a.after->>'status' IN (${marks(SHIP_PILE_EXITS)})${idClause}${opts.openOnly ? ' AND c.admin_id IS NULL' : ''}
+          ORDER BY a.entity_id, a.created_at DESC, a.id DESC
+       ) newest
+       ORDER BY moved_at DESC, order_id DESC
+       LIMIT ?`,
+      params,
+    );
+  }
+
+  // The packer's "parcel pulled from the pile" for a move out of it: one
+  // delivery_order audit row whose before/after carry ship_pile, never a
+  // status, so the support bot's status-move list leaves it out. Under the
+  // order's advisory lock, so a double click writes one row; the second
+  // answers already_cleared without writing.
+  @InjectTransactionManager()
+  async clearShipPile(
+    input: { orderId: string; adminId: string },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ order_id: string; cleared_at: Date; already_cleared: boolean }> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+      `delivery:${input.orderId}`,
+    ]);
+    const [order] = await this.listDeliveryOrders(
+      { id: input.orderId },
+      { take: 1 },
+      sharedContext,
+    );
+    const [entry] = order
+      ? await this.listShipPileExits(
+          { orderIds: [input.orderId] },
+          sharedContext,
+        )
+      : [];
+    const verdict = shipPileClearVerdict(
+      order ? { exited: !!entry, cleared: !!entry?.cleared_at } : undefined,
+    );
+    if (verdict === 'not_found') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_FOUND,
+        `Delivery order '${input.orderId}' not found.`,
+      );
+    }
+    if (verdict === 'not_pile_exit') {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'This order has not left the ship pile without shipping, so there is no parcel to pull.',
+      );
+    }
+    if (verdict === 'already_cleared') {
+      return {
+        order_id: input.orderId,
+        cleared_at: entry!.cleared_at!,
+        already_cleared: true,
+      };
+    }
+    await this.audit(
+      {
+        admin_id: input.adminId,
+        entity_type: 'delivery_order',
+        entity_id: input.orderId,
+        action: 'edit',
+        before: { ship_pile: 'open' },
+        after: { ship_pile: 'cleared' },
+        reason: 'parcel pulled from the ship pile',
+      },
+      sharedContext,
+    );
+    return {
+      order_id: input.orderId,
+      cleared_at: new Date(),
+      already_cleared: false,
+    };
   }
 
   // Atomic credit adjustment + audit: writes the ledger row AND the

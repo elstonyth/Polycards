@@ -15,7 +15,7 @@ import { loadSchemas } from '@/lib/lazy-schemas';
  * The pull-history STATS tab (showgo's histogram sheet): for one chase tier,
  * one horizontal bar per hit — how many pulls it took since the previous hit,
  * and who landed it — under the current drought bar (no winner yet), against
- * a dashed reference line at the expected gap (1 / the pack's published rate,
+ * a dashed reference line at the expected gap (1 / the pack's Pull Odds rate,
  * or the observed mean when there is no rate) with the axis laid out in its
  * multiples.
  *

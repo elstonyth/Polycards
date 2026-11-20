@@ -351,10 +351,23 @@ medusaIntegrationTestRunner({
         expect(reversed.status).toBeLessThan(300);
         expect(await statusOf(order)).toBe('ready_to_ship');
 
-        const back = await unwrapResponse(
+        // A step back out of the ship pile asks the pile question too
+        // (incident 2026-11-03): refused until the admin says the parcel was
+        // pulled.
+        const unchecked = await unwrapResponse(
           api.post(
             `/admin/delivery-orders/${order}`,
             { status: 'processed' },
+            headers(),
+          ),
+        );
+        expect(unchecked.status).toBe(400);
+        expect(await statusOf(order)).toBe('ready_to_ship');
+
+        const back = await unwrapResponse(
+          api.post(
+            `/admin/delivery-orders/${order}`,
+            { status: 'processed', pile_checked: true },
             headers(),
           ),
         );

@@ -20,7 +20,7 @@ export type PackBackDetails = {
   price: string | null;
   /** The pack's name, then its header facts ("151", "Pokémon", ...). */
   productLine: string[];
-  /** Published odds rows, rarest first; null when the pack publishes none. */
+  /** Pull Odds rows, rarest first; null when the pack has none. */
   odds: { label: string; chance: string }[] | null;
   /** The buyback wording; null when the page shows none (free, ticket packs). */
   buyback: { headline: string; rule: string } | null;

@@ -106,7 +106,7 @@ const DETAIL: PackDetail = {
     card(2, 'Legendary', 800),
     card(3, 'Common', 5),
   ],
-  publishedOdds: { tiers: { Immortal: 0.2, Legendary: 2.8, Common: 97 } },
+  pullOdds: { tiers: { Immortal: 0.2, Legendary: 2.8, Common: 97 } },
 };
 const TICKETS: PackDetail = {
   topHits: [],
@@ -115,12 +115,12 @@ const TICKETS: PackDetail = {
     ticketCard(300, 'Legendary'),
     ticketCard(16, 'Common'),
   ],
-  publishedOdds: { tiers: { Immortal: 0.1, Legendary: 1.4, Common: 98.5 } },
+  pullOdds: { tiers: { Immortal: 0.1, Legendary: 1.4, Common: 98.5 } },
 };
 
 function dataFor(pack: ResolvedPack, detail: PackDetail): FlowData {
   const tiers = packTiersOf(pack, detail);
-  const pullOdds = detail.publishedOdds;
+  const pullOdds = detail.pullOdds;
   const back = backFor(pack, pullOdds);
   return {
     pack,
@@ -213,7 +213,7 @@ describe('FlowChapters', () => {
   it('no pull odds: no chances, no odds board, no odds stop', () => {
     let source: FlowScrollSource | null = null;
     show({
-      data: dataFor(GOLD, { ...DETAIL, publishedOdds: null }),
+      data: dataFor(GOLD, { ...DETAIL, pullOdds: null }),
       bindScroll: (s) => {
         source = s;
         return () => {};
@@ -351,7 +351,7 @@ describe('FlowChapters', () => {
       miniHeaderText('Gold Pack', { kind: 'odds', tier: null }, rows),
     ).toBe('Gold Pack · Pull Odds');
     const noOdds = walkRows(
-      dataFor(GOLD, { ...DETAIL, publishedOdds: null }).tiers!.tiers,
+      dataFor(GOLD, { ...DETAIL, pullOdds: null }).tiers!.tiers,
       false,
     );
     expect(miniHeaderText('Gold Pack', { kind: 'tier', tier: 1 }, noOdds)).toBe(
@@ -376,7 +376,7 @@ describe('useFlowData', () => {
       json: async () => JSON.parse(JSON.stringify(tiers)),
     });
     const seed = flowSeedFromHighlights(GOLD, {
-      pullOdds: DETAIL.publishedOdds,
+      pullOdds: DETAIL.pullOdds,
     });
     const h = renderHook(
       ({ enabled }: { enabled: boolean }) => useFlowData(seed, { enabled }),
@@ -405,7 +405,7 @@ describe('useFlowData', () => {
     const cap = renderHook(
       () =>
         useFlowData(
-          flowSeedFromHighlights(CAPSULE, { pullOdds: TICKETS.publishedOdds }),
+          flowSeedFromHighlights(CAPSULE, { pullOdds: TICKETS.pullOdds }),
           { enabled: false },
         ),
       undefined,

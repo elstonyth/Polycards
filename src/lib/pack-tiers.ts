@@ -87,11 +87,11 @@ export type PackTierRows = {
 
 export type PackTiers = PackTierRows & { pack: PackLive };
 
-/** The detail fields the projection reads. `publishedOdds` is the existing
- *  in-app name of the pull odds; it is read here and handed on as `chance`. */
+/** The detail fields the projection reads. `pullOdds` (the staff-entered
+ *  odds) is read here and handed on as `chance`. */
 type DetailInput = {
   pool: readonly PackCard[];
-  publishedOdds: { tiers: Partial<Record<Rarity, number>> } | null;
+  pullOdds: { tiers: Partial<Record<Rarity, number>> } | null;
 };
 
 const tileOf = (c: PackCard): PackTierCard => {
@@ -115,7 +115,7 @@ export function packTierRows(
   tickets: boolean,
 ): PackTierRows {
   const { pool } = detail;
-  const pullOdds = detail.publishedOdds?.tiers ?? null;
+  const pullOdds = detail.pullOdds?.tiers ?? null;
   // The same sums the odds board states: card prices, or ticket amounts.
   const oddsPool = tickets ? ticketOddsPool(pool) : pool;
   const tierRanges = tierValueRanges(oddsPool);

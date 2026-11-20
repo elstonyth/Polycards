@@ -4,12 +4,12 @@
 //
 //   price        rm(pack.priceMyr)                  the page's price ("RM 40.00")
 //   productLine  pack.name + packFacts(pack) values the page header's facts
-//   odds         publishedOddsRows(publishedOdds)   the Pull Odds board's rows
+//   odds         pullOddsRows(pullOdds)             the Pull Odds board's rows
 //   buyback      the header badge (PackDetailClient) and the explainer under it (PackBuyControls)
 //
-// No fetch here: the caller passes what it already holds. The homepage's
-// pack projection (getPackHighlights) does not carry published odds today, so
-// a back rendered there passes `publishedOdds: undefined` and prints no odds.
+// No fetch here: the caller passes what it already holds (the homepage's
+// pack projection, getPackHighlights, carries `pullOdds`). A caller with no
+// odds passes `pullOdds: null | undefined` and the back prints no odds.
 import { rm } from '@/lib/format';
 import {
   FLAT_BUYBACK_PERCENT,
@@ -18,7 +18,7 @@ import {
   packFacts,
   type ResolvedPack,
 } from '@/lib/packs-data';
-import { publishedOddsRows, type PublishedOdds } from '@/lib/packs-format';
+import { pullOddsRows, type PullOdds } from '@/lib/packs-format';
 import type { PackBackDetails } from './pack-print';
 
 /** The pack page's explainer under the buyback badge, word for word
@@ -35,11 +35,11 @@ export const buybackHeadline = (
 
 export function packBackDetails(
   pack: ResolvedPack,
-  publishedOdds: PublishedOdds | null | undefined,
+  pullOdds: PullOdds | null | undefined,
 ): PackBackDetails {
   const isFree = pack.categoryId === FREE_WELCOME_CATEGORY;
   const ticket = isTicketPack(pack);
-  const rows = publishedOdds ? publishedOddsRows(publishedOdds) : [];
+  const rows = pullOdds ? pullOddsRows(pullOdds) : [];
   return {
     // The free pack's page shows no price at all.
     price: isFree ? null : rm(pack.priceMyr),

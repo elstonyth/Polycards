@@ -32,6 +32,12 @@ export type UpdateDeliveryOrderInput = {
    * own delivery time, from the shipment tracker. Omitted = now.
    */
   delivered_at?: string;
+  /**
+   * The admin says the parcel was pulled from the ship pile. Passed straight
+   * through to transitionDeliveryOrderStatus, which refuses a cancel from
+   * ready_to_ship or pending_ship without it (incident 2026-11-03).
+   */
+  pile_checked?: boolean;
 };
 
 export type UpdateDeliveryOrderResult = {
@@ -150,6 +156,7 @@ export const updateDeliveryOrderInvoke = async (
     audit: input.audit,
     allowedFrom: input.allowed_from,
     deliveredAt: input.delivered_at,
+    pileChecked: input.pile_checked,
   });
 
   const prevPullStatus: 'delivering' | null =

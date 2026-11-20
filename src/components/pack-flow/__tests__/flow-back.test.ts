@@ -110,7 +110,7 @@ describe('flowSeed (pack page) and flowSeedFromHighlights (homepage)', () => {
           spriteImage: null,
         },
       ],
-      publishedOdds: ODDS,
+      pullOdds: ODDS,
     },
     recentPulls: { pulls: [], drought: {} },
     freePackMissing: [],
@@ -133,7 +133,7 @@ describe('flowSeed (pack page) and flowSeedFromHighlights (homepage)', () => {
   it('no odds entered: no odds, no back, even with a pool', () => {
     const seed = flowSeed({
       ...data,
-      detail: { ...data.detail!, publishedOdds: null },
+      detail: { ...data.detail!, pullOdds: null },
     });
     expect(seed.pullOdds).toBeNull();
     expect(seed.back).toBeNull();
@@ -161,7 +161,7 @@ describe('flowSeed (pack page) and flowSeedFromHighlights (homepage)', () => {
       detail: {
         topHits: [],
         pool: [ticketCard(300, 'Immortal')],
-        publishedOdds: { tiers: { Immortal: 100 } },
+        pullOdds: { tiers: { Immortal: 100 } },
       },
     });
     expect(seed.tiers?.tiers[0]?.cards?.[0]?.tickets).toBe(300);

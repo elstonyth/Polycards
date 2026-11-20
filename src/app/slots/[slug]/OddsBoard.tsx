@@ -6,13 +6,13 @@ import type { PoolValueRange } from '@/lib/packs-format';
 import { rarityRgb } from '@/lib/rarity';
 import { rm } from '@/lib/format';
 import { Bezel } from '@/components/ui/soft';
-import { hasPublishedOddsContent, rangeLabel } from './OddsSheet';
+import { hasPullOddsContent, rangeLabel } from './OddsSheet';
 
 /**
  * The pack page's Pull Odds, as a board (DESIGN.md, Soft pack page): the
  * headline figure in its own plate beside one cell per tier. It states exactly
- * what `PublishedOddsList` states (the reel's odds sheet still uses that list):
- * the top figure, then every published tier with its chance and value range.
+ * what `PullOddsList` states (the reel's odds sheet still uses that list):
+ * the top figure, then every Pull Odds tier with its chance and value range.
  *
  * The two bars are pictures of numbers printed beside them, so both are
  * `aria-hidden`: the split bar shows the tiers' shares of one pull, a cell's
@@ -34,7 +34,7 @@ export function OddsBoard({
 }: {
   /** The section's heading, set at the top of the board's first column. */
   heading: ReactNode;
-  /** Published rows (rarest-first). */
+  /** Pull Odds rows (rarest-first). */
   odds: { rarity: Rarity; chance: string }[];
   /** Pack value range; null hides the headline figure. Still the content gate. */
   range: PoolValueRange | null;
@@ -47,7 +47,7 @@ export function OddsBoard({
    *  Opt-in: the homepage flow's summary rows; the pack page passes none. */
   tierCounts?: Partial<Record<Rarity, number>>;
 }) {
-  if (!hasPublishedOddsContent(odds, range)) return null;
+  if (!hasPullOddsContent(odds, range)) return null;
   const noun = tickets ? 'prize' : 'card';
 
   // "0.2%" → 0.2, for the bars only. A chance that isn't a number draws no bar.
@@ -110,9 +110,8 @@ export function OddsBoard({
                 ))}
               </div>
             )}
-            {/* Customer-facing copy never says "published": it implies a
-                second, unpublished set of odds. These are "the rates for this
-                pack". */}
+            {/* Customer-facing copy never hints at a second, hidden set of
+                odds. These are "the rates for this pack". */}
             <p className="text-xs text-neutral-400">
               Rates for this {tickets ? 'capsule' : 'pack'}.
             </p>

@@ -8,6 +8,8 @@ import {
 import { fakeGateway, type FakeConfig } from './fake-gateway';
 import * as a3pay from './a3pay-client';
 import type { A3payConfig } from './a3pay-client';
+import * as gmpay from './gmpay-client';
+import type { GmpayConfig } from './gmpay-client';
 import { toLedgerAmount, type RowFx } from './payment-fx';
 import { gatewayEnv } from './gateway-env';
 import { PACKS_MODULE } from './index';
@@ -111,11 +113,25 @@ export type GatewayDefinition = {
   /** Must a pay-in name the PAYING account's holder (A3Pay matches it)? */
   needsPayerName?: boolean;
   /**
+   * Must a pay-in also declare the paying account's bank and number (GMpay)?
+   * The deposit route takes them from the customer's saved accounts at a
+   * bank this gateway serves; with none, startDeposit refuses before a row.
+   */
+  needsPayerBank?: boolean;
+  /**
    * How far (cents of its currency) the gateway may move a payin from what
    * we asked and still be the same deposit at the same rate (payment-fx.ts
    * nudgedDeposit / callbackLedgerAmount). Default PAYIN_NUDGE_CENTS.
    */
   payinNudgeCents?: number;
+  /**
+   * Can the gateway be asked about a payment ONLY by its own id (GMpay's
+   * token), never by our reference? Then a row whose create never returned
+   * that id cannot be looked up at all, so the code that would ask first
+   * decides from what it already knows (withdrawal-submit.ts
+   * refundsWithoutLookup, the gateway-audit job).
+   */
+  lookupNeedsGatewayId?: boolean;
   /** Their server-to-server callback targets on OUR backend. */
   hooks: { deposit: string; withdrawal: string; payoutVerify?: string };
   /**
@@ -235,6 +251,48 @@ export const GATEWAYS: Record<PaymentGateway, GatewayDefinition> = {
     // (2026-11-04, PC-ad171adf…), and the default 10-cent window left a paid
     // S$100.11 unlocked and quarantined. Up to S$1, as GlobePay365's.
     payinNudgeCents: 100,
+  },
+
+  // Singapore (SGD), A3Pay's replacement (owner, 2026-11-19), beside the
+  // active RM gateway like it. Its own platform (PayFlowXZ API v3,
+  // gmpay-client.ts): SHA-256 signed JSON, statuses looked up by THEIR token.
+  // `configured` also requires GMPAY_ENABLED=true; the sweeps read
+  // configFromEnv, so rows in flight still settle after a switch-off.
+  gmpay: {
+    id: 'gmpay',
+    label: 'GMpay (SGD)',
+    currency: 'SGD',
+    configured: (env) =>
+      env.GMPAY_ENABLED === 'true' && gmpay.gmpayConfigured(env),
+    configFromEnv: (env) => gmpay.gmpayConfigFromEnv(env),
+    needsCustomerContact: false,
+    // The sheet's PayNow QR and online banking (gmpay-client.ts contracts).
+    depositMethods: ['BQR', 'OB'],
+    // Every GMpay pay-in names the paying account (holder, bank, number).
+    needsPayerName: true,
+    needsPayerBank: true,
+    // GMpay does not nudge amounts: a pay-in at any other sum is not this one.
+    payinNudgeCents: 0,
+    // payinQuery / payoutQuery take their tran_token only.
+    lookupNeedsGatewayId: true,
+    hooks: {
+      deposit: '/hooks/gmpay/deposit',
+      withdrawal: '/hooks/gmpay/withdrawal',
+    },
+    // PROVISIONAL, copied from A3Pay's until GMpay states its SGD limits and
+    // fees (asked 2026-11-19). RM fences on the converted amount.
+    limits: {
+      depositMin: 30,
+      depositMax: 20000,
+      withdrawalMin: 50,
+      withdrawalMax: 30000,
+    },
+    currencyLimits: {
+      depositMin: 30,
+      depositMax: 5000,
+      withdrawalMin: 30,
+      withdrawalMax: 10000,
+    },
   },
 
   // USDT, beside the active RM gateway like A3Pay — and on the same platform
@@ -481,6 +539,7 @@ export type GatewayConfig =
   | TgpayConfig<'the7pay'>
   | A3payConfig<'a3pay'>
   | A3payConfig<'gp365'>
+  | GmpayConfig
   | FakeConfig;
 
 /** Config for a SPECIFIC gateway, from env. Throws when it is not configured. */
@@ -598,9 +657,14 @@ export type GatewayAdapter<C extends GatewayConfig> = {
     input: SubmitDepositInput,
     config: C,
   ) => Promise<SubmitDepositResult>;
+  /**
+   * `gatewayTransactionId` is the gateway's own id stored on the row, for a
+   * gateway that can be asked by its id only (GMpay). The others ignore it.
+   */
   getDepositDetail: (
     merchantTransactionId: string,
     config: C,
+    gatewayTransactionId?: string | null,
   ) => Promise<DepositDetail>;
   submitWithdrawal: (
     input: SubmitWithdrawalInput,
@@ -609,6 +673,7 @@ export type GatewayAdapter<C extends GatewayConfig> = {
   getWithdrawalDetail: (
     merchantTransactionId: string,
     config: C,
+    gatewayTransactionId?: string | null,
   ) => Promise<WithdrawalDetail>;
   getSupportedBanks: (config: C) => Promise<SupportedBank[]>;
   checkBalance: (config: C) => Promise<MerchantBalance>;
@@ -988,6 +1053,217 @@ const a3payAdapter: GatewayAdapter<A3payConfig> = {
   },
 };
 
+/** A GMpay refusal raised before any call reached them: nothing exists. */
+function gmpayRefusal(message: string, code: string): gmpay.GmpayError {
+  return new gmpay.GmpayError(`GMpay: ${message}`, [code], 400, true, NOT_SENT);
+}
+
+/**
+ * GMpay's answer for one of OUR rows must name that row. Their lookups go by
+ * their token, so a token stored against the wrong row would otherwise settle
+ * someone else's payment here. A mismatch is unclear, never an outcome.
+ */
+function gmpayOwnRow<T extends { merchantTransactionId: string }>(
+  status: T,
+  merchantTransactionId: string,
+): T {
+  // An answer that names no row is no proof either: unclear, never acted on.
+  if (status.merchantTransactionId !== merchantTransactionId) {
+    throw new gmpay.GmpayError(
+      `GMpay: the token on ${merchantTransactionId} answers for ${status.merchantTransactionId || 'no reference'}`,
+      ['GMPAY_TOKEN_MISMATCH'],
+      400,
+    );
+  }
+  return status;
+}
+
+/**
+ * As a3payWalletEmpty: GMpay says our balance is short only in its message
+ * text, so the hint counts once our own balance read confirms it. Confirmed,
+ * no payout was created and the refusal is definite ('wallet-empty').
+ */
+async function gmpayWalletEmpty(
+  error: unknown,
+  config: GmpayConfig,
+  gatewayAmount: number,
+): Promise<unknown> {
+  if (
+    !(error instanceof gmpay.GmpayError) ||
+    !error.has(gmpay.GMPAY_PAYOUT_FLOAT_EMPTY)
+  ) {
+    return error;
+  }
+  try {
+    const { available } = await gmpay.balance(config);
+    if (
+      !Number.isFinite(available) ||
+      available >= payoutFloatNeeded('gmpay', gatewayAmount)
+    ) {
+      return error;
+    }
+    return new gmpay.GmpayError(error.message, error.codes, 400, true, {
+      result: 'wallet-empty',
+      available,
+    });
+  } catch {
+    return error;
+  }
+}
+
+const gmpayAdapter: GatewayAdapter<GmpayConfig> = {
+  async submitDeposit(input, config) {
+    const contract =
+      gmpay.GMPAY_PAYIN_CONTRACTS[config.currencyCode]?.[
+        input.paymentMethodCode
+      ];
+    if (!contract) {
+      throw gmpayRefusal(
+        `no contract for method ${input.paymentMethodCode} in ${config.currencyCode}`,
+        'GMPAY_UNSUPPORTED_METHOD',
+      );
+    }
+    // From the row's FX lock. Never `amount`: that is RM.
+    if (!(input.gatewayAmount && input.gatewayAmount > 0)) {
+      throw gmpayRefusal(
+        `no ${config.currencyCode} amount on the deposit`,
+        'GMPAY_NO_GATEWAY_AMOUNT',
+      );
+    }
+    const holder = input.payerName?.trim() ?? '';
+    const payerBank = input.payerBank
+      ? gatewayBankCode(input.payerBank.bankCode, 'gmpay')
+      : null;
+    const account = input.payerBank?.accountNumber.trim() ?? '';
+    if (!holder || !payerBank || !account) {
+      throw gmpayRefusal(
+        'every pay-in needs the paying bank account (holder, bank, number)',
+        'GMPAY_PAYER_REQUIRED',
+      );
+    }
+    const r = await gmpay.createPayin(
+      {
+        merchantTransactionId: input.merchantTransactionId,
+        customerId: input.merchantClientId,
+        amount: input.gatewayAmount,
+        contractCode: contract,
+        payerBankCode: payerBank.code,
+        payerHolderName: holder,
+        payerAccountNumber: account,
+        callbackUrl: input.notifyUrl,
+        returnUrl: input.returnUrl,
+      },
+      config,
+    );
+    return {
+      transactionId: r.tranToken,
+      url: r.redirectTo,
+      bankCode: r.bankName,
+      accountNumber: r.bankAccountNumber,
+      accountHolderName: r.bankAccountName,
+      referenceNo: r.bankReference,
+      qrCode: r.qrCode,
+      depositActualAmount:
+        Number.isFinite(r.amount) && r.amount > 0
+          ? r.amount
+          : input.gatewayAmount,
+    };
+  },
+
+  async getDepositDetail(merchantTransactionId, config, gatewayTransactionId) {
+    const q = gmpayOwnRow(
+      await gmpay.payinQuery(gatewayTransactionId, config),
+      merchantTransactionId,
+    );
+    return {
+      transactionId: q.tranToken,
+      merchantTransactionId,
+      statusId: null,
+      status: q.status,
+      amount: q.amount,
+      // What reached our wallet: the amount less their fee.
+      netAmount: Number.isFinite(q.fee) ? q.amount - q.fee : NaN,
+      paymentMethodCode: '',
+      bankReferenceNo: null,
+      uniqueReferenceNo: null,
+      state: gmpay.gmpayPayinState(q.status),
+    };
+  },
+
+  async submitWithdrawal(input, config) {
+    if (!(input.gatewayAmount && input.gatewayAmount > 0)) {
+      throw gmpayRefusal(
+        `no ${config.currencyCode} amount on the payout`,
+        'GMPAY_NO_GATEWAY_AMOUNT',
+      );
+    }
+    const bank = gatewayBankCode(input.destinationBankCode, 'gmpay');
+    if (!bank) {
+      throw gmpayRefusal(
+        `cannot pay to bank ${input.destinationBankCode}`,
+        'GMPAY_UNKNOWN_BANK',
+      );
+    }
+    const gatewayAmount = input.gatewayAmount;
+    const r = await gmpay
+      .submitPayout(
+        {
+          merchantTransactionId: input.merchantTransactionId,
+          customerId: input.merchantClientId,
+          amount: gatewayAmount,
+          bankCode: bank.code,
+          accountName: input.destinationAccountHolderName,
+          accountNumber: input.destinationAccountNumber,
+          callbackUrl: input.notifyUrl,
+        },
+        config,
+      )
+      .catch(async (error: unknown) => {
+        throw await gmpayWalletEmpty(error, config, gatewayAmount);
+      });
+    return { transactionId: r.tranToken };
+  },
+
+  async getWithdrawalDetail(
+    merchantTransactionId,
+    config,
+    gatewayTransactionId,
+  ) {
+    const q = gmpayOwnRow(
+      await gmpay.payoutQuery(gatewayTransactionId, config),
+      merchantTransactionId,
+    );
+    return {
+      transactionId: q.tranToken,
+      merchantTransactionId,
+      statusId: null,
+      status: q.status,
+      amount: q.amount,
+      // What our wallet PAID (amount + their fee) — the payout-net rule.
+      netAmount: Number.isFinite(q.fee) ? q.amount + q.fee : NaN,
+      paymentMethodCode: 'WD',
+      bankReferenceNo: null,
+      uniqueReferenceNo: null,
+      state: gmpay.gmpayPayoutState(q.status),
+    };
+  },
+
+  async getSupportedBanks() {
+    return banksFor('gmpay');
+  },
+
+  async checkBalance(config) {
+    const b = await gmpay.balance(config);
+    return {
+      merchantCode: 'gmpay',
+      currencyCode: config.currencyCode,
+      currentBalance: b.balance,
+      availableBalance: b.available,
+      t1Balance: 0,
+    };
+  },
+};
+
 // Total over the kinds by construction: a new member of the GatewayConfig
 // union has no entry here until someone writes its adapter, and the compiler
 // says so.
@@ -1000,6 +1276,7 @@ const ADAPTERS: {
   the7pay: tgpayAdapter,
   a3pay: a3payAdapter,
   gp365: a3payAdapter,
+  gmpay: gmpayAdapter,
   fake: fakeGateway,
 };
 
@@ -1046,11 +1323,13 @@ export async function getDepositDetail(
   merchantTransactionId: string,
   config: GatewayConfig,
   fx: RowFx,
+  gatewayTransactionId?: string | null,
 ): Promise<DepositDetail & { reportedAmount: number }> {
   const asked = inRowCurrency(config, fx);
   const d = await adapterFor(asked).getDepositDetail(
     merchantTransactionId,
     asked,
+    gatewayTransactionId,
   );
   return {
     ...d,
@@ -1073,11 +1352,13 @@ export async function getWithdrawalDetail(
   merchantTransactionId: string,
   config: GatewayConfig,
   fx: RowFx,
+  gatewayTransactionId?: string | null,
 ): Promise<WithdrawalDetail> {
   const asked = inRowCurrency(config, fx);
   const d = await adapterFor(asked).getWithdrawalDetail(
     merchantTransactionId,
     asked,
+    gatewayTransactionId,
   );
   return {
     ...d,
