@@ -109,10 +109,6 @@ export default function PackStage({
         (m) => {
           if (!live) return;
           const c = m.startSpin({
-            set: (spin, exit) => {
-              spinValues.spin.set(spin);
-              spinValues.exit.set(exit);
-            },
             stage: { state: stageState, wake, values: spinValues },
             ui: setFocusUi,
           });
@@ -127,8 +123,6 @@ export default function PackStage({
       live = false;
       clearTimeout(t);
       ctl?.stop();
-      spinValues.spin.set(0);
-      spinValues.exit.set(0);
     };
   }, [spinValues, stageState, wake, empty0, reduced, loaderUp]);
 

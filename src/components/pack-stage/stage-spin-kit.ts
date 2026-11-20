@@ -163,13 +163,17 @@ export const SPIN_KIT: StageSpinKit = {
 
 /** What the provider lends the driver. */
 export type SpinHost = {
-  /** Writes the spin and the exit (the provider's observables). */
-  set(spin: number, exit: number): void;
-  /** The stage (state, wake, motion values): the focused view drives it. */
-  stage?: {
+  /**
+   * The stage: its state and wake (the focused view drives them) and its
+   * motion values (the driver writes the spin and the exit; back to 0 on stop).
+   */
+  stage: {
     state: StageState;
     wake(): void;
-    values: Record<string, unknown>;
+    values: {
+      spin: { set(v: number): void };
+      exit: { set(v: number): void };
+    } & Record<string, unknown>;
   };
   /** Renders the focused view's blocks over the panel. */
   ui?: (node: ReactNode) => void;
@@ -217,6 +221,10 @@ export function startSpin(host: SpinHost): SpinControl {
   let last: SpinFrame | null = null;
   let unbindPage: (() => void) | null = null;
   const now = () => performance.now();
+  const setSpin = (spin: number, exit: number) => {
+    host.stage.values.spin.set(spin);
+    host.stage.values.exit.set(exit);
+  };
   /** The focused view (its chunk loads at idle after this one, or at a tap). */
   let focus: FocusRun | null = null;
   let focusLoad: Promise<FocusRun | null> | null = null;
@@ -292,7 +300,7 @@ export function startSpin(host: SpinHost): SpinControl {
   const tick = (data: FrameData) => {
     if (focus?.active()) {
       const rest = focus.frame(data.timestamp);
-      host.set(0, 0);
+      setSpin(0, 0);
       if (rest && data.timestamp - wokeAt > 250) stopLoop();
       return;
     }
@@ -308,7 +316,7 @@ export function startSpin(host: SpinHost): SpinControl {
     last = f;
     if (trace && trace.push([data.timestamp, window.scrollY, f.spin]) > 4000)
       trace.splice(0, 2000);
-    host.set(f.spin, f.exit);
+    setSpin(f.spin, f.exit);
     setFlags(f.spin, f.exit);
     if (f.idle && data.timestamp - wokeAt > 250) stopLoop();
   };
@@ -544,6 +552,7 @@ export function startSpin(host: SpinHost): SpinControl {
     range: () => range,
     looping: () => looping,
     stop() {
+      setSpin(0, 0);
       clearTimeout(idleLoad);
       focus?.stop();
       window.removeEventListener('keydown', onKey);

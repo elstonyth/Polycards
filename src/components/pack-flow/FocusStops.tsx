@@ -14,7 +14,6 @@ import { Pill } from '@/components/ui/pill';
 import { ArrowDisc } from '@/components/ui/soft';
 import { rm } from '@/lib/format';
 import { isTicketPack, packFacts, type PackCard } from '@/lib/packs-data';
-import { ticketTopHits } from '@/lib/packs-format';
 import { pullOddsOf } from '@/lib/pack-tiers';
 import { rarityRgb } from '@/lib/rarity';
 import { isPokemonPack } from '@/lib/resolve-card-pokemon';
@@ -29,6 +28,7 @@ import {
   PackRecentPulls,
   usePackCardOverlay,
 } from '@/app/slots/[slug]/PackDetailSections';
+import { blockOf, topHitsOf } from './focus-stops-data';
 import { useFlowData } from './use-flow-data';
 import type { FlowData, FlowSeed } from './types';
 import styles from './focus.module.css';
@@ -61,10 +61,6 @@ export type FocusStopsProps = {
   /** Pull rows shown in Recent Pulls (desktop 8, phone 5). */
   onGoToReel?: (href: string) => void;
 };
-
-/** The block shown at focus F: switches 20% into a move, either way. */
-export const blockOf = (f: number, n: number) =>
-  Math.min(n, Math.max(0, Math.floor(f + 0.8)));
 
 const TITLES: Record<FocusStopKind, string> = {
   front: 'Pack',
@@ -122,25 +118,6 @@ function demoDetail(data: FlowData): PackDetail | null {
   const pool = (data.tiers?.tiers ?? []).flatMap((t) => t.cards ?? []);
   const detail = { topHits: [], pool } as unknown as PackDetail;
   return pool.length > 0 ? detail : null;
-}
-
-/** Top Hits: the top tiers' cards in one row, most valuable first (the pack page's order). */
-export function topHitsOf(data: Pick<FlowData, 'tiers'>, tickets: boolean) {
-  const cards = (data.tiers?.tiers ?? []).flatMap(
-    (t) => t.cards ?? [],
-  ) as unknown as PackCard[];
-  if (tickets) return ticketTopHits(cards);
-  return cards
-    .map((c, i) => ({ c, i }))
-    .sort((a, b) => {
-      const pa = a.c.priceMyr ?? null;
-      const pb = b.c.priceMyr ?? null;
-      if (pa === pb) return a.i - b.i;
-      if (pa === null) return 1;
-      if (pb === null) return -1;
-      return pb - pa || a.i - b.i;
-    })
-    .map((x) => x.c);
 }
 
 /**
@@ -486,3 +463,5 @@ export function FocusStops({
     </div>
   );
 }
+
+export { blockOf, topHitsOf } from './focus-stops-data';
