@@ -347,32 +347,26 @@ describe('polling JSON compatibility aliases', () => {
       spriteImage: '/sprite.png',
     });
   });
-  // The poll body names the odds `pullOdds` whichever key the backend sends
-  // (an older backend sends it under its previous name).
-  it.each([['pull_odds'], ['published_odds']])(
-    'pack detail: odds sent as %s reach the browser as pullOdds only',
-    async (key) => {
-      const { GET: packGet } =
-        await import('@/app/api/pack-detail/[slug]/route');
-      seed({
-        'GET /store/packs/:slug': {
-          body: {
-            odds: [{ ...wire, marketPriceMyr: 5 }],
-            [key]: { tiers: { Rare: 100 } },
-          },
+  it('pack detail: odds sent as pull_odds reach the browser as pullOdds only', async () => {
+    const { GET: packGet } = await import('@/app/api/pack-detail/[slug]/route');
+    seed({
+      'GET /store/packs/:slug': {
+        body: {
+          odds: [{ ...wire, marketPriceMyr: 5 }],
+          pull_odds: { tiers: { Rare: 100 } },
         },
-      });
-      const response = await packGet(
-        new Request('http://localhost/api/pack-detail/bronze-pack'),
-        { params: Promise.resolve({ slug: 'bronze-pack' }) },
-      );
-      const text = await response.text();
-      expect(JSON.parse(text).detail.pullOdds).toEqual({
-        tiers: { Rare: 100 },
-      });
-      expect(text).not.toMatch(/publish/i);
-    },
-  );
+      },
+    });
+    const response = await packGet(
+      new Request('http://localhost/api/pack-detail/bronze-pack'),
+      { params: Promise.resolve({ slug: 'bronze-pack' }) },
+    );
+    const text = await response.text();
+    expect(JSON.parse(text).detail.pullOdds).toEqual({
+      tiers: { Rare: 100 },
+    });
+    expect(text).not.toMatch(/publish/i);
+  });
   it('pack detail: a miss answers 404 and is not memoised, so the pack shows on the next poll', async () => {
     const { GET: packGet } = await import('@/app/api/pack-detail/[slug]/route');
     const get = () =>

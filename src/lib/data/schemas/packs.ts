@@ -73,8 +73,7 @@ export const TicketOddsRowSchema = z.looseObject({
  *  (dropping unknown tiers and out-of-range percentages) rather than
  *  rejecting the whole response over one bad number. `odds` is a
  *  droppableArray for the same reason as the catalog: a bad row drops, a
- *  non-array response does not read as "this pack has no pool".
- *  data/packs.ts also reads an older backend's previous key. */
+ *  non-array response does not read as "this pack has no pool". */
 export const PackDetailPageSchema = z.looseObject({
   odds: droppableArray(z.union([OddsEntrySchema, TicketOddsRowSchema])),
   prize_type: prizeType,
