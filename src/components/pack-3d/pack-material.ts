@@ -36,7 +36,28 @@ export type PackFoilSettings = { [K in keyof typeof PACK_FOIL]: number };
 export type PackFoilMaterial = THREE.MeshPhysicalMaterial & {
   /** Turns the ridge relief on (1) or off (0) without recompiling. */
   setRelief(strength: number): void;
+  /**
+   * The focused back's spotlight: one rect of the back image (fractions, x
+   * across, y along from the top) stays lit, the rest of the back face falls
+   * to `shadow` brightness. `on` 0 changes nothing. Never recompiles.
+   */
+  setSpot(spot: PackSpot): void;
 };
+
+/** The spotlight's values (see `setSpot`). */
+export type PackSpot = {
+  on: number;
+  rect: { x0: number; y0: number; x1: number; y1: number };
+  shadow?: number;
+  lift?: number;
+  /** Edge softness along y, as a fraction of the image height. */
+  feather?: number;
+  /** The back image's height over its width (the x feather follows it). */
+  aspect?: number;
+};
+
+/** Ciao's dark room around the lit window (plan-focus-ciao section 4). */
+export const PACK_SPOT = { shadow: 0.16, lift: 1.06, feather: 0.02 } as const;
 
 const NO_RUN = new THREE.Vector4(0, 0, 1, 0);
 
@@ -67,6 +88,9 @@ uniform vec4 packRidgeFin;
 uniform vec2 packFinSpan;
 uniform vec2 packSlope;
 uniform float packAlphaInterior;
+uniform vec4 packSpotRect;
+uniform vec4 packSpot;
+uniform float packSpotAspect;
 varying float vPackFace;
 varying vec3 vPackAxisX;
 varying vec3 vPackAxisY;
@@ -98,6 +122,26 @@ vec4 packTexel = mix( packBackTexel, packFrontTexel, clamp( vPackFace, 0.0, 1.0 
 // Dividing by alpha restores the edge colour (the interior is ~0.98 alpha).
 packTexel.rgb *= min( packAlphaInterior / max( packTexel.a, 0.02 ), 3.0 );
 diffuseColor.rgb *= packTexel.rgb;
+`;
+
+// The focused back's spotlight, after the lighting sum: a soft rect of the
+// back image stays lit (`lift`), the rest of the back face goes to `shadow`;
+// speculars, clearcoat and the print glow dim with it. The front never shows
+// it (gated by the face), so the flip to the back never flashes a rect.
+const SPOT_FRAGMENT = /* glsl */ `
+{
+	float packSpotFy = max( packSpot.z, 1e-4 );
+	float packSpotFx = packSpotFy * packSpotAspect;
+	float packBx = 1.0 - vMapUv.x;
+	float packBy = 1.0 - vMapUv.y;
+	float packLit = smoothstep( packSpotRect.x - packSpotFx, packSpotRect.x + packSpotFx, packBx ) *
+		( 1.0 - smoothstep( packSpotRect.z - packSpotFx, packSpotRect.z + packSpotFx, packBx ) ) *
+		smoothstep( packSpotRect.y - packSpotFy, packSpotRect.y + packSpotFy, packBy ) *
+		( 1.0 - smoothstep( packSpotRect.w - packSpotFy, packSpotRect.w + packSpotFy, packBy ) );
+	outgoingLight *= mix( 1.0, mix( packSpot.y, packSpot.w, packLit ),
+		packSpot.x * ( 1.0 - clamp( vPackFace, 0.0, 1.0 ) ) );
+}
+#include <opaque_fragment>
 `;
 
 const RELIEF_FRAGMENT = /* glsl */ `
@@ -171,10 +215,32 @@ export function createPackFoilMaterial({
       value: new THREE.Vector2(relief.crimpSlope, relief.finSlope),
     },
     packAlphaInterior: { value: foil.alphaInterior },
+    packSpotRect: { value: new THREE.Vector4(0, 0, 1, 1) },
+    packSpot: {
+      value: new THREE.Vector4(
+        0,
+        PACK_SPOT.shadow,
+        PACK_SPOT.feather,
+        PACK_SPOT.lift,
+      ),
+    },
+    packSpotAspect: { value: 1 },
   };
   const slopes = uniforms.packSlope.value.clone();
   material.setRelief = (strength: number) => {
     uniforms.packSlope.value.copy(slopes).multiplyScalar(strength);
+  };
+
+  material.setSpot = (spot: PackSpot) => {
+    const r = spot.rect;
+    uniforms.packSpotRect.value.set(r.x0, r.y0, r.x1, r.y1);
+    uniforms.packSpot.value.set(
+      Math.max(0, Math.min(1, spot.on)),
+      spot.shadow ?? PACK_SPOT.shadow,
+      spot.feather ?? PACK_SPOT.feather,
+      spot.lift ?? PACK_SPOT.lift,
+    );
+    uniforms.packSpotAspect.value = spot.aspect ?? 1;
   };
 
   material.onBeforeCompile = (shader) => {
@@ -195,8 +261,9 @@ export function createPackFoilMaterial({
       .replace(
         '#include <emissivemap_fragment>',
         'totalEmissiveRadiance *= packTexel.rgb;',
-      );
+      )
+      .replace('#include <opaque_fragment>', SPOT_FRAGMENT);
   };
-  material.customProgramCacheKey = () => 'polycards-pack-foil-1';
+  material.customProgramCacheKey = () => 'polycards-pack-foil-2';
   return material;
 }

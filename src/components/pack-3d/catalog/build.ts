@@ -99,6 +99,11 @@ export type ShowBackOptions = {
   releaseCanvas?: boolean;
   /** 2: the quarter spin back, from back-half.webp at half size. Default 1. */
   downscale?: 1 | 2;
+  /**
+   * 'full': print from the full back plate (back.webp) whatever the handle's
+   * resolution: the focused pack, read close up. Default: the handle's own.
+   */
+  plate?: 'full';
 };
 
 export type Pack3dBack = {
@@ -338,7 +343,11 @@ export function openPack3d(
     const call = ++backCall;
     const current = () => !disposed && call === backCall;
     const down = o.downscale === 2;
-    const plateUrl = down ? assets.backHalf : backUrl;
+    const plateUrl = down
+      ? assets.backHalf
+      : o.plate === 'full'
+        ? assets.back
+        : backUrl;
     const decoding = decodePicture(plateUrl, false);
     let plate: Picture | null = null;
     const scratch: AnyCanvas[] = [];

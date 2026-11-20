@@ -228,31 +228,52 @@ export type PackBackDetails = {
   buyback: { headline: string; rule: string } | null;
 };
 
-// --- Step 2 focus (section 8): types only, wired in the next phase -----------
+// --- Focus (plan-focus-ciao) -----------------------------------------------
 
-/** One chapter stop of the focus flow. */
-export type StageStopKind = 'back' | 'tier' | 'odds';
+/** The focused pack's stops (plan-focus-ciao section 2), in order. */
+export type StageStopKind =
+  'front' | 'tophits' | 'odds' | 'buyback' | 'pulls' | 'closing';
 export type StageStop = { y: number; kind: StageStopKind };
 
 export interface StageScrollSource {
   stops(): readonly StageStop[] | null;
 }
 
+/** A lit rect of the back image (fractions: x across, y along from the top). */
+export type SpotRect = { x0: number; y0: number; x1: number; y1: number };
+
 /**
- * Focus context for `focusPose` (stage-focus.ts). Fractions, so the CSS tiles
- * and the runtime share it.
+ * The focused pack at one stop (plan-focus-ciao section 2): centre as panel
+ * fractions, the long side over the panel height, screen roll (clockwise
+ * degrees), own turn (degrees, 180 = back), pitch (degrees, positive tips the
+ * top away), the spotlight and, at a back stop, its rect.
+ */
+export type FocusKey = {
+  kind: StageStopKind;
+  face: 'front' | 'back';
+  cx: number;
+  cy: number;
+  long: number;
+  rz: number;
+  ry: number;
+  rx: number;
+  on: number;
+  rect?: SpotRect;
+};
+
+/**
+ * Focus context for `focusPose` (stage-focus.ts).
  * - `index`: the focused pack's index in the attached set.
- * - `anchorY`: the measured art centre `cy / panelHeight` (where fy = 0 is).
- * - `stops`: the chapter stops as measured (null until measured).
- * - `leaveFrom`: set while returning to the row: the focus value left from.
- * - `yawBeat`: desktop's timed yaw beat (radians, tweened by the caller).
+ * - `keys`: its stops in order (stop k >= 1 rests on `keys[k - 1]`).
+ * - `panel`: the panel in host CSS px (keys are fractions of it).
+ * - `backW`: 0..1, the back's readiness (back stops turn over as it arrives).
  */
 export type FocusCtx = {
   index: number;
   anchorY: number;
-  stops: readonly StageStop[] | null;
-  leaveFrom?: number;
-  yawBeat?: number;
+  keys: readonly FocusKey[];
+  panel: { w: number; h: number };
+  backW?: number;
 };
 
 export type StageFocusRequest = {

@@ -129,7 +129,12 @@ describe('the spin composes with the other terms', () => {
     const s: StageState = { ...restState(0), spin: 0.5, focus: 0.5 };
     const p = poseStep2(s, 1, PHONE, false, false, {
       spin,
-      focus: { index: 0, anchorY: 0.46, stops: null },
+      focus: {
+        index: 0,
+        anchorY: 0.46,
+        keys: [],
+        panel: { w: 390, h: 716 },
+      },
     });
     expect(p.rotZ).toBe(0);
   });

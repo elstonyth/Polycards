@@ -338,3 +338,43 @@ export function packPrintSpecFromGeometry(
     },
   };
 }
+
+/** A lit rect of the back image (fractions: x across, y along from the top). */
+export type SpotRect = { x0: number; y0: number; x1: number; y1: number };
+
+/** Padding that takes in the printed gold border around a lit zone. */
+export const SPOT_PAD = 0.012;
+
+/**
+ * The focused back's two lit rects (plan-focus-ciao section 4): `odds`, the
+ * whole gold box (the union of the headline, odds heading and odds zones),
+ * and `buyback`, the buyback paragraph; each padded by `SPOT_PAD`. Null when
+ * the geometry lacks one of the zones.
+ */
+export function spotRects(
+  geometry: Pick<PackBackGeometry, 'printZones'>,
+): { odds: SpotRect; buyback: SpotRect } | null {
+  const zone = (id: string) =>
+    geometry.printZones.zones.find((z) => z.id === id)?.rect;
+  const box = ['headline', 'oddsHeading', 'odds']
+    .map(zone)
+    .filter((r): r is PrintRect => !!r);
+  const buy = zone('buyback');
+  if (box.length < 3 || !buy) return null;
+  const r4 = (v: number) => Math.round(v * 1e4) / 1e4;
+  const pad = (r: SpotRect): SpotRect => ({
+    x0: r4(r.x0 - SPOT_PAD),
+    x1: r4(r.x1 + SPOT_PAD),
+    y0: r4(r.y0 - SPOT_PAD),
+    y1: r4(r.y1 + SPOT_PAD),
+  });
+  return {
+    odds: pad({
+      x0: Math.min(...box.map((r) => r.x0)),
+      x1: Math.max(...box.map((r) => r.x1)),
+      y0: Math.min(...box.map((r) => r.y0)),
+      y1: Math.max(...box.map((r) => r.y1)),
+    }),
+    buyback: pad(buy),
+  };
+}
