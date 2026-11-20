@@ -227,7 +227,6 @@ class StageEngine {
   private readonly settled: Promise<StageMode>;
 
   private override: StageOverride = null;
-  private debug = false;
   private started = false;
   private gen = 0;
   private failedForPage = false;
@@ -501,13 +500,14 @@ class StageEngine {
     this.started = true;
     const gen = ++this.gen;
     this.override = opts.override;
-    this.debug = opts.debug;
     this.watchdogOn = opts.override === null;
     if (this.host) this.bindHost(this.host);
     this.bindDocument();
-    // ?debug=1: window.__packStage, loaded on demand
-    if (this.debug)
-      void import('./stage-debug').then((m) => m.exposeStageDebug(this));
+    // ?debug=1: window.__packStage, loaded on demand (removed on stop)
+    if (opts.debug)
+      void import('./stage-debug').then((m) =>
+        this.cleanups.push(m.exposeStageDebug(this)),
+      );
 
     if (this.failedForPage) {
       this.settleFlat();
@@ -551,9 +551,6 @@ class StageEngine {
     this.introStop?.();
     this.swapStop?.();
     for (const a of this.pointerAnims) a?.stop();
-    if (this.debug && typeof window !== 'undefined') {
-      delete (window as unknown as Record<string, unknown>).__packStage;
-    }
   }
 
   private settleFlat() {

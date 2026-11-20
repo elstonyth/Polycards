@@ -18,8 +18,8 @@ type EngineView = {
   poke(): void;
 };
 
-export function exposeStageDebug(engine: unknown): void {
-  if (typeof window === 'undefined') return;
+/** Sets `window.__packStage`; returns its removal. */
+export function exposeStageDebug(engine: unknown): () => void {
   const e = engine as EngineView;
   const rt = () =>
     e.runtime as {
@@ -41,5 +41,8 @@ export function exposeStageDebug(engine: unknown): void {
     state: e.state,
     stats: () => e.stats(),
     wake: () => e.wake(),
+  };
+  return () => {
+    delete (window as unknown as Record<string, unknown>).__packStage;
   };
 }

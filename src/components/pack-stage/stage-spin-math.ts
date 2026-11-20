@@ -60,7 +60,7 @@ export const SPIN_EXIT_PANELS = 1.25;
 export const SPIN_TEXT_AT = 0.2;
 const SPIN_TEXT_HYSTERESIS = 0.01;
 /**
- * The stage heading fades as the exit starts (in 250 ms, CSS), so it is gone
+ * The stage heading fades as the exit starts (in 150 ms, CSS), so it is gone
  * before the leaving row climbs through it.
  */
 export const SPIN_HEAD_AT = 0.01;

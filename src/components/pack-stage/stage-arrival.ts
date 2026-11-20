@@ -19,12 +19,11 @@
 /** An arrival older than this is stale (the push never landed on the stage). */
 export const ARRIVAL_WINDOW_MS = 5000;
 
-let markedAt: number | null = null;
+/** When the arrival was marked; far in the past when none is. */
+let markedAt = -Infinity;
 
-const clock = (): number =>
-  typeof performance !== 'undefined' && typeof performance.now === 'function'
-    ? performance.now()
-    : Date.now();
+/** The browser's clock (a soft navigation keeps the module and its value). */
+const clock = (): number => performance.now();
 
 export function markArrival(now: number = clock()): void {
   markedAt = now;
@@ -32,21 +31,18 @@ export function markArrival(now: number = clock()): void {
 
 /** True when an arrival was marked within the last 5 s. No side effect. */
 export function peekArrival(now: number = clock()): boolean {
-  return (
-    markedAt !== null &&
-    now - markedAt >= 0 &&
-    now - markedAt <= ARRIVAL_WINDOW_MS
-  );
+  const age = now - markedAt;
+  return age >= 0 && age <= ARRIVAL_WINDOW_MS;
 }
 
 /** As `peekArrival`, then clears the flag (also when stale). */
 export function takeArrival(now: number = clock()): boolean {
   const fresh = peekArrival(now);
-  markedAt = null;
+  markedAt = -Infinity;
   return fresh;
 }
 
 /** Tests only. */
 export function resetArrivalForTests(): void {
-  markedAt = null;
+  markedAt = -Infinity;
 }

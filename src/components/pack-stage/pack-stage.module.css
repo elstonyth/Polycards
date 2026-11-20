@@ -568,7 +568,7 @@
 .stage[data-spin-head] [data-stage-head] {
   opacity: 0;
   pointer-events: none;
-  transition-duration: 250ms;
+  transition-duration: 150ms;
 }
 
 /* Once the spin has started the row is the scroll's (10.4): a tap on a pack
