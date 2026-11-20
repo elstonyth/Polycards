@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
-// The dots are wired by a hard-coded href match in TabBar, and nothing else
+// The dots are wired by a hard-coded href match in TabLink, and nothing else
 // checks that wiring: swap '/vault' for '/me' and every other test still
 // passes. These pin which destination each dot lands on, and that a dot is
 // announced rather than being colour-only.
@@ -12,7 +12,10 @@ const vaultDot = { show: false };
 const creditDot = { show: false };
 const drawDot = { show: false };
 
-vi.mock('next/navigation', () => ({ usePathname: () => '/' }));
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/',
+  useRouter: () => ({ push: vi.fn() }),
+}));
 vi.mock('@/components/auth/AuthProvider', () => ({
   useAuth: () => ({ customer: { id: 'cus_1' }, isLoading: false }),
 }));

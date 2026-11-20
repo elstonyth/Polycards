@@ -2,6 +2,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { Trophy, Coins, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { PAGE_COLUMN } from '@/components/ui/page-frame';
 import type { Challenge } from '@/lib/data/challenge';
 import { PrizeCard } from './PrizeCard';
 import { StageCarousel } from './StageCarousel';
@@ -28,7 +29,7 @@ export function WeeklyChallenge({ challenge }: { challenge: Challenge }) {
     // Same width as the standings below — one column down the page. The stage
     // rail sizes items from the viewport (--slab-w: min(82vw,360px)), which
     // still fits this container at every breakpoint (measured).
-    <div className="px-fluid mx-auto w-full max-w-md pt-10 lg:max-w-3xl">
+    <div className={cn(PAGE_COLUMN, 'pt-4')}>
       {/* Hero — generated gold trophy emblem (public/images/task, alpha webp) */}
       <header className="text-center">
         <span className="from-chase/15 mx-auto flex h-28 w-28 items-center justify-center rounded-3xl bg-gradient-to-b to-transparent">
@@ -275,10 +276,7 @@ export function WeeklyChallenge({ challenge }: { challenge: Challenge }) {
  */
 export function ChallengeRules() {
   return (
-    <section
-      className="px-fluid mx-auto mt-8 w-full max-w-md lg:max-w-3xl"
-      aria-label="How it works"
-    >
+    <section className={cn(PAGE_COLUMN, 'mt-8')} aria-label="How it works">
       <h2 className="font-heading text-lg text-white">How it works</h2>
       <ul className="mt-3 space-y-2 rounded-2xl border border-white/5 bg-neutral-900/60 p-5">
         {RULES.map((rule) => (
