@@ -156,6 +156,18 @@
 
 /* ---- Stop positions: phone ------------------------------------------- */
 
+/* the pack's lane: under the header the raised pack fades out */
+.over::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 28px;
+  background: linear-gradient(rgb(0 0 0), rgb(0 0 0 / 0));
+  pointer-events: none;
+}
+
 .over .block {
   left: 16px;
   right: 58px;
@@ -166,65 +178,30 @@
   gap: 0.5rem;
 }
 
+/* Top Hits and Recent Pulls: under the raised pack (its foot is
+   --dock-bottom, set by the focus kit), down to the tab bar */
 .over .block[data-kind='tophits'],
 .over .block[data-kind='pulls'] {
-  top: 64px;
-}
-
-/* the phone's compact odds board: one row per tier */
-.compact {
-  display: flex;
-  flex-direction: column;
-  border-radius: 1.25rem;
-  background: rgb(255 255 255 / 0.04);
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1);
-}
-
-.compact li {
-  display: grid;
-  grid-template-columns: auto 1fr auto auto;
-  align-items: center;
+  top: calc(var(--dock-bottom, 208px) + 12px);
+  bottom: 12px;
   gap: 0.5rem;
-  min-height: 2.5rem;
-  padding: 0 0.875rem;
-  font-size: 0.8125rem;
-  color: #fff;
-}
-
-.compact li + li {
-  border-top: 1px solid rgb(255 255 255 / 0.08);
-}
-
-.dot {
-  width: 0.375rem;
-  height: 0.375rem;
-  border-radius: 9999px;
-}
-
-.tier {
-  font-weight: 600;
-}
-
-.count {
-  font-size: 0.6875rem;
-  color: rgb(163 163 163);
-}
-
-.chance {
-  min-width: 3.25rem;
-  text-align: right;
-  font-family: var(--font-heading, inherit);
-  font-size: 1rem;
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-.over .block[data-kind='tophits'] {
-  bottom: 20%;
 }
 
 .over .block[data-kind='tophits'] .strip {
-  margin-top: auto;
+  min-height: 0;
+  margin-top: 0.25rem;
+}
+
+/* bigger tiles: two and a peek fill the room above the tab bar */
+.over .block[data-kind='tophits'] [data-focus-strip] > div {
+  flex: 0 0 56%;
+  max-width: 60%;
+}
+
+.over .block[data-kind='pulls'] .pulls {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 
 .over .block[data-kind='odds'],
@@ -232,26 +209,6 @@
   top: 42%;
   bottom: 12px;
   overflow: hidden;
-}
-
-/* the list starts under the docked pack (its foot at 0.28 of the panel) */
-.over .block[data-kind='pulls'] {
-  bottom: 12px;
-}
-
-.over .block[data-kind='pulls'] .pulls {
-  position: absolute;
-  top: calc(var(--dock-bottom, 212px) - 64px + 8px);
-  right: 0;
-  bottom: 0;
-  left: 0;
-  overflow: hidden;
-}
-
-/* titles beside the docked pack stop short of it */
-.over .block[data-kind='tophits'] > :not(.strip),
-.over .block[data-kind='pulls'] > h2 {
-  max-width: calc(var(--dock-left, 262px) - 16px - 8px);
 }
 
 .over .block[data-kind='closing'] {
@@ -267,11 +224,35 @@
 
 /* ---- Stop positions: desktop ----------------------------------------- */
 
+/* the pack stays on the right at its Front place; the left column swaps */
 @media (min-width: 1024px) {
+  .over::before {
+    display: none;
+  }
+
   .over .block {
     left: 10.2%;
     right: auto;
     width: 33.4%;
+  }
+
+  .over .block[data-kind='front'],
+  .over .block[data-kind='buyback'],
+  .over .block[data-kind='pulls'],
+  .over .block[data-kind='closing'] {
+    top: 50%;
+    bottom: auto;
+    transform: translateY(-50%);
+    overflow: visible;
+  }
+
+  .over .block[data-kind='closing'] {
+    align-items: flex-start;
+    text-align: left;
+  }
+
+  .over .block[data-kind='closing'] .closingRow {
+    justify-content: flex-start;
   }
 
   .over .block[data-kind='odds'] {
@@ -283,41 +264,22 @@
   .over .block[data-kind='odds'] .board {
     width: 113.6%;
     transform: scale(0.88);
-  }
-
-  .over .block[data-kind='pulls'] .pulls {
-    margin-top: 0;
-    max-height: none;
-  }
-
-  .over .block[data-kind='front'],
-  .over .block[data-kind='buyback'] {
-    top: 50%;
-    bottom: auto;
-    transform: translateY(-50%);
-    overflow: visible;
+    transform-origin: top left;
   }
 
   .over .block[data-kind='tophits'] {
-    top: 8%;
-    bottom: 5%;
-    width: 79.6%;
+    top: 14%;
+    bottom: auto;
   }
 
-  .over .block[data-kind='pulls'] {
-    top: 50%;
-    left: 38.9%;
-    width: 50.7%;
-    transform: translateY(-50%);
+  /* about three cards and a peek; the arrows page the rest */
+  .over .block[data-kind='tophits'] [data-focus-strip] > div {
+    flex: 0 0 8.5rem;
+    max-width: 8.5rem;
   }
 
-  .over .block[data-kind='closing'] {
-    top: auto;
-    bottom: 10%;
-    left: 10.2%;
-    width: 79.6%;
-    align-items: center;
-    text-align: center;
+  .over .block[data-kind='pulls'] .pulls {
+    max-height: 70vh;
   }
 }
 

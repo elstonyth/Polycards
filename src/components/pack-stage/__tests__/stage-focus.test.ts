@@ -199,6 +199,41 @@ describe('owner correction (2026-11-20): upright fronts, the back on its side', 
       }
   });
 
+  it('the lane: front-facing stops keep the Front size and centre x', () => {
+    for (const slug of SLUGS)
+      for (const desktop of [false, true])
+        for (const variant of ['sleeve', 'noOdds'] as const) {
+          const keys = focusKeys(slug, desktop, variant);
+          const front = keys.find((k) => k.kind === 'front')!;
+          for (const key of keys) {
+            if (key.face !== 'front') continue;
+            expect(key.long).toBe(front.long);
+            expect(key.cx).toBe(front.cx);
+            const raised =
+              !desktop && (key.kind === 'tophits' || key.kind === 'pulls');
+            // phone Top Hits and Recent Pulls: centre on the panel's top edge
+            expect(key.cy).toBe(raised ? 0 : front.cy);
+          }
+        }
+  });
+
+  it('Front to Top Hits is a pure vertical slide', () => {
+    for (const desktop of [false, true]) {
+      const size = desktop ? 'desktop' : 'phone';
+      const l = LAYOUT[size];
+      const ctx = ctxFor('151', desktop);
+      const rest = restBlock(restState(2), 2, l, desktop, false);
+      const a = focusPose(rest, 1, 0, 2, 2, l, desktop, false, ctx);
+      for (let f = 1; f <= 2.0001; f += 0.1) {
+        const p = focusPose(rest, f, 0, 2, 2, l, desktop, false, ctx);
+        expect(p.scale).toBeCloseTo(a.scale, 9);
+        expect(p.fx).toBeCloseTo(a.fx, 9);
+        expect(p.rotZ).toBeCloseTo(0, 12);
+        expect(p.rotY).toBeCloseTo(0, 12);
+      }
+    }
+  });
+
   it('the tap is a pure zoom: no rotation anywhere in the move', () => {
     for (const desktop of [false, true]) {
       const size = desktop ? 'desktop' : 'phone';

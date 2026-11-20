@@ -350,7 +350,7 @@ export function FocusStops({
                 pack={pack}
                 initial={data.recentPulls}
                 onOpenCard={overlay.open}
-                limit={desktop ? 8 : 5}
+                limit={desktop ? 8 : 4}
                 bare
               />
             </div>
