@@ -10,6 +10,11 @@
  * part: one wheel notch or swipe plays one 1.5 s ease-out cubic move, input
  * locked meanwhile, the page never following a held finger. A down gesture
  * at the row focuses the centred pack.
+ *
+ * Keys (plan 2.10) go through the same pager in the paged part; in the free
+ * part they are the browser's. Focus landing in the row's own UI while the
+ * page is off the row pages back to it. While bound, the page's scroll
+ * restoration is manual and a reload starts at the row (plan 2.8).
  */
 import type { ReactNode } from 'react';
 import type {
@@ -28,7 +33,12 @@ import { poseAt, stageOpacity } from './stage-pose';
 import { CAPSULE_LEAN, LEAN } from './stage-spin-math';
 import { composePose } from './stage-pose-compose';
 import { ciaoCopies, ciaoOpacity, ciaoPose } from './stage-spin';
-import { createFlowInput, type FlowInputFrame } from './stage-flow-input';
+import {
+  createFlowInput,
+  flowKeyIntent,
+  flowLoadStart,
+  type FlowInputFrame,
+} from './stage-flow-input';
 
 /**
  * The measured stage a CSS row is projected into (host px; the art box is
@@ -234,24 +244,31 @@ export function startSpin(host: SpinHost): SpinControl {
     centreKinds: () => focus?.kindsAt(centre()) ?? null,
     focused: () => !!focus?.active(),
     kinds: () => focus?.kinds() ?? [],
-    enter: () => !!focus?.enter(centre(), undefined, false),
+    enter: () => !!focus?.enter(centre(), { how: 'scroll', page: false }),
   });
   const flowOn = () => !!src?.flow.hasAttribute('data-flow-on');
 
+  /** The site header's height: the panel pins under it. */
+  const headerHeight = () =>
+    document.querySelector<HTMLElement>('header')?.offsetHeight ?? 0;
+  /** The row rest R0 for this flow: its top under the site header. */
+  const rowTop = (s: StageSpinSource) =>
+    Math.max(
+      0,
+      Math.round(
+        s.flow.getBoundingClientRect().top + window.scrollY - headerHeight(),
+      ),
+    );
   const measure = () => {
     if (!src) return;
-    const header = document.querySelector<HTMLElement>('header');
     const tabBar = document.querySelector<HTMLElement>('nav.fixed.bottom-0');
-    const top = header?.offsetHeight ?? 0;
+    const top = headerHeight();
     const bottom = tabBar && tabBar.offsetHeight > 0 ? tabBar.offsetHeight : 0;
     src.flow.style.setProperty('--flow-top', `${top}px`);
     src.flow.style.setProperty('--flow-bottom', `${bottom}px`);
     // The flow is switched on only while the visitor is still at the row,
     // so a page already scrolled down never jumps.
-    const r0 = Math.max(
-      0,
-      Math.round(src.flow.getBoundingClientRect().top + window.scrollY - top),
-    );
+    const r0 = rowTop(src);
     const panel = src.panel.getBoundingClientRect().height;
     const was = flowOn();
     const on =
@@ -332,6 +349,7 @@ export function startSpin(host: SpinHost): SpinControl {
           target: f.target,
           animating: f.animating,
           idle: f.idle,
+          past: f.past,
         })
       : true;
     if (f.idle && rest && t - wokeAt > 250) stopLoop();
@@ -513,10 +531,54 @@ export function startSpin(host: SpinHost): SpinControl {
   };
   let tapping = false;
   const preload = () => void loadFocus();
+  // The flow's keys (plan 2.10): never while a field, the Top Hits strip
+  // or a dialog has focus, never Space on a control, never a key a part of
+  // the page already took (the row's own arrows, the sort panel).
   const onKey = (e: KeyboardEvent) => {
-    const t = input.table();
-    // the stops' keys, while the page is in the paged part
-    if (focus?.active() && t && window.scrollY <= t.edge) focus.key(e);
+    if (e.defaultPrevented || !flowOn() || !input.table()) return;
+    const intent = flowKeyIntent(e);
+    if (!intent) return;
+    const t = e.target instanceof Element ? e.target : null;
+    if (
+      t?.closest(
+        'input,textarea,select,[contenteditable],[data-focus-strip],[role="dialog"]',
+      ) ||
+      document.querySelector('[role="dialog"][aria-modal="true"]')
+    )
+      return;
+    if (
+      e.key === ' ' &&
+      t?.closest('button,a[href],[role="button"],summary,label')
+    )
+      return;
+    // the leave is under way: every key waits for it
+    if (held()) {
+      e.preventDefault();
+      return;
+    }
+    // a key at the row before the focused view has loaded: load it
+    if (!focus) void loadFocus();
+    const r = input.key(intent, window.scrollY, now());
+    if (r === 'free') return;
+    e.preventDefault();
+    if (r === 'leave') focus?.leave();
+    wake();
+  };
+  // Keyboard users keep every control (nothing is inert): focus landing in
+  // the row's own UI while the page is off the row brings it back there (a
+  // focused pack leaves; past the details nothing is focusable in the panel).
+  const onFocusIn = (e: FocusEvent) => {
+    const t = e.target instanceof Element ? e.target : null;
+    if (
+      !t?.closest(
+        '[data-stage-viewport],[data-stage-info],[data-stage-head],[data-stage-nav]',
+      )
+    )
+      return;
+    const tb = input.table();
+    if (!tb || !flowOn() || window.scrollY > tb.edge || held()) return;
+    if (focus?.active()) focus.leave();
+    else if (Math.abs(window.scrollY - tb.r0) >= 1) go(0);
   };
   window.addEventListener('keydown', onKey);
   const idleLoad = setTimeout(() => void loadFocus(), 2500);
@@ -529,6 +591,18 @@ export function startSpin(host: SpinHost): SpinControl {
       '__flow' in st
     );
   };
+  /** The page's own restoration mode, put back when the flow unbinds. */
+  let restoration: ScrollRestoration | null = null;
+  /** The document's load was looked at once (a reload starts at the row). */
+  let loadSeen = false;
+  const startAtRow = (s: StageSpinSource) => {
+    if (loadSeen) return;
+    loadSeen = true;
+    const nav = performance.getEntriesByType('navigation')[0] as
+      PerformanceNavigationTiming | undefined;
+    const y = flowLoadStart(nav?.type, window.scrollY, rowTop(s));
+    if (y !== null) window.scrollTo(0, y);
+  };
   const resume = () => {
     if (!atEntry() || !flowOn()) return;
     void loadFocus().then((f) => f?.resume());
@@ -538,6 +612,10 @@ export function startSpin(host: SpinHost): SpinControl {
     if (next === src) return;
     unbindPage?.();
     unbindPage = null;
+    if (!next && restoration !== null) {
+      window.history.scrollRestoration = restoration;
+      restoration = null;
+    }
     if (src) {
       src.flow.removeAttribute('data-flow-on');
       src.flow.removeAttribute('data-flow-free');
@@ -547,15 +625,23 @@ export function startSpin(host: SpinHost): SpinControl {
     }
     src = next;
     if (next) {
+      // no restored scroll: a reload or a history load starts at the row
+      if (restoration === null) {
+        restoration = window.history.scrollRestoration;
+        window.history.scrollRestoration = 'manual';
+      }
+      startAtRow(next);
       const ro = new ResizeObserver(measure);
       ro.observe(next.flow);
       ro.observe(next.panel);
+      next.panel.addEventListener('focusin', onFocusIn);
       next.panel.addEventListener('click', onTap, { capture: true });
       // a press loads the focused view ahead of its tap (when idle has not yet)
       next.panel.addEventListener('pointerdown', preload, quiet);
       setTimeout(resume, 0);
       unbindPage = () => {
         ro.disconnect();
+        next.panel.removeEventListener('focusin', onFocusIn);
         next.panel.removeEventListener('click', onTap, { capture: true });
         next.panel.removeEventListener('pointerdown', preload);
       };

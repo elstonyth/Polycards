@@ -7,11 +7,15 @@
  *   and the CSS tiles read from the stage state: the pack's keys for this
  *   size, the focus term and the spotlight.
  * - `createFocusRun` is the focused view itself: the declaration, the stop
- *   blocks, the address and the leave. It owns no input and no pager: the
- *   spin chunk's flow pager moves the page, and each frame hands it the
- *   focus value read from the scroll (a tap or a down gesture at the row
- *   pages to Front; paging back past Front, "All packs", Escape or browser
- *   Back pages from Front to the row, which ends the focus).
+ *   blocks, the address and the leave. It owns no input, no keys and no
+ *   pager: the spin chunk's flow pager moves the page, and each frame hands
+ *   it the focus value read from the scroll (a tap or a down gesture at the
+ *   row pages to Front; paging back past Front, "All packs", Escape, Home or
+ *   browser Back pages from Front to the row, which ends the focus).
+ * - The address follows full-flow plan 2.8 (`stage-focus-address`): a tap
+ *   pushes `/slots/<id>`, a scroll replaces it, and leaving the details
+ *   downwards or ending the focus puts the base path back without a new
+ *   entry.
  */
 import { createElement, startTransition, type ReactNode } from 'react';
 import {
@@ -35,6 +39,7 @@ import {
   focusStops,
   type FocusVariant,
 } from './stage-focus-keys';
+import { createFocusAddress, type FocusEntryKind } from './stage-focus-address';
 import { readFocusSeeds } from './stage-focus-seeds';
 import { STAGE_DESKTOP_QUERY } from './stage-gate';
 
@@ -126,6 +131,18 @@ export type FocusFrame = {
   target: number | null;
   animating: boolean;
   idle: boolean;
+  /** The page has left the details downwards (the address shows the base path). */
+  past?: boolean;
+};
+
+/** How a focus begins. */
+export type FocusEnter = {
+  /** A tap pushes the address; a scroll or key replaces it (default: tap). */
+  how?: Exclude<FocusEntryKind, 'resume'>;
+  /** Resume this focus entry of ours (Back from the pack page, Forward). */
+  entry?: string;
+  /** Page to its first stop (false: the flow is already paging). */
+  page?: boolean;
 };
 
 export type FocusRun = {
@@ -136,14 +153,10 @@ export type FocusRun = {
   kindsAt(index: number): FocusStopKind[] | null;
   /** The focused pack's stop kinds. */
   kinds(): readonly FocusStopKind[];
-  /**
-   * Focus the pack at `index` of the shown row; false: not focusable here.
-   * `page`: page to its first stop (false: the flow is already paging).
-   */
-  enter(index: number, fromEntry?: string, page?: boolean): boolean;
-  /** "All packs" (and Escape, browser Back). */
+  /** Focus the pack at `index` of the shown row; false: not focusable here. */
+  enter(index: number, o?: FocusEnter): boolean;
+  /** "All packs" (and Escape, Home, browser Back); nothing past the details. */
   leave(fromHistory?: boolean): void;
-  key(e: KeyboardEvent): void;
   /** One frame; true when at rest. */
   frame(now: number, f: FocusFrame): boolean;
   /** The page shows a focus entry of ours (Back from the reel, Forward): focus that pack. */
@@ -153,7 +166,6 @@ export type FocusRun = {
   stop(): void;
 };
 
-const MARK = '__flow';
 /** The stop a focus entry rests on (restored on Forward and Back). */
 const stopKey = (entry: string) => `pack-flow:stop:${entry}`;
 
@@ -172,9 +184,9 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
   let kinds: FocusStopKind[] = [];
   let decl: StageFocusOn | null = null;
   let seed: FlowSeed | null = null;
-  let entry: string | null = null;
-  let path = '';
-  let base = '';
+  const addr = createFocusAddress(window.history, () => window.location);
+  /** The page has left the details downwards (last frame). */
+  let past = false;
   let desktop = false;
   const subs = new Set<(f: number) => void>();
   let lastF = -1;
@@ -255,44 +267,41 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
     subs.clear();
     lastF = -1;
     d.paint();
-    // the address goes back with the pack (our entry: one step back)
-    if (entry && window.location.pathname === path) {
-      if (window.history.state?.[MARK] === entry) {
-        ignorePop = true; // the popstate this step fires
-        window.history.back();
-      } else window.history.replaceState(null, '', base);
-    }
-    entry = null;
+    // the address goes back with the pack (our pushed entry: one step back)
+    addr.end();
+    past = false;
     seed = null;
     d.ended();
   };
 
-  let ignorePop = false;
   const onPop = () => {
-    if (ignorePop) {
-      ignorePop = false;
-      return;
-    }
-    if (on && window.location.pathname !== path) {
-      run.leave(true);
+    // our own step back (the address leaving with the pack)
+    if (addr.popped()) return;
+    if (on) {
+      // past the details the address is the base path: Back leaves the
+      // page, and Forward to the pack's entry is stepped back again, so the
+      // address keeps matching what the page shows
+      if (past) {
+        if (addr.onPack()) addr.show(false);
+        return;
+      }
+      if (!addr.onPack()) run.leave(true);
       return;
     }
     // Forward to a focus entry of ours: focus that pack again (no new entry)
     resumeEntry();
   };
   const resumeEntry = (): boolean => {
-    const st: unknown = window.history.state;
-    const mark =
-      st && typeof st === 'object'
-        ? (st as Record<string, unknown>)[MARK]
-        : null;
+    const mark = addr.resumable();
     const m = /^\/slots\/([^/]+)\/?$/.exec(window.location.pathname);
-    if (on || typeof mark !== 'string' || !m?.[1]) return false;
+    if (on || mark === null || !m?.[1]) return false;
     const id = decodeURIComponent(m[1]);
     const tile = d.src.panel.querySelector<HTMLElement>(
       `[data-stage-panel]:not([hidden]) [data-stage-tile][data-pack-id="${CSS.escape(id)}"]`,
     );
-    return tile ? run.enter(Number(tile.dataset.index), mark) : false;
+    return tile
+      ? run.enter(Number(tile.dataset.index), { entry: mark })
+      : false;
   };
   let savedK = 0;
   window.addEventListener('popstate', onPop);
@@ -318,8 +327,10 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       return p ? kindsOf(p.s) : null;
     },
     kinds: () => kinds,
-    enter(index, fromEntry, page = true) {
+    enter(index, o = {}) {
       if (on) return false;
+      const fromEntry = o.entry;
+      const page = o.page ?? true;
       const panel = d.src.panel;
       const p = packAt(index);
       if (!p) return false;
@@ -368,14 +379,13 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       leaving = false;
       settled = false;
       publish();
-      // the address: /slots/<id>, Back unfocuses (plan section 7)
-      base = window.location.pathname + window.location.search;
-      path = `/slots/${encodeURIComponent(id)}`;
-      if (fromEntry) entry = fromEntry;
-      else {
-        entry = `${id}:${Math.round(now())}`;
-        window.history.pushState({ [MARK]: entry }, '', path);
-      }
+      // the address: /slots/<id> (a tap pushes it, a scroll replaces it)
+      past = false;
+      addr.enter(
+        id,
+        fromEntry ? 'resume' : (o.how ?? 'tap'),
+        fromEntry ?? `${id}:${Math.round(now())}`,
+      );
       // the row's motion values repaint the tiles; the focus repaints after
       for (const v of Object.values(d.values))
         offs.push(v.on('change', () => requestAnimationFrame(d.paint)));
@@ -396,8 +406,9 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       return true;
     },
     leave(fromHistory = false) {
-      if (!on || leaving) return;
-      if (fromHistory) entry = null; // the address already moved
+      // past the details there is no move home from here (the flow pages)
+      if (!on || leaving || past) return;
+      if (fromHistory) addr.forget(); // the address already moved
       if (d.busy()) {
         // mid-move: leave once it lands
         setTimeout(() => {
@@ -428,41 +439,6 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
         d.loop();
       }, LEAVE_FADE_MS);
     },
-    key(e) {
-      if (leaving) return;
-      const t = e.target as HTMLElement | null;
-      if (
-        t?.closest?.(
-          'input,textarea,select,[contenteditable],[data-focus-strip],[role="dialog"]',
-        )
-      )
-        return;
-      if (e.key === 'Escape') {
-        if (document.querySelector('[role="dialog"][aria-modal="true"]'))
-          return;
-        run.leave();
-        return;
-      }
-      const k = Math.round(Math.max(0, lastF));
-      const n = kinds.length;
-      let to: number | null = null;
-      if (e.key === 'ArrowDown' || e.key === 'PageDown') to = k + 1;
-      else if (e.key === 'ArrowUp' || e.key === 'PageUp') to = k - 1;
-      else if (
-        e.key === ' ' &&
-        !t?.closest?.('button,a[href],[role="button"],summary,label')
-      )
-        to = e.shiftKey ? k - 1 : k + 1;
-      else if (e.key === 'Home') to = 1;
-      else if (e.key === 'End') to = n;
-      if (to === null) return;
-      e.preventDefault();
-      if (to < 1) {
-        run.leave();
-        return;
-      }
-      if (d.go(Math.min(n, to))) d.loop();
-    },
     frame(t, f) {
       if (!on) return true;
       if (f.focus > 0.001) leftRow = true;
@@ -474,6 +450,9 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
         decl = { ...decl, ctx: { ...decl.ctx, leaving: true } };
         publish();
       }
+      // the address: the pack's while in the details, the base path past them
+      past = !!f.past;
+      if (!leaving) addr.show(!past);
       if (trace.push([t, window.scrollY, f.focus]) > 4000)
         trace.splice(0, 2000);
       if (f.focus !== lastF) {
@@ -493,6 +472,7 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       }
       // the stop this entry rests on, for Back and Forward
       const k = f.target;
+      const entry = addr.entry();
       if (f.idle && !leaving && entry && k !== null && k >= 1) {
         if (k !== savedK && k <= kinds.length) {
           savedK = k;
@@ -512,6 +492,9 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       stops: d.stops(),
       focus: lastF,
       busy: d.busy(),
+      past,
+      entry: addr.entry(),
+      onPack: addr.onPack(),
       trace,
     }),
     stop() {

@@ -30,9 +30,11 @@ import {
 } from './stage-flow';
 import {
   createFlowPager,
+  type FlowKeyResult,
   type FlowPagerFrame,
   type FlowPagerTable,
 } from './stage-flow-pager';
+import { blockAt } from './stage-focus';
 import { clamp01 } from './stage-spin-math';
 
 /** What the flow reads of the page. */
@@ -65,7 +67,73 @@ export type FlowInputFrame = FlowPagerFrame & {
   focus: number;
   /** The focused pack's fade past its last stop: 0 shown, 1 gone (from the Exit spacer's top). */
   fade: number;
+  /**
+   * The page has left the details downwards: the free part, or past the
+   * last stop by the text's own line (20% into the move below it, either
+   * way, as `blockAt`). The address follows it (plan 2.8).
+   */
+  past: boolean;
 };
+
+/** What a key asks for (plan 2.10). */
+export type FlowKeyIntent = 'next' | 'prev' | 'first' | 'last' | 'escape';
+
+/**
+ * What a key did: the pager's result, or `leave`: the caller runs the
+ * focused view's leave (the text first, then the move home), which is how
+ * the details go back to the row.
+ */
+export type FlowKeyOutcome = FlowKeyResult | 'leave';
+
+type KeyLike = {
+  key: string;
+  shiftKey: boolean;
+  ctrlKey: boolean;
+  altKey: boolean;
+  metaKey: boolean;
+};
+
+/**
+ * The flow's keys: ArrowDown, PageDown and Space go to the next stop;
+ * ArrowUp, PageUp and Shift+Space to the previous; Home to the row; End to
+ * the last paged stop; Escape back to the row. With Ctrl, Alt or Meta held a
+ * key is the browser's.
+ */
+export function flowKeyIntent(e: KeyLike): FlowKeyIntent | null {
+  if (e.ctrlKey || e.altKey || e.metaKey) return null;
+  switch (e.key) {
+    case 'ArrowDown':
+    case 'PageDown':
+      return 'next';
+    case 'ArrowUp':
+    case 'PageUp':
+      return 'prev';
+    case ' ':
+      return e.shiftKey ? 'prev' : 'next';
+    case 'Home':
+      return 'first';
+    case 'End':
+      return 'last';
+    case 'Escape':
+      return 'escape';
+    default:
+      return null;
+  }
+}
+
+/**
+ * Where a page starts once the flow binds (plan 2.8: a reload starts at the
+ * row, as the reference always does). A reload or a history load that left
+ * the page elsewhere goes to R0; a plain load is the visitor's own.
+ */
+export function flowLoadStart(
+  type: string | undefined,
+  scrollY: number,
+  r0: number,
+): number | null {
+  if (type !== 'reload' && type !== 'back_forward') return null;
+  return Math.abs(scrollY - r0) >= SAME_PX ? r0 : null;
+}
 
 export interface FlowInput {
   /**
@@ -85,6 +153,8 @@ export interface FlowInput {
   ): boolean;
   /** Straight to stop k (the exit end is the index after the last stop). */
   goTo(k: number, scrollY: number, now: number, ms?: number): boolean;
+  /** A key: a move, swallowed, the browser's own, or the focused view's leave. */
+  key(intent: FlowKeyIntent, scrollY: number, now: number): FlowKeyOutcome;
   /** `strip`: a sideways touch here belongs to what it started on. */
   touchStart(
     x: number,
@@ -174,6 +244,38 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
       entered();
       return ok;
     },
+    key(intent, scrollY, now) {
+      arm();
+      if (!table) return 'free';
+      if (pager.busy()) return 'swallowed';
+      if (pager.zone(scrollY) === 'free') return 'free';
+      const s = stops();
+      let k = 0;
+      for (let j = 1; j < s.length; j++)
+        if (Math.abs(scrollY - s[j]!) < Math.abs(scrollY - s[k]!)) k = j;
+      const inDetails = d.focused() && k >= 1;
+      let r: FlowKeyResult;
+      switch (intent) {
+        case 'escape':
+          return inDetails ? 'leave' : 'free';
+        case 'first':
+          return inDetails ? 'leave' : 'swallowed';
+        case 'prev':
+          if (inDetails && k <= 1) return 'leave';
+          r = pager.step(-1, scrollY, now);
+          break;
+        case 'next':
+          r = pager.step(1, scrollY, now);
+          break;
+        case 'last':
+          // from the row only a pack that can be focused goes anywhere
+          if (!d.focused() && d.centreKinds() === null) return 'swallowed';
+          r = pager.goTo(s.length - 1, scrollY, now);
+          break;
+      }
+      entered();
+      return r;
+    },
     touchStart(x, y, scrollY, now, o) {
       arm();
       nativeTouch = pager.zone(scrollY) === 'free';
@@ -222,7 +324,7 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
           f = { ...f, target: 0, animating: true, idle: false };
         }
       }
-      if (!t) return { ...f, at: null, focus: 0, fade: 0 };
+      if (!t) return { ...f, at: null, focus: 0, fade: 0, past: false };
       const at = flowAt(y, t);
       const n = t.rests.length;
       const last = n > 0 ? t.rests[n - 1]! : t.r0;
@@ -231,7 +333,8 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
       // into view over the fading pack
       const fade =
         t.exitStart > last ? clamp01((y - last) / (t.exitStart - last)) : 0;
-      return { ...f, at, focus, fade };
+      const past = at.zone === 'free' || blockAt(at.p, n + 1) > n;
+      return { ...f, at, focus, fade, past };
     },
     busy: () => pager.busy(),
   };

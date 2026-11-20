@@ -51,15 +51,16 @@ import {
   PAGE_MS,
   TOUCH_PAGE_PX,
   WHEEL_GAP_MS,
+  WHEEL_MIN_DELTA,
   durationFor,
 } from './stage-pager';
 import { easeOutCubic } from './stage-spin-driver';
 
-/** Wheel deltas under this are ignored [measured D §B] (the focus pager keeps an unexported copy). */
-export const WHEEL_MIN_DELTA = 4;
-/** Quiet before an off-rest page snaps back [ours: the focus kit's SNAP_QUIET_MS, not exported there]. */
+/** Wheel deltas under this are ignored [measured D §B]: one value, the focus pager's. */
+export { WHEEL_MIN_DELTA };
+/** Quiet before an off-rest page snaps back [ours, plan 2.2]. */
 export const SNAP_QUIET_MS = 150;
-/** The snap back's length [ours: the focus kit's SNAP_MS, not exported there]. */
+/** The snap back's length [ours, plan 2.2]. */
 export const SNAP_MS = 600;
 /** Free touch release: glide sign * |v|^1.7 px [code, P §C]. */
 export const GLIDE_POWER = 1.7;

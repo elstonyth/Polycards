@@ -29,7 +29,8 @@ export const SAME_FRAMING_MS = 1000;
 export const WHEEL_GAP_MS = 120;
 export const AXIS_LOCK_PX = 6;
 export const TOUCH_PAGE_PX = 24;
-const WHEEL_MIN_DELTA = 4;
+/** Wheel deltas under this are ignored [measured D §B]. */
+export const WHEEL_MIN_DELTA = 4;
 
 export type PagerFrame = {
   /** Write this to the window scroll this frame; null: leave it. */

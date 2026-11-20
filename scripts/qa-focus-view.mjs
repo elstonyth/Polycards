@@ -96,6 +96,25 @@ async function settle(page, k) {
   await page.waitForTimeout(500);
 }
 
+/** Back to Front by ArrowUp, one stop at a time (Home goes to the row: full-flow plan 2.10). */
+async function toFront(page) {
+  for (let i = 0; i < 8; i++) {
+    const f = await focusOf(page);
+    if (!f?.on || Math.abs(f.focus - 1) < 1e-3) break;
+    await page.keyboard.press('ArrowUp');
+    await page.waitForFunction(
+      () => {
+        const g = window.__packStage.focus();
+        return g && !g.busy && Math.abs(g.focus - Math.round(g.focus)) < 1e-3;
+      },
+      null,
+      { timeout: 8000 },
+    );
+    await page.waitForTimeout(200);
+  }
+  await settle(page, 1);
+}
+
 async function stage(size, { waitKit = true } = {}) {
   const s = await open(size);
   await s.page.goto(`${BASE}/home-preview?stage=3d&debug=1&loader=never`, {
@@ -213,8 +232,7 @@ for (const size of ['phone', 'desktop']) {
       tb.on && offTb < 1,
       `focused ${tb.on}, off a rest by ${offTb} px (focus ${tb.focus})`,
     );
-    await page.keyboard.press('Home');
-    await settle(page, 1);
+    await toFront(page);
   }
 
   if (size === 'phone') {
@@ -261,8 +279,7 @@ for (const size of ['phone', 'desktop']) {
     `off a stop by ${off} px, focus ${f4.focus}`,
   );
 
-  await page.keyboard.press('Home');
-  await settle(page, 1);
+  await toFront(page);
   await page.keyboard.press('ArrowDown');
   await settle(page, 2);
   await page.locator('[data-focus-strip] > div').first().click();

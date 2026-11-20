@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { createFlowInput, type FlowInput } from '../stage-flow-input';
+import {
+  createFlowInput,
+  flowKeyIntent,
+  flowLoadStart,
+  type FlowInput,
+} from '../stage-flow-input';
 import { focusStops } from '../stage-focus-keys';
 
 // panel 800: S = 1000; rests 1000..6000, RL 7000, edge 7500, exit 8000 to 9000
@@ -188,5 +193,161 @@ describe('flow input: a re-measure keeps P', () => {
     const y = run(p.input, 0, 16, 1600);
     expect(y).toBe(1000);
     expect(p.input.measure({ ...GEO, panel: 400 }, y)).toBe(500);
+  });
+});
+
+describe('flow input: keys (plan 2.10)', () => {
+  const ev = (
+    key: string,
+    o: Partial<
+      Record<'shiftKey' | 'ctrlKey' | 'altKey' | 'metaKey', boolean>
+    > = {},
+  ) => ({
+    key,
+    shiftKey: false,
+    ctrlKey: false,
+    altKey: false,
+    metaKey: false,
+    ...o,
+  });
+
+  it('maps the keys to one intent each', () => {
+    expect(flowKeyIntent(ev('ArrowDown'))).toBe('next');
+    expect(flowKeyIntent(ev('PageDown'))).toBe('next');
+    expect(flowKeyIntent(ev(' '))).toBe('next');
+    expect(flowKeyIntent(ev(' ', { shiftKey: true }))).toBe('prev');
+    expect(flowKeyIntent(ev('ArrowUp'))).toBe('prev');
+    expect(flowKeyIntent(ev('PageUp'))).toBe('prev');
+    expect(flowKeyIntent(ev('Home'))).toBe('first');
+    expect(flowKeyIntent(ev('End'))).toBe('last');
+    expect(flowKeyIntent(ev('Escape'))).toBe('escape');
+    expect(flowKeyIntent(ev('ArrowLeft'))).toBeNull();
+    expect(flowKeyIntent(ev('Tab'))).toBeNull();
+    expect(flowKeyIntent(ev('ArrowDown', { ctrlKey: true }))).toBeNull();
+    expect(flowKeyIntent(ev('End', { metaKey: true }))).toBeNull();
+    expect(flowKeyIntent(ev('Home', { altKey: true }))).toBeNull();
+  });
+
+  /** Focused and resting on stop k. */
+  function atStop(k: number) {
+    const p = page();
+    p.input.key('next', 0, 0);
+    let y = run(p.input, 0, 16, 1600);
+    y = k * 1000;
+    p.input.frame(y, 1700);
+    p.input.frame(y, 1716);
+    return { ...p, y };
+  }
+
+  it('next at the row focuses the centred pack and lands on Front in 1.5 s', () => {
+    const p = page();
+    expect(p.input.key('next', 0, 0)).toBe('moved');
+    expect(p.calls).toEqual(['enter']);
+    expect(p.input.frame(0, 750).scrollTo).toBeCloseTo(875, 6);
+    expect(run(p.input, 875, 766, 1600)).toBe(1000);
+  });
+
+  it('next at the row with a pack that cannot be focused is swallowed, and nothing moves', () => {
+    const p = page(null);
+    expect(p.input.key('next', 0, 0)).toBe('swallowed');
+    expect(p.calls).toEqual([]);
+    expect(run(p.input, 0, 16, 2000)).toBe(0);
+  });
+
+  it('prev, first and escape at the row do nothing (prev and first are swallowed, escape is free)', () => {
+    const p = page();
+    expect(p.input.key('prev', 0, 0)).toBe('swallowed');
+    expect(p.input.key('first', 0, 0)).toBe('swallowed');
+    expect(p.input.key('escape', 0, 0)).toBe('free');
+    expect(run(p.input, 0, 16, 2000)).toBe(0);
+  });
+
+  it('end at the row focuses the centred pack and pages to the last stop', () => {
+    const p = page();
+    expect(p.input.key('last', 0, 0)).toBe('moved');
+    expect(p.calls).toEqual(['enter']);
+    expect(run(p.input, 0, 16, 1600)).toBe(6000);
+  });
+
+  it('next and prev page one stop either way between the stops', () => {
+    const p = atStop(2);
+    expect(p.input.key('next', p.y, 2000)).toBe('moved');
+    let y = run(p.input, p.y, 2016, 3600);
+    expect(y).toBe(3000);
+    expect(p.input.key('prev', y, 3700)).toBe('moved');
+    y = run(p.input, y, 3716, 5300);
+    expect(y).toBe(2000);
+  });
+
+  it('end pages to the last stop, from any stop', () => {
+    const p = atStop(2);
+    expect(p.input.key('last', p.y, 2000)).toBe('moved');
+    expect(run(p.input, p.y, 2016, 3600)).toBe(6000);
+  });
+
+  it('prev at Front, home at any stop and escape in the details hand over to the leave', () => {
+    expect(atStop(1).input.key('prev', 1000, 2000)).toBe('leave');
+    const p = atStop(3);
+    expect(p.input.key('first', p.y, 2000)).toBe('leave');
+    expect(p.input.key('escape', p.y, 2000)).toBe('leave');
+  });
+
+  it('next at Closing pages on to the free part, as a wheel notch does', () => {
+    const p = atStop(6);
+    expect(p.input.key('next', p.y, 2000)).toBe('moved');
+    expect(run(p.input, p.y, 2016, 3600)).toBe(9000);
+  });
+
+  it('keys during a move are swallowed', () => {
+    const p = atStop(2);
+    p.input.key('next', p.y, 2000);
+    const y = run(p.input, p.y, 2016, 2400);
+    for (const k of ['next', 'prev', 'first', 'last', 'escape'] as const)
+      expect(p.input.key(k, y, 2420)).toBe('swallowed');
+    expect(run(p.input, y, 2416, 3600)).toBe(3000);
+  });
+
+  it("in the free part every key is the browser's own", () => {
+    const p = atStop(6);
+    for (const k of ['next', 'prev', 'first', 'last', 'escape'] as const)
+      expect(p.input.key(k, 9000, 2000)).toBe('free');
+  });
+});
+
+describe('flow input: past the details (the address threshold)', () => {
+  it('switches where the text does: 20% into the move below Closing, either way', () => {
+    const p = page();
+    p.input.key('next', 0, 0);
+    run(p.input, 0, 16, 1600);
+    expect(p.input.frame(6000, 2000).past).toBe(false);
+    expect(p.input.frame(6190, 2016).past).toBe(false);
+    expect(p.input.frame(6200, 2032).past).toBe(true);
+    expect(p.input.frame(7400, 2048).past).toBe(true);
+    // and on the way back up the same line
+    expect(p.input.frame(6210, 2064).past).toBe(true);
+    expect(p.input.frame(6190, 2080).past).toBe(false);
+  });
+
+  it('is true in the free part and false at every stop', () => {
+    const p = page();
+    p.input.key('next', 0, 0);
+    run(p.input, 0, 16, 1600);
+    expect(p.input.frame(9000, 2000).past).toBe(true);
+    for (const y of [1000, 2000, 3000, 4000, 5000, 6000])
+      expect(p.input.frame(y, 2016 + y / 100).past).toBe(false);
+  });
+});
+
+describe('flow load start (plan 2.8: a reload starts at the row)', () => {
+  it('a reload or a history load starts at R0', () => {
+    expect(flowLoadStart('reload', 9300, 0)).toBe(0);
+    expect(flowLoadStart('back_forward', 2000, 0)).toBe(0);
+    expect(flowLoadStart('reload', 9300, 56)).toBe(56);
+  });
+
+  it('a plain load, or a page already at R0, is left alone', () => {
+    expect(flowLoadStart('navigate', 400, 0)).toBeNull();
+    expect(flowLoadStart('reload', 0, 0)).toBeNull();
+    expect(flowLoadStart(undefined, 400, 0)).toBeNull();
   });
 });
