@@ -192,10 +192,14 @@
   margin-top: 0.25rem;
 }
 
-/* bigger tiles: two and a peek fill the room above the tab bar */
+/* the row stops short of the icon column: two whole tiles and a peek */
+.over .block[data-kind='tophits'] {
+  right: 68px;
+}
+
 .over .block[data-kind='tophits'] [data-focus-strip] > div {
-  flex: 0 0 56%;
-  max-width: 60%;
+  flex: 0 0 45%;
+  max-width: 45%;
 }
 
 .over .block[data-kind='pulls'] .pulls {
