@@ -11,13 +11,16 @@
  * 1.5 s ease-out cubic move, input locked meanwhile, the page never following
  * a held finger.
  */
+import type { ReactNode } from 'react';
 import type {
   ComposeCtx,
   SpinPanel,
   SpinRange,
   StageSpinKit,
   StageSpinSource,
+  StageState,
 } from './contract';
+import type { FocusRun } from './stage-focus-kit';
 import { STAGE_DESKTOP_QUERY } from './stage-gate';
 import { tileVars } from './StageTile';
 import { cancelFrame, frame, type FrameData } from './stage-motion';
@@ -114,8 +117,33 @@ export const SPIN_KIT: StageSpinKit = {
         spinOpacity: ciaoOpacity,
         compose: composePose,
       };
-      const pose = poseAt(state, i, l, g.desktop, soldOut, ctx);
-      const op = stageOpacity(state, i, g.desktop, count, ctx);
+      // focused: the focus term, keyed to the panel (the picture is the
+      // front, so a back stop shows it until the 3D back is drawn)
+      const fo = state.focus > 0 ? state.focusOn : null;
+      let lf = l;
+      if (fo) {
+        const img = tile.querySelector('img');
+        const fit =
+          img && img.naturalWidth > 0 && img.naturalHeight > 0
+            ? Math.min(
+                1,
+                g.artW / g.artH / (img.naturalWidth / img.naturalHeight),
+              )
+            : 1;
+        lf = { ...l, cx: g.panel.w / 2 };
+        ctx.focus = {
+          ...fo.ctx,
+          panel: { w: g.panel.w, h: g.panel.h },
+          anchorY: g.panel.anchorY,
+          backW: 0,
+          fit,
+        };
+        ctx.focusTerm = fo.term;
+      }
+      const pose = poseAt(state, i, lf, g.desktop, soldOut, ctx);
+      const op =
+        stageOpacity(state, i, g.desktop, count, ctx) *
+        (fo ? fo.term.opacity(state.focus, i === fo.ctx.index) : 1);
       const k = 1 / g.artH;
       vars[`--${p}-dx`] = fmt((pose.dx + pose.fx * g.panel.w) * k);
       vars[`--${p}-dy`] = fmt((pose.dy + pose.fy * g.panel.h) * k);
@@ -137,6 +165,14 @@ export const SPIN_KIT: StageSpinKit = {
 export type SpinHost = {
   /** Writes the spin and the exit (the provider's observables). */
   set(spin: number, exit: number): void;
+  /** The stage (state, wake, motion values): the focused view drives it. */
+  stage?: {
+    state: StageState;
+    wake(): void;
+    values: Record<string, unknown>;
+  };
+  /** Renders the focused view's blocks over the panel. */
+  ui?: (node: ReactNode) => void;
 };
 
 export type SpinControl = {
@@ -181,6 +217,9 @@ export function startSpin(host: SpinHost): SpinControl {
   let last: SpinFrame | null = null;
   let unbindPage: (() => void) | null = null;
   const now = () => performance.now();
+  /** The focused view (its chunk loads at idle after this one, or at a tap). */
+  let focus: FocusRun | null = null;
+  let focusLoad: Promise<FocusRun | null> | null = null;
 
   const measure = () => {
     if (!src) return;
@@ -193,6 +232,12 @@ export function startSpin(host: SpinHost): SpinControl {
     // The pin exists only while this driver runs (the CSS reads
     // data-spin-on). It is switched on only while the visitor is still on
     // the stage, so a page already scrolled down never jumps.
+    // focused: the focus owns the scroll (no spin range)
+    if (focus?.active()) {
+      range = null;
+      wake();
+      return;
+    }
     const wrapTop = src.wrap.getBoundingClientRect().top + window.scrollY;
     const was = src.wrap.hasAttribute('data-spin-on');
     const on =
@@ -245,6 +290,12 @@ export function startSpin(host: SpinHost): SpinControl {
   let gestures: number[] | null = null;
 
   const tick = (data: FrameData) => {
+    if (focus?.active()) {
+      const rest = focus.frame(data.timestamp);
+      host.set(0, 0);
+      if (rest && data.timestamp - wokeAt > 250) stopLoop();
+      return;
+    }
     const r = src ? range : null;
     const k = r ? `${r.start}|${r.length}|${r.exit}` : '';
     if (k !== key) {
@@ -275,6 +326,10 @@ export function startSpin(host: SpinHost): SpinControl {
 
   const onWheel = (e: WheelEvent) => {
     if (e.ctrlKey || !armed(e.target)) return;
+    if (focus?.active()) {
+      focus.wheel(e);
+      return;
+    }
     gestures?.push(now());
     if (d.wheel(wheelPx(e), window.scrollY, now())) e.preventDefault();
     wake();
@@ -282,12 +337,20 @@ export function startSpin(host: SpinHost): SpinControl {
   const onTouchStart = (e: TouchEvent) => {
     const p = e.touches[0];
     if (!p || e.touches.length > 1 || !armed(e.target)) return;
+    if (focus?.active()) {
+      focus.touchStart(e);
+      return;
+    }
     d.touchStart(p.clientX, p.clientY, window.scrollY, now());
     wake();
   };
   const onTouchMove = (e: TouchEvent) => {
     const p = e.touches[0];
     if (!p || e.touches.length > 1) return;
+    if (focus?.active()) {
+      focus.touchMove(e);
+      return;
+    }
     if (
       d.touchMove(p.clientX, p.clientY, window.scrollY, now()) &&
       e.cancelable
@@ -295,6 +358,10 @@ export function startSpin(host: SpinHost): SpinControl {
       e.preventDefault();
   };
   const onTouchEnd = () => {
+    if (focus?.active()) {
+      focus.touchEnd();
+      return;
+    }
     gestures?.push(now());
     d.touchEnd(window.scrollY, now());
     wake();
@@ -309,6 +376,95 @@ export function startSpin(host: SpinHost): SpinControl {
   window.addEventListener('scroll', wake, quiet);
   window.addEventListener('resize', measure, quiet);
   rmq.addEventListener('change', measure);
+
+  // ---- The focused view: the same listeners, handed over while focused ----
+  const stage = host.stage;
+  const paintRow = () => {
+    const panel = src?.panel;
+    if (!panel || !stage) return;
+    const row = panel.querySelector<HTMLElement>(
+      '[data-stage-panel]:not([hidden]) [data-stage-row]',
+    );
+    if (!row) return;
+    const tiles = Array.from(row.children) as HTMLElement[];
+    const packs = tiles.map((t) => ({
+      soldOut: !!t.getAttribute('aria-label')?.endsWith(', sold out'),
+      ticket: false,
+    }));
+    const art = row.querySelector<HTMLElement>('[data-stage-art]');
+    const a = art?.getBoundingClientRect();
+    const h = panel.getBoundingClientRect();
+    const cyArt =
+      a && a.height > 0 ? (a.top + a.height / 2 - h.top) / a.height : 0;
+    SPIN_KIT.paintTiles(row, panel, packs, stage.state, cyArt);
+  };
+  const loadFocus = (): Promise<FocusRun | null> => {
+    if (!stage || !host.ui) return Promise.resolve(null);
+    focusLoad ??= import(
+      /* webpackChunkName: "pack-stage-focus" */ './stage-focus-kit'
+    ).then(
+      (m) => {
+        const s = src;
+        if (!s || !host.ui) return null;
+        focus = m.createFocusRun({
+          src: s,
+          state: stage.state,
+          wake: stage.wake,
+          values: stage.values as Parameters<
+            typeof m.createFocusRun
+          >[0]['values'],
+          ui: host.ui,
+          loop: wake,
+          top: () => document.querySelector('header')?.offsetHeight ?? 0,
+          paint: paintRow,
+          ended: () => {
+            d.reset(0);
+            measure();
+          },
+        });
+        return focus;
+      },
+      () => null,
+    );
+    return focusLoad;
+  };
+  // A plain tap on the centred pack focuses it (the row at rest only).
+  const onTap = (e: MouseEvent) => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
+      return;
+    const t = e.target as HTMLElement | null;
+    const tile = t?.closest?.<HTMLElement>('[data-stage-tile]');
+    if (!tile || !stage) return;
+    if (focus?.active()) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+    const index = Number(tile.dataset.index);
+    if (
+      index !== Math.round(stage.state.track) ||
+      (last?.spin ?? 0) >= 0.02 ||
+      (last?.target ?? 0) >= 0.02 ||
+      flags.spinning
+    )
+      return;
+    e.preventDefault();
+    e.stopPropagation();
+    void loadFocus().then((f) => {
+      // not focusable (no data for it): today's pack page
+      if (!f || !f.enter(index)) {
+        const a = tile.querySelector<HTMLAnchorElement>('a[href]');
+        if (a) window.location.assign(a.href);
+        return;
+      }
+      measure();
+    });
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (focus?.active()) focus.key(e);
+  };
+  window.addEventListener('keydown', onKey);
+  const idleLoad = setTimeout(() => void loadFocus(), 2500);
 
   const bind = (next: StageSpinSource | null) => {
     if (next === src) return;
@@ -326,9 +482,11 @@ export function startSpin(host: SpinHost): SpinControl {
       ro.observe(next.wrap);
       ro.observe(next.panel);
       next.panel.addEventListener('focusin', onFocusIn);
+      next.panel.addEventListener('click', onTap, { capture: true });
       unbindPage = () => {
         ro.disconnect();
         next.panel.removeEventListener('focusin', onFocusIn);
+        next.panel.removeEventListener('click', onTap, { capture: true });
       };
       measure();
     }
@@ -344,6 +502,7 @@ export function startSpin(host: SpinHost): SpinControl {
     dbg.spinTrace = () => ({ trace, gestures });
     dbg.focusKit = () =>
       import(/* webpackChunkName: "pack-stage-focus" */ './stage-focus-kit');
+    dbg.focus = () => focus?.debug() ?? null;
   }
   if (dbg)
     dbg.spin = () => ({
@@ -362,6 +521,9 @@ export function startSpin(host: SpinHost): SpinControl {
     range: () => range,
     looping: () => looping,
     stop() {
+      clearTimeout(idleLoad);
+      focus?.stop();
+      window.removeEventListener('keydown', onKey);
       bind(null);
       stopLoop();
       window.removeEventListener('wheel', onWheel);

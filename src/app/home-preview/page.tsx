@@ -19,6 +19,8 @@ import PackStage from '@/components/pack-stage/PackStage';
 import { Stage3dProvider } from '@/components/pack-stage/Stage3dProvider';
 import { StageNoScript } from '@/components/pack-stage/StageNoScript';
 import { toStageCategories } from '@/components/pack-stage/stage-packs';
+import { flowSeedFromHighlights } from '@/components/pack-flow/flow-seed';
+import { FOCUS_SEEDS_ID } from '@/components/pack-stage/stage-focus-seeds';
 import type {
   GateMode,
   StageOverride,
@@ -100,11 +102,32 @@ export default async function HomePreviewPage({
   const chaseByPack = new Map<string, PackCard | null>(
     packs.map((pack, i) => [pack.id, highlights[i]?.chase ?? null]),
   );
+  // The focused pack view's starting data, read by its lazily loaded chunk:
+  // data in the page, no script.
+  const highlightOf = new Map(packs.map((pack, i) => [pack.id, highlights[i]]));
+  const seeds = Object.fromEntries(
+    categories.flatMap((c) =>
+      c.packs.map((pack) => [
+        pack.id,
+        flowSeedFromHighlights(
+          { ...pack, categoryId: c.id, categoryName: c.heading, icon: c.icon },
+          highlightOf.get(pack.id) ?? null,
+        ),
+      ]),
+    ),
+  );
   // The first-visit loader's pre-paint gate is in the root layout's <head>
   // (stage-loader-script.ts, STAGE_LOADER_PATHS); it reads ?loader= itself.
   return (
     <div className="w-full">
       <StageNoScript />
+      <script
+        type="application/json"
+        id={FOCUS_SEEDS_ID}
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(seeds).replace(/</g, '\\u003c'),
+        }}
+      />
       <ShelfCategoryProvider categories={packTabs(categories)}>
         <Stage3dProvider override={stage} debug={debug}>
           {/* The page below the stage rises over its pinned panel during the

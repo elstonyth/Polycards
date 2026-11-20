@@ -65,6 +65,35 @@
   margin-top: calc(var(--panel) * -1);
 }
 
+/* Focused (the spin chunk sets data-focus-on): the panel sticks through one
+   stop per 1.25 panels (Ciao's sections), the page below waits. */
+.spinWrap[data-focus-on] {
+  height: calc(var(--panel) * (1 + 1.25 * var(--focus-n, 6)));
+}
+
+.spinWrap[data-focus-on] .stage.panel {
+  position: sticky;
+  top: var(--flow-top);
+}
+
+.spinWrap[data-focus-on] + .spinAfter {
+  display: none;
+}
+
+/* The row's own UI fades out early in the tap's move. */
+.spinWrap[data-focus-on] [data-stage-head],
+.spinWrap[data-focus-on] [data-stage-info],
+.spinWrap[data-focus-on] [data-stage-nav],
+.spinWrap[data-focus-on] .label {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease-out 0.1s;
+}
+
+.spinWrap[data-focus-on] .pose {
+  pointer-events: none;
+}
+
 .spinOff .stage.panel {
   height: auto;
 }

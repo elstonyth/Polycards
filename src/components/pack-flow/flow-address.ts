@@ -121,7 +121,7 @@ export type FlowAddressOptions = {
 export type FlowAddress = {
   location: FlowLocation;
   /** The current entry's flow id (null on a cold load / not ours). Restores
-   *  the chapter from sessionStorage (FlowChapters). */
+   *  the stop from sessionStorage. */
   entryId: string | null;
   /** True when the current entry was pushed by `enter` in this document. */
   isOurs: boolean;

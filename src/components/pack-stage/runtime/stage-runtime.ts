@@ -24,6 +24,7 @@ import type {
   ComposeCtx,
   FocusCtx,
   PackBackDetails,
+  SpotRect,
   StageFocusOn,
   StageLayout,
   StageRuntime,
@@ -184,6 +185,8 @@ export type StageRuntimeDebug = {
   copies: number;
   spinBand: boolean;
   bandH: number;
+  /** The spotlight last set on the focused pack. */
+  spot: { on: number; rect: SpotRect } | null;
   /** The focused back: state, GPU bytes, peak print bytes, canvas bytes held, turn weight. */
   focusBack: {
     id: string;
@@ -266,6 +269,7 @@ export function createStageRuntime(
   /** The material the spotlight was last set on. */
   let spotted: PackFoilMaterial | null = null;
   let lastFocusOn: StageFocusOn | null = null;
+  let lastSpot: { on: number; rect: SpotRect } | null = null;
 
   let inflight = 0;
   let uploadedBytes = 0;
@@ -1160,6 +1164,7 @@ export function createStageRuntime(
               spotted.setSpot({ on: 0, rect: sp.rect });
             model.material.setSpot(sp);
             spotted = model.material;
+            lastSpot = sp;
           }
           if (frustum.intersectsObject(model.mesh)) live.push(slot.id);
         }
@@ -1242,6 +1247,7 @@ export function createStageRuntime(
       copies: lastCopies,
       spinBand,
       bandH: band.h,
+      spot: lastSpot,
       focusBack: focusBack
         ? {
             id: focusBack.slot.id,

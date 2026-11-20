@@ -408,6 +408,7 @@ export function PullHistory({
   noun = 'pack',
   variant = 'cards',
   heading,
+  limit,
 }: {
   /** `cards`: the panel as the home feed wears it. `board`: the pack page's
    *  soft layout (counters and filter in a side column, the pulls as one
@@ -426,6 +427,11 @@ export function PullHistory({
   onSelect?: (pull: RecentPull) => void;
   /** What one open is called in the copy; a ticket pack says capsule. */
   noun?: 'pack' | 'capsule';
+  /**
+   * Show only the newest this many pulls, as a bare list (the homepage
+   * flow's stop: no heading, counters or tier filter).
+   */
+  limit?: number;
 }) {
   const [tab, setTab] = useState<Tab>('All');
   const { pulls, drought, pending, shownScope, shownCategory } =
@@ -438,6 +444,7 @@ export function PullHistory({
   // A category feed is capsules. Follows the rows that landed, not the prop: the
   // counters on screen are the old scope's until the new one arrives.
   const shownNoun = shownCategory ? 'capsule' : noun;
+  const shown = limit ? pulls.slice(0, limit) : pulls;
   const droughts = RARITY_ORDER.flatMap((r) => {
     const n = drought[r];
     return n == null ? [] : [[r, n] as const];
@@ -450,81 +457,85 @@ export function PullHistory({
             parent holds the rows, and the list (or the chart) is the group's
             next sibling. Keep the three children in this order. */}
         <div className="grid grid-cols-1 gap-5 @[56rem]:grid-cols-[minmax(0,20rem)_minmax(0,1fr)] @[56rem]:grid-rows-[auto_1fr] @[56rem]:gap-x-10">
-          <div className="flex flex-col gap-5">
-            {heading}
-            {droughts.length > 0 && (
-              <Bezel
-                core={cn(
-                  'grid gap-px bg-white/10',
-                  droughts.length > 1 && 'grid-cols-2',
-                )}
-              >
-                {droughts.map(([r, n], i) => (
-                  <div
-                    key={r}
-                    className={cn(
-                      'bg-neutral-950 px-4 py-4',
-                      // An odd one out takes the whole last row.
-                      droughts.length > 1 &&
-                        droughts.length % 2 === 1 &&
-                        i === droughts.length - 1 &&
-                        'col-span-2',
-                    )}
-                    style={{
-                      boxShadow: `inset 0 -28px 40px -36px rgba(${rarityRgb(r)}, 0.7)`,
-                    }}
-                  >
-                    <p className="font-heading text-[2.5rem] leading-none tracking-[-0.02em] text-white tabular-nums">
-                      <span
-                        key={n}
-                        className="pull-row-in inline-block motion-reduce:animate-none"
-                      >
-                        {n}
-                      </span>
-                    </p>
-                    <p className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs text-neutral-400">
-                      {shownNoun}s without <TierBadge rarity={r} />
-                    </p>
-                  </div>
-                ))}
-              </Bezel>
-            )}
-          </div>
+          {!limit && (
+            <div className="flex flex-col gap-5">
+              {heading}
+              {droughts.length > 0 && (
+                <Bezel
+                  core={cn(
+                    'grid gap-px bg-white/10',
+                    droughts.length > 1 && 'grid-cols-2',
+                  )}
+                >
+                  {droughts.map(([r, n], i) => (
+                    <div
+                      key={r}
+                      className={cn(
+                        'bg-neutral-950 px-4 py-4',
+                        // An odd one out takes the whole last row.
+                        droughts.length > 1 &&
+                          droughts.length % 2 === 1 &&
+                          i === droughts.length - 1 &&
+                          'col-span-2',
+                      )}
+                      style={{
+                        boxShadow: `inset 0 -28px 40px -36px rgba(${rarityRgb(r)}, 0.7)`,
+                      }}
+                    >
+                      <p className="font-heading text-[2.5rem] leading-none tracking-[-0.02em] text-white tabular-nums">
+                        <span
+                          key={n}
+                          className="pull-row-in inline-block motion-reduce:animate-none"
+                        >
+                          {n}
+                        </span>
+                      </p>
+                      <p className="mt-2.5 flex flex-wrap items-center gap-1.5 text-xs text-neutral-400">
+                        {shownNoun}s without <TierBadge rarity={r} />
+                      </p>
+                    </div>
+                  ))}
+                </Bezel>
+              )}
+            </div>
+          )}
 
-          <div
-            role="group"
-            aria-label="Filter pulls by tier"
-            className="flex flex-wrap gap-2 self-start"
-          >
-            {TABS.map((t) => (
-              <button
-                key={t}
-                type="button"
-                aria-pressed={tab === t}
-                aria-label={t === 'Stats' ? 'Stats' : undefined}
-                onClick={() => setTab(t)}
-                className={cn(
-                  chipVariants(tab === t),
-                  t === 'Stats' ? 'w-11 justify-center px-0' : 'px-3.5',
-                )}
-              >
-                {t === 'Stats' ? (
-                  <ChartNoAxesColumn className="h-4 w-4" aria-hidden />
-                ) : (
-                  <>
-                    {t !== 'All' && (
-                      <span
-                        aria-hidden
-                        className="h-1.5 w-1.5 shrink-0 rounded-full"
-                        style={{ backgroundColor: `rgb(${rarityRgb(t)})` }}
-                      />
-                    )}
-                    {t}
-                  </>
-                )}
-              </button>
-            ))}
-          </div>
+          {!limit && (
+            <div
+              role="group"
+              aria-label="Filter pulls by tier"
+              className="flex flex-wrap gap-2 self-start"
+            >
+              {TABS.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  aria-pressed={tab === t}
+                  aria-label={t === 'Stats' ? 'Stats' : undefined}
+                  onClick={() => setTab(t)}
+                  className={cn(
+                    chipVariants(tab === t),
+                    t === 'Stats' ? 'w-11 justify-center px-0' : 'px-3.5',
+                  )}
+                >
+                  {t === 'Stats' ? (
+                    <ChartNoAxesColumn className="h-4 w-4" aria-hidden />
+                  ) : (
+                    <>
+                      {t !== 'All' && (
+                        <span
+                          aria-hidden
+                          className="h-1.5 w-1.5 shrink-0 rounded-full"
+                          style={{ backgroundColor: `rgb(${rarityRgb(t)})` }}
+                        />
+                      )}
+                      {t}
+                    </>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="@container min-w-0 @[56rem]:col-start-2 @[56rem]:row-span-2 @[56rem]:row-start-1">
             {tab === 'Stats' ? (
@@ -556,7 +567,7 @@ export function PullHistory({
                       key={shownScope}
                       className="grid grid-cols-1 @[46rem]:grid-cols-2"
                     >
-                      {pulls.map((pull, i) => (
+                      {shown.map((pull, i) => (
                         <li
                           key={pull.id}
                           className="pull-row-in border-b border-white/[0.08] motion-reduce:animate-none @[46rem]:odd:border-r"
@@ -687,7 +698,7 @@ export function PullHistory({
               // (time · pack · value) and the whole page pans sideways on phones.
               className="grid grid-cols-1 gap-2 @3xl:grid-cols-2"
             >
-              {pulls.map((pull, i) => (
+              {shown.map((pull, i) => (
                 <li
                   key={pull.id}
                   className="pull-row-in motion-reduce:animate-none"

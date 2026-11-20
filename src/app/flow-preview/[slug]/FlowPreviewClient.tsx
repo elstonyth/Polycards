@@ -2,35 +2,52 @@
 
 // TEMPORARY (WP-F flow groundwork): remove with ./page.tsx at integration.
 
-import { FlowChapters } from '@/components/pack-flow/FlowChapters';
+import { FocusStops } from '@/components/pack-flow/FocusStops';
 import {
   useFlowAddress,
   type FlowAddress,
 } from '@/components/pack-flow/flow-address';
-import { useFlowData } from '@/components/pack-flow/use-flow-data';
+import { markArrival } from '@/components/pack-stage/stage-arrival';
+import { useMediaQuery } from '@/lib/use-reveal';
 import type { FlowSeed } from '@/components/pack-flow/types';
 import { rm } from '@/lib/format';
 
-/** One focused pack: its live data, then the chapters with the stand-in. */
+/**
+ * One focused pack as a document: the stop blocks in page order under its
+ * front picture (the reduced-motion and no-stage form of the focused view).
+ */
 function FocusedPack({
   seed,
   address,
-  autoFocusHeading,
 }: {
   seed: FlowSeed;
   address: FlowAddress;
-  autoFocusHeading: boolean;
 }) {
-  const data = useFlowData(seed);
+  const desktop = useMediaQuery('(min-width: 1024px)');
+  const kinds =
+    seed.shape === 'capsule'
+      ? (['front', 'tophits', 'odds', 'pulls', 'closing'] as const)
+      : seed.back
+        ? (['front', 'tophits', 'odds', 'buyback', 'pulls', 'closing'] as const)
+        : (['front', 'tophits', 'pulls', 'closing'] as const);
   return (
-    <FlowChapters
-      key={seed.pack.id}
-      data={data}
-      onLeave={address.leave}
-      onGoToReel={address.enterReel}
-      entryId={address.entryId}
-      autoFocusHeading={autoFocusHeading}
-    />
+    <div className="px-fluid py-8">
+      {/* eslint-disable-next-line @next/next/no-img-element -- the static front */}
+      <img
+        src={seed.pack.image}
+        alt=""
+        className="mx-auto mb-8 h-[22rem] w-auto object-contain"
+      />
+      <FocusStops
+        key={seed.pack.id}
+        seed={seed}
+        kinds={kinds}
+        mode="document"
+        desktop={desktop}
+        leave={address.leave}
+        onGoToReel={address.enterReel}
+      />
+    </div>
   );
 }
 
@@ -93,15 +110,9 @@ export default function FlowPreviewClient({
   basePath: string;
   seeds: FlowSeed[];
 }) {
-  const address = useFlowAddress(basePath);
+  const address = useFlowAddress(basePath, { markArrival });
   if (mode === 'pack') {
-    return (
-      <FocusedPack
-        seed={seeds[0]!}
-        address={address}
-        autoFocusHeading={false}
-      />
-    );
+    return <FocusedPack seed={seeds[0]!} address={address} />;
   }
   const focused =
     address.location.kind === 'focus'
@@ -112,7 +123,7 @@ export default function FlowPreviewClient({
         )
       : undefined;
   return focused ? (
-    <FocusedPack seed={focused} address={address} autoFocusHeading />
+    <FocusedPack seed={focused} address={address} />
   ) : (
     <StandInStage seeds={seeds} address={address} />
   );

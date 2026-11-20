@@ -12,7 +12,7 @@ import { SPRING } from '@/components/ui/soft';
 
 /**
  * The swipeable row's parts, shared by the pack page's Top Hits rail
- * (PoolByRarity) and the homepage flow's tier walk (PackTierWalk): the row's
+ * (PoolByRarity, also in the homepage flow's Top Hits stop): the row's
  * scrolling (`useStrip`), its edge fade, the previous / next buttons and the
  * ticket prize tile. Moved here unchanged from PoolByRarity, where they were
  * private.

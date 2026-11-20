@@ -54,6 +54,7 @@ export function PoolByRarity({
   tierChances,
   onOpen,
   pokemon,
+  header = true,
 }: {
   /** Top-tier subset for the teaser rail, value-sorted. */
   rail: PackCard[];
@@ -65,6 +66,12 @@ export function PoolByRarity({
   onOpen: (card: PackCard) => void;
   /** false in a non-Pokémon pack: badges show only the cards' own sprites. */
   pokemon?: boolean;
+  /**
+   * false (the homepage flow): no title, blurb, "By rarity" button or dialog;
+   * the previous / next arrows stay, right-aligned above the row, and the row
+   * takes sideways touches only (vertical swipes page the flow).
+   */
+  header?: boolean;
 }) {
   const [modalOpen, setModalOpen] = useState(false);
   const hasRail = rail.length > 0;
@@ -101,14 +108,21 @@ export function PoolByRarity({
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
-        <div className="flex flex-col gap-2">
-          <SectionHead
-            eyebrow={`${view.cards.length} ${view.cards.length === 1 ? noun : `${noun}s`}`}
-            title={view.title}
-          />
-          <p className="text-sm text-neutral-400">{view.blurb}</p>
-        </div>
+      <div
+        className={cn(
+          'flex flex-wrap items-end justify-between gap-x-4 gap-y-3',
+          !header && 'justify-end empty:hidden',
+        )}
+      >
+        {header && (
+          <div className="flex flex-col gap-2">
+            <SectionHead
+              eyebrow={`${view.cards.length} ${view.cards.length === 1 ? noun : `${noun}s`}`}
+              title={view.title}
+            />
+            <p className="text-sm text-neutral-400">{view.blurb}</p>
+          </div>
+        )}
         <div className="flex shrink-0 items-center gap-2">
           {/* Only where the row runs past the screen, and not on a phone: a
               thumb swipes it, and the peeking tile already says so. */}
@@ -140,20 +154,22 @@ export function PoolByRarity({
           )}
           {/* Opens the same subset grouped by tier. The visible words are part
               of the label ("…grouped by rarity"), so voice control can name it. */}
-          <button
-            type="button"
-            onClick={() => setModalOpen(true)}
-            aria-haspopup="dialog"
-            aria-label={expandLabel}
-            className={cn(
-              'flex min-h-11 shrink-0 items-center gap-2 rounded-full bg-white/[0.06] pl-4 pr-3.5 text-[13px] font-semibold text-white outline-none ring-1 ring-white/10 transition-[background-color,transform] duration-300',
-              SPRING,
-              'hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/40 active:scale-[0.98] motion-reduce:transition-[background-color] motion-reduce:active:scale-100',
-            )}
-          >
-            By rarity
-            <LayoutGrid className="h-4 w-4" strokeWidth={1.5} aria-hidden />
-          </button>
+          {header && (
+            <button
+              type="button"
+              onClick={() => setModalOpen(true)}
+              aria-haspopup="dialog"
+              aria-label={expandLabel}
+              className={cn(
+                'flex min-h-11 shrink-0 items-center gap-2 rounded-full bg-white/[0.06] pl-4 pr-3.5 text-[13px] font-semibold text-white outline-none ring-1 ring-white/10 transition-[background-color,transform] duration-300',
+                SPRING,
+                'hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-white/40 active:scale-[0.98] motion-reduce:transition-[background-color] motion-reduce:active:scale-100',
+              )}
+            >
+              By rarity
+              <LayoutGrid className="h-4 w-4" strokeWidth={1.5} aria-hidden />
+            </button>
+          )}
         </div>
       </div>
       {/* Skipped entirely when the pack has no top-tier cards: the header and
@@ -166,6 +182,7 @@ export function PoolByRarity({
           <div
             {...strip.drag}
             onScroll={strip.onScroll}
+            data-focus-strip={header ? undefined : ''}
             // Ticket tiles are not controls, so nothing inside the strip can
             // take focus: the strip does, and the arrow keys then scroll it.
             {...(tickets
@@ -176,7 +193,7 @@ export function PoolByRarity({
             // tile's hover lift and its focus ring: the 4px of padding
             // (cancelled by the margin) is their room.
             // The scroll padding keeps a tile reached by Tab clear of the fade.
-            className="-m-1 flex cursor-grab scroll-px-[3.75rem] gap-3 overflow-x-auto rounded-[1.75rem] p-1 outline-none focus-visible:ring-2 focus-visible:ring-white/40 active:cursor-grabbing [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="-m-1 flex cursor-grab scroll-px-[3.75rem] gap-3 overflow-x-auto rounded-[1.75rem] p-1 outline-none focus-visible:ring-2 focus-visible:ring-white/40 active:cursor-grabbing [-ms-overflow-style:none] data-[focus-strip]:touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
             {(strip.grown ? rail : rail.slice(0, RAIL_FIRST_TILES)).map(
               (c, i) => (
@@ -203,16 +220,18 @@ export function PoolByRarity({
           </div>
         </div>
       )}
-      <PoolModal
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        pool={view.cards}
-        title={view.title}
-        tierChances={tierChances}
-        onOpen={onOpen}
-        pokemon={pokemon}
-        tickets={tickets}
-      />
+      {header && (
+        <PoolModal
+          open={modalOpen}
+          onClose={() => setModalOpen(false)}
+          pool={view.cards}
+          title={view.title}
+          tierChances={tierChances}
+          onOpen={onOpen}
+          pokemon={pokemon}
+          tickets={tickets}
+        />
+      )}
     </div>
   );
 }

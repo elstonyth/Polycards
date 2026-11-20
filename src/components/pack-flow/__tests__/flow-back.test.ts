@@ -3,7 +3,6 @@ import { ticketCard, type ResolvedPack } from '@/lib/packs-data';
 import { BUYBACK_RULE } from '@/components/pack-3d/pack-back-details';
 import { backFor, backKey, canTurn, shapeOf, withLive } from '../flow-back';
 import { flowSeed, flowSeedFromHighlights } from '../flow-seed';
-import { stopIndexAt, stopsFrom, beatOf, STOP_ANCHOR } from '../flow-stops';
 import type { PackPageData } from '@/lib/data/pack-page';
 
 const GOLD: ResolvedPack = {
@@ -166,59 +165,5 @@ describe('flowSeed (pack page) and flowSeedFromHighlights (homepage)', () => {
     });
     expect(seed.tiers?.tiers[0]?.cards?.[0]?.tickets).toBe(300);
     expect(seed.back).toBeNull();
-  });
-});
-
-describe('flow stops', () => {
-  it('the back at the wrapper top, each later stop where its top reaches 0.42 of the panel', () => {
-    const stops = stopsFrom(
-      100,
-      [
-        { kind: 'tier', top: 1000 },
-        { kind: 'tier', top: 1400 },
-        { kind: 'odds', top: 1900 },
-      ],
-      64,
-      700,
-    );
-    expect(stops).toEqual([
-      { y: 36, kind: 'back' },
-      { y: 1000 - 64 - STOP_ANCHOR * 700, kind: 'tier' },
-      { y: 1400 - 64 - STOP_ANCHOR * 700, kind: 'tier' },
-      { y: 1900 - 64 - STOP_ANCHOR * 700, kind: 'odds' },
-    ]);
-  });
-
-  it('never decreasing, never negative', () => {
-    const stops = stopsFrom(
-      0,
-      [
-        { kind: 'tier', top: 10 },
-        { kind: 'odds', top: 5 },
-      ],
-      64,
-      700,
-    );
-    expect(stops.map((s) => s.y)).toEqual([0, 0, 0]);
-  });
-
-  it('the rounded stop: halfway counts as the next', () => {
-    const stops = [
-      { y: 0, kind: 'back' as const },
-      { y: 400, kind: 'tier' as const },
-      { y: 800, kind: 'tier' as const },
-      { y: 1200, kind: 'odds' as const },
-    ];
-    expect(stopIndexAt(stops, 0)).toBe(0);
-    expect(stopIndexAt(stops, 199)).toBe(0);
-    expect(stopIndexAt(stops, 200)).toBe(1);
-    expect(stopIndexAt(stops, 1100)).toBe(3);
-    expect(stopIndexAt(stops, 5000)).toBe(3);
-    expect([0, 1, 2, 3].map((i) => beatOf(stops, i))).toEqual([
-      null,
-      0,
-      1,
-      null,
-    ]);
   });
 });

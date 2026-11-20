@@ -76,11 +76,10 @@ vi.mock('@/components/cards/CardDetailOverlay', () => ({
       : null,
 }));
 
-const { PackTierWalk, walkRows } = await import('../PackTierWalk');
 const sections = await import('../PackDetailSections');
 const rail = await import('../pool-rail');
 const { usePackLive, packTiersUrl } = await import('../use-pack-live');
-const { packTierRows, packTiersOf } = await import('@/lib/pack-tiers');
+const { packTiersOf } = await import('@/lib/pack-tiers');
 const { ticketCard } = await import('@/lib/packs-data');
 
 (
@@ -124,7 +123,6 @@ const GOLD: ResolvedPack = {
   icon: '/p.webp',
   buybackPercent: 95,
 };
-const CAPSULE = { prizeType: 'tickets' as const, categoryId: 'poly' };
 
 let host: HTMLDivElement;
 let root: Root;
@@ -139,125 +137,6 @@ afterEach(() => {
 });
 const show = (el: React.ReactElement) => act(() => root.render(el));
 const text = () => (host.textContent ?? '').replace(/\s+/g, ' ');
-
-describe('PackTierWalk', () => {
-  it('one row per top tier the pack has, rarest first; a missing tier is left out', () => {
-    show(
-      createElement(PackTierWalk, {
-        pack: GOLD,
-        tiers: packTierRows(DETAIL, false),
-        onOpenCard: vi.fn(),
-      }),
-    );
-    expect(host.querySelector('h2')?.textContent).toBe('Top Hits');
-    expect([...host.querySelectorAll('h3')].map((h) => h.textContent)).toEqual([
-      'Immortal',
-      'Mythical',
-    ]);
-    const lists = [...host.querySelectorAll('ul')];
-    expect(lists.map((l) => l.getAttribute('aria-label'))).toEqual([
-      'Immortal cards, 2',
-      'Mythical cards, 1',
-    ]);
-    expect(lists[0]!.querySelectorAll('li')).toHaveLength(2);
-    expect(text()).toContain('0.2% a pull');
-    expect(text()).toContain('RM 5,000.00 – RM 9,000.00');
-    expect(text()).toContain('2 cards');
-    // Lower tiers have no row here.
-    expect(text()).not.toContain('Common');
-  });
-
-  it('a tap opens the card', () => {
-    const onOpenCard = vi.fn();
-    show(
-      createElement(PackTierWalk, {
-        pack: GOLD,
-        tiers: packTierRows(DETAIL, false),
-        onOpenCard,
-      }),
-    );
-    act(() =>
-      host
-        .querySelector<HTMLButtonElement>(
-          'button[aria-label^="View details for Card 2"]',
-        )!
-        .click(),
-    );
-    expect(onOpenCard.mock.calls[0]?.[0].handle).toBe('card-2');
-  });
-
-  it('without pull odds: no chance, still the range and count', () => {
-    show(
-      createElement(PackTierWalk, {
-        pack: GOLD,
-        tiers: packTierRows({ ...DETAIL, pullOdds: null }, false),
-        onOpenCard: vi.fn(),
-      }),
-    );
-    expect(text()).not.toContain('a pull');
-    expect(text()).toContain('2 cards');
-  });
-
-  it('a capsule: prizes, ticket ranges, ticket tiles', () => {
-    const tickets: PackDetail = {
-      topHits: [],
-      pool: [
-        ticketCard(1000, 'Immortal'),
-        ticketCard(300, 'Immortal'),
-        ticketCard(5, 'Common'),
-      ],
-      pullOdds: { tiers: { Immortal: 1, Common: 99 } },
-    };
-    show(
-      createElement(PackTierWalk, {
-        pack: CAPSULE,
-        tiers: packTierRows(tickets, true),
-        onOpenCard: vi.fn(),
-      }),
-    );
-    expect(host.querySelector('ul')?.getAttribute('aria-label')).toBe(
-      'Immortal prizes, 2',
-    );
-    expect(text()).toContain('300 – 1,000 tickets');
-    expect(text()).toContain('2 prizes');
-    expect(host.querySelector('button[aria-label^="View details"]')).toBeNull();
-  });
-
-  it('a capsule with no top tier: one "All prizes" row, biggest first', () => {
-    const rows = walkRows(
-      packTierRows(
-        {
-          pool: [ticketCard(5, 'Common'), ticketCard(50, 'Rare')],
-          pullOdds: null,
-        },
-        true,
-      ).tiers,
-      true,
-    );
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.tier).toBeNull();
-    expect(rows[0]!.cards.map((c) => c.tickets)).toEqual([50, 5]);
-  });
-
-  it('a card pack with no top tier, or no tiers: nothing', () => {
-    show(
-      createElement(PackTierWalk, {
-        pack: GOLD,
-        tiers: packTierRows({ ...DETAIL, pool: [card(4, 'Common', 5)] }, false),
-        onOpenCard: vi.fn(),
-      }),
-    );
-    expect(host.innerHTML).toBe('');
-    show(
-      createElement(PackTierWalk, {
-        pack: GOLD,
-        tiers: null,
-        onOpenCard: vi.fn(),
-      }),
-    );
-    expect(host.innerHTML).toBe('');
-  });
-});
 
 describe('PackDetailSections', () => {
   function Page({
@@ -480,7 +359,6 @@ describe("the extracted parts never use Next's search-params hook", () => {
     'use-pack-buy.ts',
     'PackBuyControls.tsx',
     'PackDetailSections.tsx',
-    'PackTierWalk.tsx',
     'pool-rail.tsx',
     'use-pack-live.ts',
     'PackDetailClient.tsx',

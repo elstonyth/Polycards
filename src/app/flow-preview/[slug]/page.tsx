@@ -17,7 +17,8 @@ export const metadata: Metadata = {
 
 /**
  * The flow's chapters for one pack, with a flat stand-in where the 3D pack
- * will be. 404 unless `next dev` or the server runs with HOME_PREVIEW=1, as
+ * will be. 404 unless 
+ext dev` or the server runs with HOME_PREVIEW=1, as
  * /home-preview. Reading searchParams keeps the route dynamic, so the gate is
  * checked per request.
  *
@@ -71,6 +72,10 @@ export default async function FlowPreviewPage({
   const data = await loadPackPage(slug);
   if (!data) notFound();
   return (
-    <FlowPreviewClient mode="pack" basePath="/" seeds={[flowSeed(data)]} />
+    <FlowPreviewClient
+      mode="pack"
+      basePath="/home-preview"
+      seeds={[flowSeed(data)]}
+    />
   );
 }

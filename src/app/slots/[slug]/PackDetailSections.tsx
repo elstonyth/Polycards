@@ -121,11 +121,14 @@ export function PackPullOdds({
   tiers,
   counts = false,
   bare,
+  heading = true,
 }: {
   pack: Pick<Pack, 'prizeType'>;
   tiers: PackTierRows | null;
   counts?: boolean;
   bare?: boolean;
+  /** false: no title over the board (the homepage flow titles its stop). */
+  heading?: boolean;
 }) {
   if (!tiers) return null;
   const tickets = isTicketPack(pack);
@@ -141,14 +144,16 @@ export function PackPullOdds({
     <Section bare={bare} className="min-w-0">
       <OddsBoard
         heading={
-          <SectionHead
-            eyebrow={
-              rows.length > 0
-                ? `${rows.length} ${rows.length === 1 ? 'tier' : 'tiers'}`
-                : undefined
-            }
-            title="Pull Odds (by rarity)"
-          />
+          heading && (
+            <SectionHead
+              eyebrow={
+                rows.length > 0
+                  ? `${rows.length} ${rows.length === 1 ? 'tier' : 'tiers'}`
+                  : undefined
+              }
+              title="Pull Odds (by rarity)"
+            />
+          )
         }
         odds={rows}
         range={tiers.range}
@@ -171,11 +176,14 @@ export function PackRecentPulls({
   initial,
   onOpenCard,
   bare,
+  limit,
 }: {
   pack: Pick<Pack, 'id' | 'draft' | 'prizeType'>;
   initial: RecentFeed;
   onOpenCard?: OpenCard;
   bare?: boolean;
+  /** Only the newest this many pulls (the homepage flow). */
+  limit?: number;
 }) {
   if (pack.draft) return null;
   return (
@@ -206,6 +214,7 @@ export function PackRecentPulls({
         // null: /store/pulls/recent doesn't send them.
         onSelect={onOpenCard}
         noun={isTicketPack(pack) ? 'capsule' : 'pack'}
+        limit={limit}
       />
     </Section>
   );
