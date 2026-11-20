@@ -2,10 +2,11 @@
  * Pack stage data: the server's catalogue projected into the stage's own
  * `StagePack` shape (plan sections 2 and 3). Pure and server-safe.
  *
- * This is the ONLY pack-stage file that imports the 3D catalogue, and only its
- * sync lookup (data, no three.js). No client file may import this module: the
+ * This is the ONLY pack-stage file that imports the 3D catalogue and the 3D
+ * capsule set, and only their sync lookups (data, no three.js). No client file may import this module: the
  * client gets the picture URLs as props, inside each `StagePack`.
  */
+import { capsule3dAssets } from '@/components/pack-3d/capsule';
 import { pack3dAssets } from '@/components/pack-3d/catalog';
 import { rm, rm0 } from '@/lib/format';
 import {
@@ -71,7 +72,24 @@ const catalogueArt: Art3dLookup = (id) => {
     : null;
 };
 
-/** One pack as the stage draws it. Capsules (ticket packs) never get 3D. */
+/** A capsule's 3D set: its own picture, at the size the model was fitted to. */
+const capsuleArt = (pack: Pack): StageArt | null => {
+  const assets = capsule3dAssets(pack.id);
+  return assets
+    ? {
+        front: pack.image,
+        frontHalf: pack.image,
+        width: assets.picture.width,
+        height: assets.picture.height,
+        shape: 'capsule',
+      }
+    : null;
+};
+
+/**
+ * One pack as the stage draws it. A capsule (ticket pack) gets 3D from the
+ * capsule set (`capsule3dAssets`), never from the sleeve catalogue.
+ */
 export function toStagePack(
   pack: Pack,
   chase: PackCard | null,
@@ -86,7 +104,7 @@ export function toStagePack(
     href: packHref(pack.id, 1),
     soldOut: pack.inStock === false,
     image: pack.image,
-    art3d: ticket ? null : art3dOf(pack.id),
+    art3d: ticket ? capsuleArt(pack) : art3dOf(pack.id),
     // getPackHighlights only hands over a priced card; a ticket has no chase.
     chaseLabel: !ticket && chase?.priceMyr != null ? rm(chase.priceMyr) : null,
     buybackPercent: pack.buybackPercent ?? FLAT_BUYBACK_PERCENT,

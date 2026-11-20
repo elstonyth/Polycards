@@ -13,11 +13,17 @@
 import type { Observable } from './stage-motion';
 
 export type StageMode = 'pending' | 'flat' | '3d' | 'lite';
+/**
+ * ADDITION (WP-G): `shape: 'capsule'` marks a capsule's 3D set; its `front` and
+ * `frontHalf` are the pack's own picture and `width` x `height` the picture
+ * its model was fitted to. Absent: a sleeve.
+ */
 export type StageArt = {
   front: string;
   frontHalf: string;
   width: number;
   height: number;
+  shape?: 'capsule';
 };
 export type StagePack = {
   id: string;

@@ -71,7 +71,7 @@ describe('toStagePack', () => {
     expect(p.art3d).toEqual(art);
   });
 
-  it('never gives a capsule (ticket pack) a 3D set, a chase or a boost', () => {
+  it('never gives a capsule (ticket pack) a sleeve set, a chase or a boost', () => {
     const p = toStagePack(
       pack({ id: 'gold-pack', prizeType: 'tickets', boost: undefined }),
       chase(500),
@@ -81,6 +81,29 @@ describe('toStagePack', () => {
     expect(p.art3d).toBeNull();
     expect(p.chaseLabel).toBeNull();
     expect(p.boost).toBe(false);
+  });
+
+  it('gives a capsule with a 3D capsule set its own picture at the fitted size', () => {
+    const p = toStagePack(
+      pack({
+        id: 'gold-capsule',
+        prizeType: 'tickets',
+        image: '/images/polycards/capsulegold-pack.webp',
+      }),
+      null,
+      () => ({ front: '/f', frontHalf: '/fh', width: 1, height: 1 }),
+    );
+    expect(p.art3d).toEqual({
+      front: '/images/polycards/capsulegold-pack.webp',
+      frontHalf: '/images/polycards/capsulegold-pack.webp',
+      width: 940,
+      height: 1666,
+      shape: 'capsule',
+    });
+    // a ticket pack with no capsule set keeps the flat picture
+    expect(
+      toStagePack(pack({ id: 'mystery', prizeType: 'tickets' }), null).art3d,
+    ).toBeNull();
   });
 
   it('defaults the buyback to the flat rate', () => {

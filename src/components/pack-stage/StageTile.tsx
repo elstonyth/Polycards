@@ -151,35 +151,37 @@ export default function StageTile({
 
   // A 3D tile's picture is the bundled half front, byte for byte the texture the
   // 3D pack loads (CORS mode included, so both share one HTTP cache entry).
-  const picture = pack.art3d ? (
-    // eslint-disable-next-line @next/next/no-img-element -- see above
-    <img
-      src={pack.art3d.frontHalf}
-      crossOrigin="anonymous"
-      alt=""
-      width={Math.round(pack.art3d.width / 2)}
-      height={Math.round(pack.art3d.height / 2)}
-      draggable={false}
-      decoding="async"
-      loading={eager ? 'eager' : 'lazy'}
-      fetchPriority={priority ? 'high' : undefined}
-      className={styles.pic}
-    />
-  ) : (
-    <Image
-      src={pack.image}
-      alt=""
-      width={300}
-      height={540}
-      draggable={false}
-      // Operator-entered art can live on any host; bypass the optimizer for
-      // remote art only, as the shelf and the catalogue do.
-      unoptimized={!isOptimizableImage(pack.image)}
-      priority={priority}
-      loading={priority ? undefined : eager ? 'eager' : 'lazy'}
-      className={styles.pic}
-    />
-  );
+  // A capsule keeps its catalogue image (its 3D set is drawn from that picture).
+  const picture =
+    pack.art3d && !pack.ticket ? (
+      // eslint-disable-next-line @next/next/no-img-element -- see above
+      <img
+        src={pack.art3d.frontHalf}
+        crossOrigin="anonymous"
+        alt=""
+        width={Math.round(pack.art3d.width / 2)}
+        height={Math.round(pack.art3d.height / 2)}
+        draggable={false}
+        decoding="async"
+        loading={eager ? 'eager' : 'lazy'}
+        fetchPriority={priority ? 'high' : undefined}
+        className={styles.pic}
+      />
+    ) : (
+      <Image
+        src={pack.image}
+        alt=""
+        width={300}
+        height={540}
+        draggable={false}
+        // Operator-entered art can live on any host; bypass the optimizer for
+        // remote art only, as the shelf and the catalogue do.
+        unoptimized={!isOptimizableImage(pack.image)}
+        priority={priority}
+        loading={priority ? undefined : eager ? 'eager' : 'lazy'}
+        className={styles.pic}
+      />
+    );
 
   const body = (
     <>

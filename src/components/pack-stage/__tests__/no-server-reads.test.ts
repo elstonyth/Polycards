@@ -43,6 +43,10 @@ const THREE =
 const PACK_3D =
   /['"](?:@\/components\/pack-3d|(?:\.\.\/)+pack-3d)(\/[^'"]*)?['"]/g;
 
+/** The sync lookups: the sleeve catalogue's and the capsule set's index only. */
+const lookupOnly = (sub: string) =>
+  sub.startsWith('/catalog') || sub === '/capsule' || sub === '/capsule/index';
+
 describe('pack-stage import guards', () => {
   it('finds the stage files', () => {
     expect(files.some((f) => f.rel === 'Stage3dProvider.tsx')).toBe(true);
@@ -69,6 +73,9 @@ describe('pack-stage import guards', () => {
       '/catalog/lookup',
     ]);
     expect(p3("import { z } from './pack-stage-3d';")).toEqual([]);
+    expect(lookupOnly('/capsule')).toBe(true);
+    expect(lookupOnly('/capsule/build')).toBe(false);
+    expect(lookupOnly('/capsule-x')).toBe(false);
   });
 
   it('never reads cookies, headers or search params', () => {
@@ -93,8 +100,7 @@ describe('pack-stage import guards', () => {
       if (f.rel.startsWith('runtime/')) continue;
       for (const m of f.src.matchAll(PACK_3D)) {
         const sub = m[1] ?? '';
-        const allowed =
-          f.rel === 'stage-packs.ts' && sub.startsWith('/catalog');
+        const allowed = f.rel === 'stage-packs.ts' && lookupOnly(sub);
         if (!allowed) hits.push(`${f.rel}: ${m[0]}`);
       }
     }

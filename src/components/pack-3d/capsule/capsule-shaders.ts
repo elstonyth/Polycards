@@ -104,6 +104,7 @@ uniform float uSpec;       // specular glint on the raised edge
 uniform float uAO;         // soft contact shade round the logo
 uniform float uAOWidth;
 uniform float uOpacity;
+uniform float uDim;       // light multiplier (sold out, the row light)
 varying vec3 vViewPos;
 varying vec3 vN;
 varying vec3 vTp;
@@ -192,7 +193,7 @@ void main() {
   vec3 ink = e * clamp(1.0 + uEdgeShade * lit, 0.0, 2.0) + uSpec * es * hp * clamp(4.0 * lit, 0.0, 1.0) * vec3(1.0, 0.97, 0.92);
   float ao = 1.0 - uAO * (1.0 - smoothstep(0.0, uAOWidth, -d)) * step(d, 0.0);
   vec3 col = mix(cap * ao, ink, cover);
-  gl_FragColor = vec4(col, uOpacity);
+  gl_FragColor = vec4(col * uDim, uOpacity);
   #include <colorspace_fragment>
 }
 `;
@@ -240,6 +241,7 @@ uniform sampler2D uMap;
 uniform vec4 uRect;   // picture x0, y0 (from the top), w, h
 uniform float uBackDim;
 uniform float uOpacity;
+uniform float uDim;       // light multiplier (sold out, the row light)
 varying vec3 vClipF;
 varying vec3 vClipB;
 varying float vFacing;
@@ -253,7 +255,7 @@ void main() {
   vec3 f = texture2D(uMap, cropUV(vClipF)).rgb;
   vec3 b = texture2D(uMap, cropUV(vClipB)).rgb * uBackDim;
   float w = smoothstep(-0.06, 0.06, vFacing);
-  gl_FragColor = vec4(mix(b, f, w), uOpacity);
+  gl_FragColor = vec4(mix(b, f, w) * uDim, uOpacity);
   #include <colorspace_fragment>
 }
 `;
@@ -277,12 +279,13 @@ void main() {
 export const GLASS_FRAGMENT = /* glsl */ `
 uniform sampler2D uMatcap;
 uniform float uOpacity;
+uniform float uDim;       // light multiplier (sold out, the row light)
 varying vec3 vN;
 varying vec3 vViewPos;
 ${MATCAP_UV}
 void main() {
   vec4 m = texture2D(uMatcap, matcapUV(normalize(vN), normalize(vViewPos)));
-  gl_FragColor = vec4(m.rgb, m.a);
+  gl_FragColor = vec4(m.rgb * uDim, m.a);
   #include <colorspace_fragment>
   gl_FragColor.rgb *= gl_FragColor.a;
   gl_FragColor *= uOpacity;

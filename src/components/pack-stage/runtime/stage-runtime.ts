@@ -34,8 +34,17 @@ import type {
   StageRuntimeStats,
   StageState,
 } from '../contract';
+import type { Capsule3dModel } from '@/components/pack-3d/capsule/build';
 import { clamp01, poseAt, stageOpacity, stageSpring } from '../stage-pose';
-import { LEAN } from '../stage-spin-math';
+import { CAPSULE_LEAN, LEAN } from '../stage-spin-math';
+import {
+  capsuleEstimateBytes,
+  capsuleMaps,
+  capsuleSharedBytes,
+  openStageCapsule,
+  paintCapsule,
+  type StageCapsuleHandle,
+} from './stage-capsule';
 import {
   CIAO_ROW,
   ciaoCopies,
@@ -87,8 +96,11 @@ type VariantState =
 
 type Variant = {
   res: Res;
-  handle: Pack3d;
+  handle: Pack3d | StageCapsuleHandle;
+  /** A sleeve's model. */
   model: PackModel | null;
+  /** A capsule's model (a capsule slot has no `model`). */
+  capsule: Capsule3dModel | null;
   bytes: number;
   state: VariantState;
   baseEnv: number;
@@ -122,17 +134,27 @@ function cloneForCopy(model: PackModel): THREE.Object3D {
 function disposeCopies(v: Variant) {
   for (const c of v.copies.values()) {
     c.removeFromParent();
+    if (v.capsule) {
+      // a capsule clone: its own materials, the model's geometry and textures
+      (c as Capsule3dModel).dispose();
+      continue;
+    }
     const mesh = c.userData.mesh as THREE.Mesh | undefined;
     if (mesh) (mesh.material as THREE.Material).dispose();
   }
   v.copies.clear();
 }
 
+/** The object a variant draws (sleeve or capsule). */
+const drawObject = (v: Variant): THREE.Object3D | null => v.model ?? v.capsule;
+
 type Slot = {
   key: string;
   id: string;
   index: number;
   soldOut: boolean;
+  /** A capsule (Poly): the capsule model, lean mode, no back. */
+  capsule: boolean;
   width: number;
   height: number;
   half: Variant | null;
@@ -180,6 +202,9 @@ export type StageRuntimeDebug = {
   bufferBytes: number;
   textureBytes: number;
   budgetBytes: number;
+  /** Draw calls and triangles of the last frame drawn. */
+  calls: number;
+  triangles: number;
   failed: StageRuntimeFailReason | null;
   /** Spin row repeats drawn in the last frame, and whether the band covers the host. */
   copies: number;
@@ -343,6 +368,7 @@ export function createStageRuntime(
   const estimateBytes = (slot: Slot, res: Res): number => {
     const v = res === 'half' ? slot.half : slot.full;
     if (v && v.bytes > 0) return v.bytes;
+    if (slot.capsule) return capsuleEstimateBytes(slot.id, res);
     if (res === 'full') return textureBytes(slot.width, slot.height);
     const [w, h] = halfSize(slot.width, slot.height);
     return textureBytes(w, h);
@@ -384,7 +410,8 @@ export function createStageRuntime(
       ? slots.find((x) => x.id === fo.id && x.index === fo.ctx.index)
       : undefined;
     let target: Variant | null = null;
-    if (fo?.details && slot) {
+    // a capsule never shows a back
+    if (fo?.details && slot && !slot.capsule) {
       target =
         slot.wantFull && !slot.fullFailed
           ? slot.full?.state === 'uploaded'
@@ -449,7 +476,9 @@ export function createStageRuntime(
     v.state = 'disposed';
     disposeCopies(v);
     if (v.model) v.model.removeFromParent();
+    if (v.capsule) v.capsule.removeFromParent();
     v.model = null;
+    v.capsule = null;
     v.handle.dispose();
     counters.disposals++;
     needsDraw = true;
@@ -474,16 +503,23 @@ export function createStageRuntime(
   const startVariant = (slot: Slot, res: Res): Variant | null => {
     const st = stage;
     if (!st || dead()) return null;
-    const anisotropy = st.renderer.capabilities.getMaxAnisotropy();
-    const handle = openPack3d(slot.id, {
-      resolution: res,
-      envMap: st.environment.texture,
-      anisotropy:
-        tier === 'lite'
-          ? Math.min(anisotropy, LITE_MAX_ANISOTROPY)
-          : anisotropy,
-      foil: tier === 'lite' ? LITE_FOIL : undefined,
-    });
+    const maxAniso = st.renderer.capabilities.getMaxAnisotropy();
+    const anisotropy =
+      tier === 'lite' ? Math.min(maxAniso, LITE_MAX_ANISOTROPY) : maxAniso;
+    // The model entry point dispatches on shape: a capsule's own module, or
+    // the sleeve catalogue.
+    const capsuleHandle = slot.capsule
+      ? openStageCapsule(slot.id, res, anisotropy)
+      : null;
+    const sleeveHandle = slot.capsule
+      ? null
+      : openPack3d(slot.id, {
+          resolution: res,
+          envMap: st.environment.texture,
+          anisotropy,
+          foil: tier === 'lite' ? LITE_FOIL : undefined,
+        });
+    const handle = capsuleHandle ?? sleeveHandle;
     if (!handle) {
       if (res === 'half') slot.halfFailed = true;
       else slot.fullFailed = true;
@@ -493,6 +529,7 @@ export function createStageRuntime(
       res,
       handle,
       model: null,
+      capsule: null,
       bytes: 0,
       state: 'loading',
       baseEnv: 1,
@@ -508,19 +545,27 @@ export function createStageRuntime(
       else slot.fullFailed = true;
       v.handle.dispose();
     };
-    handle
-      .model()
-      .then(
-        async (model) => {
-          if (v.state !== 'loading' || dead()) return;
+    const built: Promise<THREE.Object3D> = capsuleHandle
+      ? capsuleHandle.model().then((model) => {
+          if (v.state === 'loading' && !dead()) v.capsule = model;
+          return model;
+        })
+      : sleeveHandle!.model().then((model) => {
+          if (v.state !== 'loading' || dead()) return model;
           const material = model.material;
           // Fade by slot opacity without a second program: transparent from
           // the start (at opacity 1 it draws exactly as an opaque pack).
           material.transparent = true;
           v.baseEnv = material.envMapIntensity;
           v.baseGlow = material.emissiveIntensity;
-          v.bytes = handle.textures().reduce((s, t) => s + t.bytes, 0);
           v.model = model;
+          return model;
+        });
+    built
+      .then(
+        async (model) => {
+          if (v.state !== 'loading' || dead()) return;
+          v.bytes = handle.textures().reduce((s, t) => s + t.bytes, 0);
           v.state = 'compiling';
           // Programs are shared, so this is instant after the first pack;
           // either way no frame ever compiles a shader synchronously.
@@ -544,10 +589,15 @@ export function createStageRuntime(
   /** Uploads one variant's front texture and puts it in the scene. */
   const upload = (v: Variant) => {
     const st = stage;
-    const model = v.model;
+    const model = drawObject(v);
     if (!st || !model || v.state !== 'built') return;
-    const map = model.material.map;
-    if (map) st.renderer.initTexture(map);
+    if (v.capsule) {
+      // a capsule's textures are small (matcaps, its contents): all at once
+      for (const t of capsuleMaps(v.capsule)) st.renderer.initTexture(t);
+    } else {
+      const map = v.model?.material.map;
+      if (map) st.renderer.initTexture(map);
+    }
     model.visible = false;
     st.scene.add(model);
     v.state = 'uploaded';
@@ -724,6 +774,7 @@ export function createStageRuntime(
     id: p.id,
     index: p.index,
     soldOut: p.soldOut,
+    capsule: p.art.shape === 'capsule',
     width: p.art.width,
     height: p.art.height,
     half: null,
@@ -1064,10 +1115,11 @@ export function createStageRuntime(
           const shown = drawnVariant(slot);
           for (const v of [slot.half, slot.full]) {
             if (!v || v === shown) continue;
-            if (v.model) v.model.visible = false;
+            const o = drawObject(v);
+            if (o) o.visible = false;
             for (const c of v.copies.values()) c.visible = false;
           }
-          const model = shown?.model;
+          const model = shown ? drawObject(shown) : null;
           if (!shown || !model) continue;
           // One context for the CSS tiles and the canvas: the Ciao row, its
           // exit, the row's own fade (stage-pose composes the rest).
@@ -1075,11 +1127,12 @@ export function createStageRuntime(
             spin: {
               count: n,
               turn: 0,
-              lean: LEAN,
+              lean: slot.capsule ? CAPSULE_LEAN : LEAN,
               spinPose: ciaoPose,
               soldOut: slot.soldOut,
               exit: s.exit,
               panel,
+              capsule: slot.capsule,
             },
             spinOpacity: ciaoOpacity,
             compose: composePose,
@@ -1107,17 +1160,26 @@ export function createStageRuntime(
           const slotX = l.cx + (slot.index - track) * l.step;
           const paint = (
             obj: THREE.Object3D,
-            m: THREE.MeshPhysicalMaterial,
             pose: ReturnType<typeof poseAt>,
             opacity: number,
           ) => {
             // the pose is in layout px; the fitted art height only scales it
             placeModel(obj, pose, slotX, fitted, hostW, hostH);
-            m.opacity = opacity;
-            m.color.setScalar(pose.dim);
-            m.emissiveIntensity = shown.baseGlow * pose.dim;
-            m.envMapIntensity =
-              shown.baseEnv * Math.pow(Math.max(0, pose.dim), ENV_DIM_EXPONENT);
+            if (shown.capsule) {
+              paintCapsule(obj as Capsule3dModel, pose, opacity);
+            } else {
+              const m = (
+                obj === model
+                  ? shown.model?.material
+                  : (obj.userData.mesh as THREE.Mesh).material
+              ) as THREE.MeshPhysicalMaterial;
+              m.opacity = opacity;
+              m.color.setScalar(pose.dim);
+              m.emissiveIntensity = shown.baseGlow * pose.dim;
+              m.envMapIntensity =
+                shown.baseEnv *
+                Math.pow(Math.max(0, pose.dim), ENV_DIM_EXPONENT);
+            }
             obj.visible = true;
             obj.updateMatrixWorld(true);
           };
@@ -1136,7 +1198,9 @@ export function createStageRuntime(
             }
             let c = have;
             if (!c) {
-              c = cloneForCopy(model);
+              c = shown.capsule
+                ? shown.capsule.clone()
+                : cloneForCopy(shown.model!);
               shown.copies.set(o, c);
               st.scene.add(c);
             }
@@ -1144,8 +1208,7 @@ export function createStageRuntime(
               ...ctx,
               spin: { ...ctx.spin!, copy: o },
             });
-            const mesh = c.userData.mesh as THREE.Mesh;
-            paint(c, mesh.material as THREE.MeshPhysicalMaterial, cpose, op);
+            paint(c, cpose, op);
             copiesDrawn++;
           }
           // The same fade as the CSS tiles: reach (the row's, in the spin) and the category switch.
@@ -1157,16 +1220,23 @@ export function createStageRuntime(
             continue;
           }
           const pose = poseAt(s, slot.index, l, desktop, slot.soldOut, ctx);
-          paint(model, model.material, pose, opacity);
-          if (focused && fo && fctx) {
+          paint(model, pose, opacity);
+          const sleeve = shown.model;
+          if (focused && fo && fctx && sleeve) {
             const sp = fo.spot(s.focus, fctx);
-            if (spotted && spotted !== model.material)
+            if (spotted && spotted !== sleeve.material)
               spotted.setSpot({ on: 0, rect: sp.rect });
-            model.material.setSpot(sp);
-            spotted = model.material;
+            sleeve.material.setSpot(sp);
+            spotted = sleeve.material;
             lastSpot = sp;
           }
-          if (frustum.intersectsObject(model.mesh)) live.push(slot.id);
+          // a capsule has no spotlight: the last one set goes out
+          if (focused && !sleeve && spotted) {
+            spotted.setSpot({ on: 0, rect: { x0: 0, y0: 0, x1: 1, y1: 1 } });
+            spotted = null;
+          }
+          const bounds = sleeve ? sleeve.mesh : shown.capsule?.meshes.cap;
+          if (bounds && frustum.intersectsObject(bounds)) live.push(slot.id);
         }
         lastCopies = copiesDrawn;
         st.renderer.render(st.scene, st.camera);
@@ -1199,6 +1269,17 @@ export function createStageRuntime(
     }
   };
 
+  /** The capsules' shared logo mask, once per resolution an uploaded capsule uses. */
+  const capsuleShared = (): number => {
+    const res = new Set<Res>();
+    for (const s of [...slots, ...staged.values()])
+      for (const v of [s.half, s.full])
+        if (v?.capsule && v.state === 'uploaded') res.add(v.res);
+    let b = 0;
+    for (const r of res) b += capsuleSharedBytes(r);
+    return b;
+  };
+
   const stats = (): StageRuntimeStats => {
     if (finalInfo) return finalInfo;
     const info = stage?.renderer.info;
@@ -1211,6 +1292,7 @@ export function createStageRuntime(
         ? bufferBytes +
           stage.environmentBytes +
           uploadedBytes +
+          capsuleShared() +
           (focusBack && focusBack.v.state !== 'disposed'
             ? focusBack.v.handle.canvasBytes()
             : 0)
@@ -1241,8 +1323,10 @@ export function createStageRuntime(
       samples: stage?.samples ?? 0,
       environmentBytes: stage?.environmentBytes ?? 0,
       bufferBytes,
-      textureBytes: uploadedBytes,
+      textureBytes: uploadedBytes + capsuleShared(),
       budgetBytes: budget(),
+      calls: stage?.renderer.info.render.calls ?? 0,
+      triangles: stage?.renderer.info.render.triangles ?? 0,
       failed,
       copies: lastCopies,
       spinBand,

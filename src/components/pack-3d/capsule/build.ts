@@ -142,6 +142,11 @@ export type Capsule3dModel = THREE.Group & {
   lean(yawDeg: number, pitchDeg: number): void;
   /** 0..1, for fades (1 draws exactly as opaque). */
   setOpacity(opacity: number): void;
+  /** Light multiplier on every surface (1 draws as built). */
+  setDim(dim: number): void;
+  /** A second model sharing this one's geometry and textures, with its own
+   *  materials, lean and opacity; its dispose() frees its materials only. */
+  clone(): Capsule3dModel;
   /** Frees the geometry and materials (textures belong to the handle). */
   dispose(): void;
 };
@@ -450,145 +455,170 @@ export function openCapsule3d(
       const p = assets.logo[b];
       return new THREE.Vector4(p.k, p.phi0, p.m0, p.inflate);
     };
-    const opacity = { value: 1 };
-    const lean = { value: new THREE.Vector2(0, 0) };
+    const geos = {
+      cap: geometryOf(shapes.cap),
+      contents: geometryOf(shapes.contents),
+      glass: geometryOf(shapes.glass),
+    };
     const glitter = assets.cap === 'glitter' && !!tex('detail');
-    const capMat = new THREE.ShaderMaterial({
-      name: `capsule-${id}-cap`,
-      vertexShader: CAP_VERTEX,
-      fragmentShader: CAP_FRAGMENT,
-      defines: glitter ? { USE_DETAIL: '' } : {},
-      uniforms: {
-        uHC: { value: fit.HC },
-        uMatcap: { value: tex('cap') },
-        uLogoMatcap: { value: tex('logo-ink') },
-        uLogoSdf: { value: logoTexture },
-        uMark: { value: place('mark') },
-        uWord: { value: place('word') },
-        uMarkBox: { value: box('mark') },
-        uWordBox: { value: box('word') },
-        uMarkAnchor: {
-          value: new THREE.Vector2(atlas.blocks.mark.cx, atlas.blocks.mark.cy),
+    // `owner`: the model frees the geometry too; a clone frees its materials only
+    const makeGroup = (owner: boolean): Capsule3dModel => {
+      const opacity = { value: 1 };
+      const dim = { value: 1 };
+      const lean = { value: new THREE.Vector2(0, 0) };
+      const capMat = new THREE.ShaderMaterial({
+        name: `capsule-${id}-cap`,
+        vertexShader: CAP_VERTEX,
+        fragmentShader: CAP_FRAGMENT,
+        defines: glitter ? { USE_DETAIL: '' } : {},
+        uniforms: {
+          uHC: { value: fit.HC },
+          uMatcap: { value: tex('cap') },
+          uLogoMatcap: { value: tex('logo-ink') },
+          uLogoSdf: { value: logoTexture },
+          uMark: { value: place('mark') },
+          uWord: { value: place('word') },
+          uMarkBox: { value: box('mark') },
+          uWordBox: { value: box('word') },
+          uMarkAnchor: {
+            value: new THREE.Vector2(
+              atlas.blocks.mark.cx,
+              atlas.blocks.mark.cy,
+            ),
+          },
+          uWordAnchor: {
+            value: new THREE.Vector2(
+              atlas.blocks.word.cx,
+              atlas.blocks.word.cy,
+            ),
+          },
+          uMarkRect: { value: rectV4(atlasFile.rects.mark) },
+          uWordRect: { value: rectV4(atlasFile.rects.word) },
+          uSdfTexel: {
+            value: new THREE.Vector2(1 / atlasFile.width, 1 / atlasFile.height),
+          },
+          uSdfPpu: { value: ppu },
+          uSdfRange: { value: atlas.range },
+          uBevel: { value: look.bevel },
+          uRelief: { value: look.relief },
+          uEdgeShade: { value: look.edgeShade },
+          uSpec: { value: look.spec },
+          uAO: { value: look.ao },
+          uAOWidth: { value: look.aoWidth },
+          uOpacity: opacity,
+          uDim: dim,
+          uRestMVP: { value: rest.mvp },
+          uPhiC: { value: Math.atan2(rest.camLocal.x, rest.camLocal.z) },
+          uBand: { value: look.bandDeg * DEG },
+          uCamLocal: { value: rest.camLocal },
+          uDetail: { value: tex('detail') },
+          uDetailRect: { value: rectV4(assets.detailRect ?? [0, 0, 1, 1]) },
+          uDetailSize: {
+            value: new THREE.Vector2(
+              set.detail?.width ?? 1,
+              set.detail?.height ?? 1,
+            ),
+          },
+          uLean: lean,
         },
-        uWordAnchor: {
-          value: new THREE.Vector2(atlas.blocks.word.cx, atlas.blocks.word.cy),
+        toneMapped: false,
+      });
+      const contentsMat = new THREE.ShaderMaterial({
+        name: `capsule-${id}-contents`,
+        vertexShader: CONTENTS_VERTEX,
+        fragmentShader: CONTENTS_FRAGMENT,
+        uniforms: {
+          uMap: { value: tex('contents') },
+          uRect: { value: rectV4(assets.contentsRect) },
+          uRestMVP: { value: rest.mvp },
+          uCamLocal: { value: rest.camLocal },
+          uRi: { value: CONTENTS_RADIUS },
+          uHC: { value: fit.HC },
+          uYmin: { value: -fit.HC - 0.55 },
+          uYmax: { value: fit.SEAM - 0.1 },
+          uShift: { value: 0.62 },
+          uBackDim: { value: 0.85 },
+          uOpacity: opacity,
+          uDim: dim,
         },
-        uMarkRect: { value: rectV4(atlasFile.rects.mark) },
-        uWordRect: { value: rectV4(atlasFile.rects.word) },
-        uSdfTexel: {
-          value: new THREE.Vector2(1 / atlasFile.width, 1 / atlasFile.height),
+        toneMapped: false,
+      });
+      const glassMat = new THREE.ShaderMaterial({
+        name: `capsule-${id}-glass`,
+        vertexShader: GLASS_VERTEX,
+        fragmentShader: GLASS_FRAGMENT,
+        uniforms: {
+          uHC: { value: fit.HC },
+          uMatcap: { value: tex('glass') },
+          uOpacity: opacity,
+          uDim: dim,
         },
-        uSdfPpu: { value: ppu },
-        uSdfRange: { value: atlas.range },
-        uBevel: { value: look.bevel },
-        uRelief: { value: look.relief },
-        uEdgeShade: { value: look.edgeShade },
-        uSpec: { value: look.spec },
-        uAO: { value: look.ao },
-        uAOWidth: { value: look.aoWidth },
-        uOpacity: opacity,
-        uRestMVP: { value: rest.mvp },
-        uPhiC: { value: Math.atan2(rest.camLocal.x, rest.camLocal.z) },
-        uBand: { value: look.bandDeg * DEG },
-        uCamLocal: { value: rest.camLocal },
-        uDetail: { value: tex('detail') },
-        uDetailRect: { value: rectV4(assets.detailRect ?? [0, 0, 1, 1]) },
-        uDetailSize: {
-          value: new THREE.Vector2(
-            set.detail?.width ?? 1,
-            set.detail?.height ?? 1,
-          ),
-        },
-        uLean: lean,
-      },
-      toneMapped: false,
-    });
-    const contentsMat = new THREE.ShaderMaterial({
-      name: `capsule-${id}-contents`,
-      vertexShader: CONTENTS_VERTEX,
-      fragmentShader: CONTENTS_FRAGMENT,
-      uniforms: {
-        uMap: { value: tex('contents') },
-        uRect: { value: rectV4(assets.contentsRect) },
-        uRestMVP: { value: rest.mvp },
-        uCamLocal: { value: rest.camLocal },
-        uRi: { value: CONTENTS_RADIUS },
-        uHC: { value: fit.HC },
-        uYmin: { value: -fit.HC - 0.55 },
-        uYmax: { value: fit.SEAM - 0.1 },
-        uShift: { value: 0.62 },
-        uBackDim: { value: 0.85 },
-        uOpacity: opacity,
-      },
-      toneMapped: false,
-    });
-    const glassMat = new THREE.ShaderMaterial({
-      name: `capsule-${id}-glass`,
-      vertexShader: GLASS_VERTEX,
-      fragmentShader: GLASS_FRAGMENT,
-      uniforms: {
-        uHC: { value: fit.HC },
-        uMatcap: { value: tex('glass') },
-        uOpacity: opacity,
-      },
-      transparent: true,
-      depthWrite: false,
-      toneMapped: false,
-      blending: THREE.CustomBlending,
-      blendSrc: THREE.OneFactor,
-      blendDst: THREE.OneMinusSrcAlphaFactor,
-      blendSrcAlpha: THREE.OneFactor,
-      blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
-    });
-    const cap = new THREE.Mesh(geometryOf(shapes.cap), capMat);
-    cap.name = 'capsule-cap';
-    const contents = new THREE.Mesh(geometryOf(shapes.contents), contentsMat);
-    contents.name = 'capsule-contents';
-    const glass = new THREE.Mesh(geometryOf(shapes.glass), glassMat);
-    glass.name = 'capsule-glass';
-    glass.renderOrder = 2;
+        transparent: true,
+        depthWrite: false,
+        toneMapped: false,
+        blending: THREE.CustomBlending,
+        blendSrc: THREE.OneFactor,
+        blendDst: THREE.OneMinusSrcAlphaFactor,
+        blendSrcAlpha: THREE.OneFactor,
+        blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
+      });
+      const cap = new THREE.Mesh(geos.cap, capMat);
+      cap.name = 'capsule-cap';
+      const contents = new THREE.Mesh(geos.contents, contentsMat);
+      contents.name = 'capsule-contents';
+      const glass = new THREE.Mesh(geos.glass, glassMat);
+      glass.name = 'capsule-glass';
+      glass.renderOrder = 2;
 
-    const rig = new THREE.Group();
-    rig.name = 'capsule-rig';
-    rig.quaternion.copy(rest.quaternion);
-    rig.scale.setScalar(rest.scale);
-    rig.add(cap, contents, glass);
-    const leanGroup = new THREE.Group();
-    leanGroup.name = 'capsule-lean';
-    leanGroup.position.set(fit.tx * rest.scale, fit.ty * rest.scale, 0);
-    leanGroup.add(rig);
-    const group = new THREE.Group() as Capsule3dModel;
-    group.name = `capsule-${id}`;
-    group.add(leanGroup);
-    const euler = new THREE.Euler(0, 0, 0, 'YXZ');
-    Object.assign(group, {
-      leanGroup,
-      rig,
-      meshes: { cap, contents, glass },
-      restView: {
-        fov: fit.F,
-        distance: fit.D * rest.scale,
-        aspect: rest.aspect,
-      },
-      lean(yawDeg: number, pitchDeg: number) {
-        euler.set(pitchDeg * DEG, yawDeg * DEG, 0, 'YXZ');
-        leanGroup.quaternion.setFromEuler(euler);
-        lean.value.set(yawDeg * DEG, pitchDeg * DEG);
-      },
-      setOpacity(o: number) {
-        const v = Math.max(0, Math.min(1, o));
-        opacity.value = v;
-        capMat.transparent = v < 1;
-        contentsMat.transparent = v < 1;
-      },
-      dispose() {
-        for (const m of [cap, contents, glass]) {
-          m.geometry.dispose();
-          m.material.dispose();
-        }
-      },
-    });
-    return group;
+      const rig = new THREE.Group();
+      rig.name = 'capsule-rig';
+      rig.quaternion.copy(rest.quaternion);
+      rig.scale.setScalar(rest.scale);
+      rig.add(cap, contents, glass);
+      const leanGroup = new THREE.Group();
+      leanGroup.name = 'capsule-lean';
+      leanGroup.position.set(fit.tx * rest.scale, fit.ty * rest.scale, 0);
+      leanGroup.add(rig);
+      const group = new THREE.Group() as Capsule3dModel;
+      group.name = `capsule-${id}`;
+      group.add(leanGroup);
+      const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+      Object.assign(group, {
+        leanGroup,
+        rig,
+        meshes: { cap, contents, glass },
+        restView: {
+          fov: fit.F,
+          distance: fit.D * rest.scale,
+          aspect: rest.aspect,
+        },
+        lean(yawDeg: number, pitchDeg: number) {
+          euler.set(pitchDeg * DEG, yawDeg * DEG, 0, 'YXZ');
+          leanGroup.quaternion.setFromEuler(euler);
+          lean.value.set(yawDeg * DEG, pitchDeg * DEG);
+        },
+        setOpacity(o: number) {
+          const v = Math.max(0, Math.min(1, o));
+          opacity.value = v;
+          capMat.transparent = v < 1;
+          contentsMat.transparent = v < 1;
+        },
+        setDim(d: number) {
+          dim.value = Math.max(0, d);
+        },
+        clone() {
+          return makeGroup(false);
+        },
+        dispose() {
+          for (const m of [cap, contents, glass]) {
+            if (owner) m.geometry.dispose();
+            m.material.dispose();
+          }
+        },
+      });
+      return group;
+    };
+    return makeGroup(true);
   };
 
   const model = (): Promise<Capsule3dModel> => {
