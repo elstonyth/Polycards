@@ -8,10 +8,33 @@
 //   const model = await pack.model();        // back face shows the front for now
 //   scene.add(model);
 //   await pack.showBack(details);            // plate + live text, swapped in place
+//   pack.hideBack();                         // fronts only again; back freed
 //   ...
 //   pack.dispose();                          // every texture, bitmap and canvas
 //
 // or in one call: await buildPack3d('151', { details, envMap, anisotropy }).
+//
+// A back with no pull odds to print is never drawn (owner's no-odds rule,
+// 2026-11-20: no plate is bundled for it, and the plate alone would show the
+// fixed odds heading over an empty box): showBack() with null details, null
+// odds or no odds rows prints nothing, leaves the pack as it is and resolves
+// null. `printableBack()` is the same test for callers.
+//
+// Step 2 (plan-step2.md sections 4 and 10.5):
+// - showBack(details, { releaseCanvas: true }) sets the print canvas to 0x0
+//   once the renderer has uploaded it (texture.onUpdate), so only the GPU copy
+//   stays. Nothing may set needsUpdate on that texture afterwards.
+// - showBack(details, { downscale: 2 }) prints the quarter-resolution SPIN
+//   back: back-half.webp drawn at half its size, whatever this pack's
+//   resolution; the layout follows the plate's own size.
+// - openPack3d(id, { resolution: 'half', downscale: 2 }) opens a quarter
+//   "spin handle": the front is front-half.webp drawn at half its size (about
+//   0.5 MB on the GPU), for packs outside the residency during the spin.
+// - hideBack() frees the back's GPU binding and canvas and puts the front's
+//   Source back on the clone: the renderer re-binds the front's existing GPU
+//   texture, with no upload (the Source's version is untouched).
+// - textures() counts GPU bytes; canvasBytes() the canvases still held; each
+//   print reports its peak transient CPU bytes (decoded plate + canvases).
 //
 // Fronts only: until showBack() the model's back texture is a clone of the
 // front texture. A clone shares the front's three.js Source, so the renderer
@@ -64,15 +87,40 @@ export type OpenPack3dOptions = {
   /** CSS font-family for the live text; in the app, the family next/font
    *  registered for Geist (default "Geist, sans-serif"). */
   fonts?: DrawOptions['fonts'];
+  /**
+   * 2 draws the front at half the chosen resolution's size: with
+   * `resolution: 'half'`, the quarter spin handle (10.5). Default 1.
+   */
+  downscale?: 1 | 2;
+};
+
+export type ShowBackOptions = {
+  /** Free the print canvas (0x0) once the renderer has uploaded it. */
+  releaseCanvas?: boolean;
+  /** 2: the quarter spin back, from back-half.webp at half size. Default 1. */
+  downscale?: 1 | 2;
 };
 
 export type Pack3dBack = {
   /** The bound back texture (its image is the printed canvas). */
   texture: THREE.Texture;
   info: Pack3dTextureInfo;
-  /** The live text's layout and fit report; null when nothing was printed. */
-  layout: PrintLayout | null;
+  /** The live text's layout and fit report. */
+  layout: PrintLayout;
+  /**
+   * Peak CPU bytes this print held at once: the decoded plate (RGBA, no
+   * mips) plus every canvas it drew on. All but the print canvas are freed
+   * before it resolves; that one too after upload with `releaseCanvas`.
+   */
+  transientBytes: number;
 };
+
+/** True when `details` has pull odds rows to print (the no-odds rule). */
+export function printableBack(
+  details: PackBackDetails | null | undefined,
+): details is PackBackDetails {
+  return !!details && Array.isArray(details.odds) && details.odds.length > 0;
+}
 
 export type Pack3d = {
   readonly id: string;
@@ -83,13 +131,25 @@ export type Pack3d = {
   /** The sleeve, built once. Until showBack() its back face shows the front. */
   model(): Promise<PackModel>;
   /**
-   * Decodes the back plate, prints `details` on it (null prints nothing) with
-   * this pack's spec and ink, and swaps it in. Calling it again reprints.
-   * Resolves null when a later call or dispose() overtook it.
+   * Decodes the back plate, prints `details` on it with this pack's spec and
+   * ink, and swaps it in. Calling it again reprints. Resolves null, changing
+   * nothing, when `details` has no pull odds to print (`printableBack`), and
+   * null when a later call, hideBack() or dispose() overtook it.
    */
-  showBack(details: PackBackDetails | null): Promise<Pack3dBack | null>;
+  showBack(
+    details: PackBackDetails | null,
+    options?: ShowBackOptions,
+  ): Promise<Pack3dBack | null>;
+  /**
+   * Fronts only again: frees the back's GPU binding and canvas, cancels a
+   * print in flight and points the back face at the front's own texture
+   * (no upload). No-op while fronts only.
+   */
+  hideBack(): void;
   /** The GPU textures this pack holds right now (one while fronts only). */
   textures(): Pack3dTextureInfo[];
+  /** CPU bytes of the canvases this pack still holds (RGBA). */
+  canvasBytes(): number;
   /** Frees the geometry, the material, every texture, bitmap and canvas. */
   dispose(): void;
 };
@@ -98,13 +158,8 @@ type Picture = ImageBitmap | HTMLImageElement;
 type AnyCanvas = HTMLCanvasElement | OffscreenCanvas;
 
 const gpuBytes = (w: number, h: number) => Math.round((w * h * 4 * 4) / 3);
-
-const NO_DETAILS: PackBackDetails = {
-  price: null,
-  productLine: [],
-  odds: null,
-  buyback: null,
-};
+/** A decoded picture or a 2D canvas in CPU memory: RGBA, no mips. */
+const cpuBytes = (w: number, h: number) => Math.max(0, w) * Math.max(0, h) * 4;
 
 /**
  * Decodes a same-origin picture. `flipY`: three.js cannot flip an ImageBitmap
@@ -200,9 +255,12 @@ export function openPack3d(
   const half = resolution === 'half';
   const frontUrl = half ? assets.frontHalf : assets.front;
   const backUrl = half ? assets.backHalf : assets.back;
+  const frontDown = options.downscale === 2;
 
   let disposed = false;
   let frontPicture: Picture | null = null;
+  /** The downscaled front (spin handle): a canvas instead of a picture. */
+  let frontCanvas: AnyCanvas | null = null;
   let frontTexture: THREE.Texture | null = null;
   let backTexture: THREE.Texture | null = null;
   let backCanvas: AnyCanvas | null = null;
@@ -212,23 +270,29 @@ export function openPack3d(
   let backCall = 0;
 
   const frontReady = (async (): Promise<Pack3dTextureInfo> => {
-    const picture = await decodePicture(frontUrl, true);
+    // a picture drawn onto a canvas must not be decoded upside down
+    const picture = await decodePicture(frontUrl, !frontDown);
     if (disposed) {
       closePicture(picture);
       throw new Error('pack-3d: disposed');
     }
-    frontPicture = picture;
-    const texture = new THREE.Texture(picture);
-    texture.flipY = !isBitmap(picture);
+    let texture: THREE.Texture;
+    if (frontDown) {
+      const c = halfCanvas(picture);
+      closePicture(picture);
+      frontCanvas = c;
+      texture = new THREE.Texture(c as HTMLCanvasElement);
+      texture.flipY = true;
+    } else {
+      frontPicture = picture;
+      texture = new THREE.Texture(picture);
+      texture.flipY = !isBitmap(picture);
+    }
     texture.name = `pack-3d-${id}-front`;
     frontTexture = texture;
-    return {
-      role: 'front',
-      url: frontUrl,
-      width: picture.width,
-      height: picture.height,
-      bytes: gpuBytes(picture.width, picture.height),
-    };
+    const info = frontInfo();
+    if (!info) throw new Error('pack-3d: no front');
+    return info;
   })();
   // a caller that never awaits it must not see an unhandled rejection
   frontReady.catch(() => {});
@@ -266,12 +330,19 @@ export function openPack3d(
 
   const showBack = async (
     details: PackBackDetails | null,
+    o: ShowBackOptions = {},
   ): Promise<Pack3dBack | null> => {
+    // no-odds rule: never print a back without pull odds (and never cancel
+    // the back already showing for it; the caller decides when to hide it)
+    if (!printableBack(details)) return null;
     const call = ++backCall;
     const current = () => !disposed && call === backCall;
-    const decoding = decodePicture(backUrl, false);
+    const down = o.downscale === 2;
+    const plateUrl = down ? assets.backHalf : backUrl;
+    const decoding = decodePicture(plateUrl, false);
     let plate: Picture | null = null;
     const scratch: AnyCanvas[] = [];
+    let peak = 0;
     try {
       try {
         await model();
@@ -281,20 +352,27 @@ export function openPack3d(
       }
       plate = await decoding;
       if (!current()) return null;
-      if (details)
-        await loadFonts(
-          [
-            spec.price.font.weight,
-            spec.productLine.font.weight,
-            spec.odds.font.weight,
-            spec.buyback.font.weight,
-          ],
-          options.fonts,
-        );
+      await loadFonts(
+        [
+          spec.price.font.weight,
+          spec.productLine.font.weight,
+          spec.odds.font.weight,
+          spec.buyback.font.weight,
+        ],
+        options.fonts,
+      );
       if (!current()) return null;
+      const plateBytes = cpuBytes(plate.width, plate.height);
+      let source: Picture | AnyCanvas = plate;
+      if (down) {
+        // the quarter plate; renderPackBack sizes the print from it
+        const c = halfCanvas(plate);
+        scratch.push(c);
+        source = c;
+      }
       const { canvas, layout } = renderPackBack(
-        { live: plate, noOdds: plate },
-        details ?? NO_DETAILS,
+        { live: source, noOdds: source },
+        details,
         spec,
         {
           fonts: options.fonts,
@@ -305,6 +383,9 @@ export function openPack3d(
           },
         },
       );
+      peak =
+        plateBytes +
+        scratch.reduce((s, c) => s + cpuBytes(c.width, c.height), 0);
       const texture = backTexture;
       if (!texture) return null;
       // release the old binding (the front's shared texture, or the last
@@ -315,20 +396,48 @@ export function openPack3d(
       texture.needsUpdate = true;
       if (backCanvas) freeCanvas(backCanvas);
       backCanvas = canvas;
+      texture.onUpdate = o.releaseCanvas
+        ? () => {
+            // uploaded: keep the GPU copy only
+            texture.onUpdate = null;
+            if (backCanvas === canvas) {
+              freeCanvas(canvas);
+              backCanvas = null;
+            }
+          }
+        : null;
       backInfo = {
         role: 'back',
-        url: backUrl,
+        url: plateUrl,
         width: canvas.width,
         height: canvas.height,
         bytes: gpuBytes(canvas.width, canvas.height),
       };
-      return { texture, info: backInfo, layout: details ? layout : null };
+      return { texture, info: backInfo, layout, transientBytes: peak };
     } finally {
       // a decode still running when we leave early is closed when it lands
       if (plate) closePicture(plate);
       else decoding.then(closePicture, () => {});
       for (const c of scratch) if (c !== backCanvas) freeCanvas(c);
     }
+  };
+
+  const hideBack = () => {
+    backCall++; // a print in flight resolves null and swaps nothing
+    const texture = backTexture;
+    const front = frontTexture;
+    if (disposed || !texture || !front || !backInfo) return;
+    // free the print's GPU texture, then share the front's Source again. Only
+    // the texture's own version moves (not the Source's, as needsUpdate
+    // would), so the renderer re-binds the front's GPU texture, no upload.
+    texture.dispose();
+    texture.onUpdate = null;
+    texture.source = front.source;
+    texture.flipY = front.flipY;
+    texture.version++;
+    if (backCanvas) freeCanvas(backCanvas);
+    backCanvas = null;
+    backInfo = null;
   };
 
   return {
@@ -338,20 +447,30 @@ export function openPack3d(
     frontReady,
     model,
     showBack,
+    hideBack,
     textures() {
       // fronts only, the back shares the front's GPU texture: not counted
       return [frontInfo(), backInfo].filter(
         (t): t is Pack3dTextureInfo => t !== null,
       );
     },
+    canvasBytes() {
+      let n = 0;
+      for (const c of [frontCanvas, backCanvas])
+        if (c) n += cpuBytes(c.width, c.height);
+      return n;
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
+      backCall++;
       built?.dispose();
       frontTexture?.dispose();
       backTexture?.dispose();
       closePicture(frontPicture);
       frontPicture = null;
+      if (frontCanvas) freeCanvas(frontCanvas);
+      frontCanvas = null;
       if (backCanvas) freeCanvas(backCanvas);
       backCanvas = null;
       backInfo = null;
@@ -359,7 +478,7 @@ export function openPack3d(
   };
 
   function frontInfo(): Pack3dTextureInfo | null {
-    const p = frontPicture;
+    const p = frontCanvas ?? frontPicture;
     return p
       ? {
           role: 'front',
@@ -372,10 +491,24 @@ export function openPack3d(
   }
 }
 
+/** A picture drawn at half its size (rounded) on a new canvas. */
+function halfCanvas(p: Picture | AnyCanvas): AnyCanvas {
+  const w = Math.max(1, Math.round(p.width / 2));
+  const h = Math.max(1, Math.round(p.height / 2));
+  const c = makeCanvas(w, h);
+  const ctx = c.getContext('2d') as
+    CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+  if (!ctx) throw new Error('pack-3d: no 2d context');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(p as CanvasImageSource, 0, 0, w, h);
+  return c;
+}
+
 /**
- * One call: opens the pack, builds the model and, when `details` is given
- * (null = the plate without live text), prints and shows the back. Null for a
- * pack with no bundled set.
+ * One call: opens the pack, builds the model and, when `details` carries pull
+ * odds, prints and shows the back (no odds: fronts only, never the bare
+ * plate). Null for a pack with no bundled set.
  */
 export async function buildPack3d(
   id: string,
