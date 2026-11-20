@@ -179,6 +179,17 @@ type FocusBack = {
   readyAt: number;
 };
 
+/** QA: one pack drawn in the last frame (world units). */
+export type DrawnPack = {
+  id: string;
+  index: number;
+  opacity: number;
+  x: number;
+  y: number;
+  z: number;
+  scale: number;
+};
+
 export type StageRuntimeDebug = {
   slots: {
     id: string;
@@ -209,7 +220,7 @@ export type StageRuntimeDebug = {
   /** Spin row repeats drawn in the last frame, and whether the band covers the host. */
   copies: number;
   /** The packs drawn in the last frame (copies left out). */
-  drawn: { id: string; index: number; opacity: number; z: number }[];
+  drawn: DrawnPack[];
   spinBand: boolean;
   bandH: number;
   /** The spotlight last set on the focused pack. */
@@ -291,8 +302,7 @@ export function createStageRuntime(
   /** Repeats (clones) drawn in the last frame. */
   let lastCopies = 0;
   /** QA: the packs drawn in the last frame, with their opacity and depth. */
-  let lastDrawn: { id: string; index: number; opacity: number; z: number }[] =
-    [];
+  let lastDrawn: DrawnPack[] = [];
   /** The focused pack's back (one at a time). */
   let focusBack: FocusBack | null = null;
   let backW = 0;
@@ -1231,7 +1241,10 @@ export function createStageRuntime(
             id: slot.id,
             index: slot.index,
             opacity,
+            x: model.position.x,
+            y: model.position.y,
             z: model.position.z,
+            scale: model.scale.x,
           });
           const sleeve = shown.model;
           if (focused && fo && fctx && sleeve) {

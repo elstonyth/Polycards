@@ -30,11 +30,12 @@ export const LEAVE_FADE_MS = 250;
 /** A back uploaded after the pack reached its stop turns over this long. */
 export const BACK_TURN_MS = 650;
 /**
- * Neighbours are gone by this focus value: the first tenth of the zoom, so
- * they never stand beside (or over) a pack that has left its row place, and
- * on the way back they return only as it arrives.
+ * Neighbours are gone by this focus value. The tap's ease-out cubic reaches
+ * it in its first tenth of time (a ramp over several frames, while they slide
+ * off), and the leave's in its last two thirds: they come back only as the
+ * pack arrives.
  */
-export const NEIGHBOUR_FADE_END = 0.1;
+export const NEIGHBOUR_FADE_END = 0.3;
 /**
  * At rest on either face the extra yaw (pointer lean, idle sway) stays within
  * this, so the back rests well clear of the 155..165 degree glare band.

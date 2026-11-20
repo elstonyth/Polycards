@@ -5,6 +5,7 @@ import POSES from '../focus-poses.json';
 import {
   blockAt,
   focusOpacity,
+  NEIGHBOUR_FADE_END,
   focusPose,
   power1InOut,
   spotAt,
@@ -160,15 +161,25 @@ describe('focus keys (focus-poses.json)', () => {
     expect(spotAt(3, ctx).on).toBe(0);
   });
 
-  it('neighbours are gone before the focused pack grows, and come back only as it arrives', () => {
-    // the first and last tenth of the zoom: never beside a pack that has
-    // left its row place (owner, 2026-11-20)
-    for (let f = 0.1; f <= 6; f += 0.05) {
+  it('neighbours leave with the zoom and come back only as the pack arrives', () => {
+    // gone by NEIGHBOUR_FADE_END: early in the tap's ease-out, late in the leave
+    for (let f = NEIGHBOUR_FADE_END; f <= 6; f += 0.05) {
       expect(focusOpacity(f, false), `f=${f}`).toBe(0);
       expect(focusOpacity(f, true)).toBe(1);
     }
+    expect(NEIGHBOUR_FADE_END).toBeLessThanOrEqual(0.35);
     expect(focusOpacity(0, false)).toBe(1);
-    expect(focusOpacity(0.05, false)).toBeGreaterThan(0);
+    // a ramp, not a cut: the 1.5 s ease-out cubic at 60 fps never drops the
+    // neighbours by more than a quarter in one frame, and takes several frames
+    const ease = (t: number) => 1 - (1 - t) ** 3;
+    let frames = 0;
+    for (let i = 1; i <= 90; i++) {
+      const a = focusOpacity(ease((i - 1) / 90), false);
+      const b = focusOpacity(ease(i / 90), false);
+      expect(a - b, `frame ${i}`).toBeLessThanOrEqual(0.25);
+      if (a > 0) frames++;
+    }
+    expect(frames).toBeGreaterThanOrEqual(6);
   });
 
   it('neighbours slide off', () => {

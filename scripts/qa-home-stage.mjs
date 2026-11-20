@@ -1051,6 +1051,8 @@ async function checkTabs(label, profile) {
   let maxBytes = base.gpuBytesEstimate;
   for (let k = 0; k < 20; k++) {
     await page.getByRole('button', { name: /^Poly$/ }).click();
+    // the 3D capsules (WP-G): the centred ones are drawn by the canvas
+    await waitLive(page, 1, 10000).catch(() => {});
     await sleep(1000);
     const p = await stageInfo(page);
     poly.push({ ...p.stats, running: p.running, live: p.live.length });
@@ -1063,12 +1065,13 @@ async function checkTabs(label, profile) {
     maxBytes = Math.max(maxBytes, s.gpuBytesEstimate);
   }
   const p0 = poly[0];
-  const polyFlat = poly.every(
+  // every visit: the capsules live in 3D, the same textures and geometries
+  // (nothing piles up)
+  const polySteady = poly.every(
     (p) =>
       p.textures === p0.textures &&
       p.geometries === p0.geometries &&
-      p.live === 0 &&
-      !p.running,
+      p.live > 0,
   );
   const maxTex = Math.max(...pokemon.map((s) => s.textures));
   const maxGeo = Math.max(...pokemon.map((s) => s.geometries));
@@ -1077,11 +1080,11 @@ async function checkTabs(label, profile) {
   const cap = CAPS[profile.kind];
   pass(
     `tabs-x20-${label}`,
-    polyFlat &&
+    polySteady &&
       bounded &&
       maxBytes <= cap &&
       last.textures <= base.textures + 2,
-    `Pokemon start: textures ${base.textures} geometries ${base.geometries} ${(base.gpuBytesEstimate / 1e6).toFixed(1)} MB; Poly every time: textures ${p0.textures} geometries ${p0.geometries} ${(p0.gpuBytesEstimate / 1e6).toFixed(1)} MB, loop asleep, none live: ${polyFlat}; Pokemon max textures ${maxTex} geometries ${maxGeo}, after 20 ${last.textures}/${last.geometries}; max gpuBytesEstimate ${(maxBytes / 1e6).toFixed(1)} MB (cap ${cap / 1e6})`,
+    `Pokemon start: textures ${base.textures} geometries ${base.geometries} ${(base.gpuBytesEstimate / 1e6).toFixed(1)} MB; Poly every time: textures ${p0.textures} geometries ${p0.geometries} ${(p0.gpuBytesEstimate / 1e6).toFixed(1)} MB, capsules live ${poly.map((p) => p.live).join('/')}, steady: ${polySteady}; Pokemon max textures ${maxTex} geometries ${maxGeo}, after 20 ${last.textures}/${last.geometries}; max gpuBytesEstimate ${(maxBytes / 1e6).toFixed(1)} MB (cap ${cap / 1e6})`,
   );
   await page.getByRole('button', { name: /^Poly$/ }).click();
   await sleep(1200);

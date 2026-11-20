@@ -6,12 +6,22 @@
 // "Reject" is ever clicked. The pointer moves before every gesture, as a
 // visitor's does.
 //
-//   node scripts/qa-focus-frames.mjs [baseUrl] [--slug=151] [--tab=Poly] [--only=phone|desktop]
+//   node scripts/qa-focus-frames.mjs [baseUrl] [--slug=151] [--tab=Poly] [--only=phone|desktop] [--headed]
+//
+// --headed: system Chrome on the real GPU, the window parked off-screen and
+// kept painting (no ?stage=3d override); adds the frame-time limit.
 //
 // Fails when, at any sampled frame while a pack is focused:
 // - another pack of the row (its picture or its 3D model) has opacity above 0
-//   once the focus has left the row (focus >= NEIGHBOUR_GONE_AT), or any
-//   stop text is showing while another pack is;
+//   once the focus has left the row (focus >= NEIGHBOUR_GONE_AT), is drawn in
+//   front of the focused pack, or any stop text is showing while another
+//   pack is;
+// - the other packs' opacity steps by more than RAMP_STEP between two frames
+//   (they fade with the move, never cut);
+// - on the tap and on the leave, the focused pack's scale or centre goes
+//   backwards, or steps between two frames by more than the move's curve
+//   (1.5 s ease-out cubic) allows for the time that passed;
+// - (--headed) a frame of any move takes longer than 33 ms;
 // - a block's heading is hidden while the rest of its block still shows
 //   (a block fades as one piece, both ways);
 // - the Front block shows while leaving from another stop.
@@ -28,7 +38,13 @@ const SLUG = opt('slug', '151');
 const TAB = opt('tab', '');
 const ONLY = opt('only', '');
 /** The focus value by which the row's other packs must be gone. */
-const NEIGHBOUR_GONE_AT = 0.1;
+const NEIGHBOUR_GONE_AT = 0.3;
+/** Largest change of another pack's opacity between two frames. */
+const RAMP_STEP = 0.35;
+/** The focus moves' length (focus-poses.json framingChangeMs). */
+const MOVE_MS = 1500;
+const HEADED = args.includes('--headed');
+const FRAME_MS = 33;
 
 let failures = 0;
 const report = (name, ok, detail) => {
@@ -70,19 +86,21 @@ function sampler() {
     }
     return o;
   };
-  const tick = () => {
+  const tick = (ts) => {
     const ps = w.__packStage;
     const st = ps?.state;
     const fr = ps?.focus?.();
-    if (st && fr?.on) {
-      const index = st.focusOn?.ctx?.index ?? null;
+    if (st && fr && w.__sampling) {
+      const index = st.focusOn?.ctx?.index ?? w.__focusIndex ?? null;
       const tiles = [
         ...document.querySelectorAll(
           '[data-stage-panel]:not([hidden]) [data-stage-tile]',
         ),
       ];
       const css = [];
-      for (const t of tiles) {
+      // light (the real-GPU pass): no DOM reads, which would force style and
+      // layout every frame and skew the frame times; the canvas packs only
+      for (const t of w.__light ? [] : tiles) {
         const i = Number(t.getAttribute('data-index'));
         if (i === index) continue;
         const img = t.querySelector('img');
@@ -90,13 +108,17 @@ function sampler() {
         if (o > 0.001)
           css.push([t.getAttribute('data-pack-id'), +o.toFixed(3)]);
       }
-      const drawn = (ps.runtime?.()?.drawn ?? [])
+      const all = ps.runtime?.()?.drawn ?? [];
+      const focused = all.find((d) => d.index === index) ?? null;
+      const drawn = all
         .filter((d) => d.index !== index && d.opacity > 0.001)
-        .map((d) => [d.id, +d.opacity.toFixed(3)]);
+        .map((d) => [d.id, +d.opacity.toFixed(3), d.z]);
       const blocks = [];
-      for (const s of document.querySelectorAll(
-        '[data-testid="focus-stops"] > section[data-kind]',
-      )) {
+      for (const s of w.__light
+        ? []
+        : document.querySelectorAll(
+            '[data-testid="focus-stops"] > section[data-kind]',
+          )) {
         const o = opacityChain(s, s);
         if (o < 0.01) continue;
         const h = s.querySelector('h2');
@@ -119,8 +141,11 @@ function sampler() {
         ]);
       }
       w.__frames.push({
-        t: performance.now(),
-        f: st.focus,
+        // the frame time the stage posed this frame with
+        t: ts,
+        on: !!fr.on,
+        f: fr.on ? st.focus : 0,
+        foc: focused,
         busy: fr.busy,
         leaveFrom: w.__leaveFrom,
         css,
@@ -133,15 +158,30 @@ function sampler() {
   requestAnimationFrame(tick);
 }
 
-const browser = await chromium.launch({
-  channel: 'chrome',
-  args: [
-    '--mute-audio',
-    '--enable-unsafe-swiftshader',
-    '--use-angle=swiftshader',
-    '--ignore-gpu-blocklist',
-  ],
-});
+const browser = await chromium.launch(
+  HEADED
+    ? {
+        channel: 'chrome',
+        headless: false,
+        args: [
+          '--mute-audio',
+          '--window-position=-32000,-32000',
+          '--window-size=1600,1000',
+          '--disable-features=CalculateNativeWinOcclusion',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+        ],
+      }
+    : {
+        channel: 'chrome',
+        args: [
+          '--mute-audio',
+          '--enable-unsafe-swiftshader',
+          '--use-angle=swiftshader',
+          '--ignore-gpu-blocklist',
+        ],
+      },
+);
 
 async function settle(page, k) {
   await page.waitForFunction(
@@ -161,10 +201,89 @@ async function left(page) {
   await page.waitForTimeout(400);
 }
 
-function judge(name, frames) {
-  const bad = { neighbour: [], textOverPack: [], heading: [], front: [] };
+function judge(name, all, curve = null) {
+  const bad = {
+    neighbour: [],
+    textOverPack: [],
+    heading: [],
+    front: [],
+    ramp: [],
+    inFront: [],
+    curve: [],
+    slow: [],
+  };
+  // the other packs' opacity, frame to frame (the frame before the focus too)
+  const first = Math.max(0, all.findIndex((fr) => fr.on) - 1);
+  const seq = all.slice(first);
+  const op = (fr) => {
+    const m = new Map();
+    for (const [id, o] of [...fr.css, ...fr.drawn])
+      m.set(id, Math.max(m.get(id) ?? 0, o));
+    return m;
+  };
+  for (let i = 1; i < seq.length; i++) {
+    const a = op(seq[i - 1]);
+    const b = op(seq[i]);
+    for (const id of new Set([...a.keys(), ...b.keys()])) {
+      const d = Math.abs((b.get(id) ?? 0) - (a.get(id) ?? 0));
+      if (d > RAMP_STEP)
+        bad.ramp.push(
+          `${id} ${(a.get(id) ?? 0).toFixed(2)} -> ${(b.get(id) ?? 0).toFixed(2)} at f=${seq[i].f.toFixed(3)}`,
+        );
+    }
+    const dt = seq[i].t - seq[i - 1].t;
+    // frames drawn while the pack moves (the frame after a move lands, where
+    // the focus is cleaned up, is reported apart as the end frame)
+    if (HEADED && seq[i].busy && dt > FRAME_MS)
+      bad.slow.push(`${dt.toFixed(1)} ms at f=${seq[i].f.toFixed(3)}`);
+    else if (HEADED && !seq[i].busy && seq[i - 1].busy && dt > FRAME_MS)
+      console.log(
+        `INFO ${name}-end-frame: ${dt.toFixed(1)} ms, after the move landed`,
+      );
+  }
+  // the focused pack along the tap's or the leave's curve
+  if (curve) {
+    const mv = seq.filter((fr) => fr.foc);
+    const s0 = mv[0]?.foc;
+    const s1 = mv.at(-1)?.foc;
+    if (s0 && s1) {
+      const span = {
+        scale: Math.abs(s1.scale - s0.scale),
+        pos: Math.hypot(s1.x - s0.x, s1.y - s0.y),
+      };
+      // ease-out cubic: the steepest slope is 3 / MOVE_MS of the span
+      const allow = (dt, v) => ((v * 3 * dt) / MOVE_MS) * 1.3 + v * 0.01;
+      for (let i = 1; i < mv.length; i++) {
+        const a = mv[i - 1].foc;
+        const b = mv[i].foc;
+        const dt = mv[i].t - mv[i - 1].t;
+        const ds = b.scale - a.scale;
+        const want =
+          curve === 'enter'
+            ? Math.sign(s1.scale - s0.scale)
+            : Math.sign(s1.scale - s0.scale);
+        if (ds * want < -span.scale * 0.01)
+          bad.curve.push(
+            `scale went back ${a.scale.toFixed(3)} -> ${b.scale.toFixed(3)}`,
+          );
+        if (Math.abs(ds) > allow(dt, span.scale))
+          bad.curve.push(
+            `scale step ${Math.abs(ds).toFixed(3)} in ${dt.toFixed(0)} ms (curve allows ${allow(dt, span.scale).toFixed(3)}) at f=${mv[i].f.toFixed(3)}`,
+          );
+        const dp = Math.hypot(b.x - a.x, b.y - a.y);
+        if (dp > allow(dt, span.pos))
+          bad.curve.push(
+            `centre step ${dp.toFixed(3)} in ${dt.toFixed(0)} ms (curve allows ${allow(dt, span.pos).toFixed(3)}) at f=${mv[i].f.toFixed(3)}`,
+          );
+      }
+    } else bad.curve.push('the focused pack was not drawn');
+  }
+  const frames = all.filter((fr) => fr.on);
   for (const fr of frames) {
     const others = [...fr.css, ...fr.drawn];
+    for (const [id, o, z] of fr.drawn)
+      if (fr.foc && o > 0 && z > fr.foc.z + 1e-6)
+        bad.inFront.push(`${id} at f=${fr.f.toFixed(3)}`);
     if (others.length > 0 && fr.f >= NEIGHBOUR_GONE_AT)
       bad.neighbour.push(`f=${fr.f.toFixed(3)} ${JSON.stringify(others)}`);
     if (others.length > 0 && fr.blocks.length > 0)
@@ -206,6 +325,27 @@ function judge(name, frames) {
     bad.front.length === 0,
     show(bad.front),
   );
+  report(`${name}-others-fade-not-cut`, bad.ramp.length === 0, show(bad.ramp));
+  report(
+    `${name}-nothing-in-front-of-the-pack`,
+    bad.inFront.length === 0,
+    show(bad.inFront),
+  );
+  if (curve)
+    report(
+      `${name}-pack-follows-the-curve`,
+      bad.curve.length === 0,
+      show(bad.curve),
+    );
+  // the tap and the leave are held to the limit; stop moves are reported
+  if (HEADED && curve)
+    report(
+      `${name}-frames-under-${FRAME_MS}-ms`,
+      bad.slow.length === 0,
+      show(bad.slow),
+    );
+  else if (HEADED)
+    console.log(`INFO ${name}-frames-over-${FRAME_MS}-ms: ${show(bad.slow)}`);
 }
 
 for (const size of ['phone', 'desktop']) {
@@ -216,9 +356,12 @@ for (const size of ['phone', 'desktop']) {
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
-  await page.goto(`${BASE}/home-preview?stage=3d&debug=1&loader=never`, {
-    waitUntil: 'load',
-  });
+  await page.goto(
+    `${BASE}/home-preview?${HEADED ? '' : 'stage=3d&'}debug=1&loader=never`,
+    {
+      waitUntil: 'load',
+    },
+  );
   const rej = page.getByRole('button', { name: 'Reject', exact: true });
   await rej
     .waitFor({ state: 'visible', timeout: 8000 })
@@ -300,16 +443,36 @@ for (const size of ['phone', 'desktop']) {
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   };
   const frames = async (fn) => {
-    await page.evaluate(() => {
+    await page.evaluate((light) => {
       window.__frames = [];
-    });
+      window.__sampling = true;
+      window.__light = light;
+    }, HEADED);
     await fn();
-    return page.evaluate(() => window.__frames);
+    return page.evaluate(() => {
+      window.__sampling = false;
+      return window.__frames;
+    });
   };
+  const index = await page.evaluate(
+    (s) =>
+      Number(
+        document
+          .querySelector(
+            `[data-stage-panel]:not([hidden]) [data-stage-tile][data-pack-id="${s}"]`,
+          )
+          ?.getAttribute('data-index'),
+      ),
+    SLUG,
+  );
+  await page.evaluate((i) => {
+    window.__focusIndex = i;
+  }, index);
 
   // enter and walk every stop by one gesture each
   let kinds = [];
-  const walk = await frames(async () => {
+  const zoom = await frames(async () => {
+    await page.waitForTimeout(300);
     await tap();
     kinds = await page
       .waitForFunction(
@@ -322,12 +485,15 @@ for (const size of ['phone', 'desktop']) {
       )
       .then((h) => h.jsonValue());
     await settle(page, 1);
+  });
+  judge(`${size}-tap`, zoom, 'enter');
+  const walk = await frames(async () => {
     for (let k = 2; k <= kinds.length; k++) {
       await next();
       await settle(page, k);
     }
   });
-  judge(`${size}-enter-and-stops`, walk);
+  judge(`${size}-stops`, walk);
   // leave from every stop (the last one with its "All" button)
   for (let k = kinds.length; k >= 1; k--) {
     if (k !== kinds.length) {
@@ -355,7 +521,7 @@ for (const size of ['phone', 'desktop']) {
         window.__leaveFrom = 0;
       });
     });
-    judge(`${size}-leave-from-${kinds[k - 1]}`, fr);
+    judge(`${size}-leave-from-${kinds[k - 1]}`, fr, 'leave');
   }
   report(`errors-${size}`, errors.length === 0, errors.join(' | ') || 'none');
   await ctx.close();

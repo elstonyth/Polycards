@@ -12,12 +12,13 @@
  *   paging back past Front, "All packs", Escape or browser Back pages from
  *   Front to the row, which ends the focus and gives the input back).
  */
-import { createElement, type ReactNode } from 'react';
+import { createElement, startTransition, type ReactNode } from 'react';
 import {
   FocusStops,
   type FocusStopKind,
 } from '@/components/pack-flow/FocusStops';
 import type { FlowSeed } from '@/components/pack-flow/types';
+import { loadSchemas } from '@/lib/lazy-schemas';
 import type {
   FocusCtx,
   PackBackDetails,
@@ -144,6 +145,13 @@ const snapHeld = () =>
 export function createFocusRun(d: FocusRunDeps): FocusRun {
   const pager = createPager();
   const seeds = readFocusSeeds<FlowSeed>();
+  // The focused pack's live data is validated with the lazy schemas: load and
+  // evaluate them at idle now, so that chunk never runs inside a tap's zoom.
+  const whenIdle =
+    typeof window.requestIdleCallback === 'function'
+      ? (fn: () => void) => window.requestIdleCallback(fn, { timeout: 4000 })
+      : (fn: () => void) => window.setTimeout(fn, 200);
+  whenIdle(() => void loadSchemas().catch(() => {}));
   let on = false;
   let leftRow = false;
   let leaving = false;
@@ -162,40 +170,55 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
   const trace: number[][] = [];
   const now = () => performance.now();
 
-  const render = () => {
+  /** `mount`: the first render of a focus, as a transition (below). */
+  const render = (mount = false) => {
     if (!seed) return;
-    d.ui(
-      createElement(FocusStops, {
-        key: seed.pack.id,
-        seed,
-        kinds,
-        mode: 'stage',
-        desktop,
-        leaving,
-        subscribe: (fn: (f: number) => void) => {
-          subs.add(fn);
-          fn(Math.max(0, lastF));
-          return () => {
-            subs.delete(fn);
-          };
-        },
-        go: (k: number) => {
-          if (pager.goTo(k, window.scrollY, now())) d.loop();
-        },
-        leave: () => run.leave(),
-        onBack: (back: PackBackDetails | null) => {
-          if (!decl || decl.details === back) return;
-          if (decl.details === null && back === null) return;
-          // a pack that gains or loses its odds keeps its stop list until
-          // the next focus; the print follows the text
-          if (kinds.includes('odds') && back) {
-            decl = { ...decl, details: back };
-            d.state.focusOn = decl;
-            d.wake();
-          }
-        },
-      }),
-    );
+    const node = createElement(FocusStops, {
+      key: seed.pack.id,
+      seed,
+      kinds,
+      mode: 'stage',
+      desktop,
+      leaving,
+      subscribe: (fn: (f: number) => void) => {
+        subs.add(fn);
+        fn(Math.max(0, lastF));
+        return () => {
+          subs.delete(fn);
+        };
+      },
+      go: (k: number) => {
+        if (pager.goTo(k, window.scrollY, now())) d.loop();
+      },
+      leave: () => run.leave(),
+      onBack: (back: PackBackDetails | null) => {
+        if (!decl || decl.details === back) return;
+        if (decl.details === null && back === null) return;
+        // a pack that gains or loses its odds keeps its stop list until
+        // the next focus; the print follows the text
+        if (kinds.includes('odds') && back) {
+          decl = { ...decl, details: back };
+          publish();
+        }
+      },
+    });
+    // the mount is a transition: React renders the blocks in slices, never
+    // one long frame of the zoom; later renders (leaving) are urgent
+    if (mount) startTransition(() => d.ui(node));
+    else d.ui(node);
+  };
+
+  /**
+   * The declaration the runtime reads. The back is held back (details null)
+   * until the pack has first settled at a stop: printing it (a canvas print
+   * and an upload) must never land inside the tap's zoom.
+   */
+  let settled = false;
+  const publish = () => {
+    if (!decl) return;
+    d.state.focusOn =
+      settled || decl.details === null ? decl : { ...decl, details: null };
+    d.wake();
   };
 
   const measureStops = () => {
@@ -330,7 +353,8 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       on = true;
       leftRow = false;
       leaving = false;
-      d.state.focusOn = decl;
+      settled = false;
+      publish();
       // the address: /slots/<id>, Back unfocuses (plan section 7)
       base = window.location.pathname + window.location.search;
       path = `/slots/${encodeURIComponent(id)}`;
@@ -353,7 +377,7 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       offs.push(() => ro.disconnect());
       window.addEventListener('scroll', onScroll, { passive: true });
       offs.push(() => window.removeEventListener('scroll', onScroll));
-      render();
+      render(true);
       // Forward or Back to an entry: the stop it rested on
       let at = 1;
       if (fromEntry)
@@ -385,6 +409,15 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       // until the focus ends, so no block (Front's included) shows on the way.
       leaving = true;
       render();
+      // From a later stop the pack goes home from where it is: Front's pose
+      // becomes this stop's, so the jump to Front below moves nothing and the
+      // last move runs from this pose straight to the row.
+      const held = k > 1 ? decl?.ctx.keys[k - 1] : undefined;
+      if (decl && held) {
+        const keys = [held, ...decl.ctx.keys.slice(1)];
+        decl = { ...decl, ctx: { ...decl.ctx, keys } };
+        publish();
+      }
       setTimeout(() => {
         if (!on) return;
         // the active block has faded: from a later stop, jump to Front first
@@ -480,6 +513,10 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       if (leftRow && !f.animating && f.target === 0 && f.focus <= 0) {
         end();
         return true;
+      }
+      if (f.idle && !settled && f.focus >= 1 - 1e-3) {
+        settled = true;
+        publish();
       }
       if (f.idle && !leaving && stops.length > 0) {
         const k = Math.round(pager.focusAt(window.scrollY));

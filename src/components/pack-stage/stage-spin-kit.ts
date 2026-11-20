@@ -499,6 +499,7 @@ export function startSpin(host: SpinHost): SpinControl {
     });
   };
   let tapping = false;
+  const preload = () => void loadFocus();
   const onKey = (e: KeyboardEvent) => {
     if (focus?.active()) focus.key(e);
   };
@@ -535,11 +536,14 @@ export function startSpin(host: SpinHost): SpinControl {
       ro.observe(next.panel);
       next.panel.addEventListener('focusin', onFocusIn);
       next.panel.addEventListener('click', onTap, { capture: true });
+      // a press loads the focused view ahead of its tap (when idle has not yet)
+      next.panel.addEventListener('pointerdown', preload, quiet);
       setTimeout(resume, 0);
       unbindPage = () => {
         ro.disconnect();
         next.panel.removeEventListener('focusin', onFocusIn);
         next.panel.removeEventListener('click', onTap, { capture: true });
+        next.panel.removeEventListener('pointerdown', preload);
       };
       measure();
     }

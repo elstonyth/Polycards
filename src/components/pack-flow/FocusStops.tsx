@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -139,7 +140,13 @@ export function FocusStops({
   desktop,
   onGoToReel,
 }: FocusStopsProps) {
-  const data = useFlowData(seed);
+  const stage = mode === 'stage';
+  // On the stage the live data (tier view, recent pulls) is fetched and drawn
+  // only once the pack has first settled at a stop: its render, layout and
+  // pictures must never land inside the tap's zoom. Then it re-renders the
+  // blocks at low priority (sliced).
+  const [armed, setArmed] = useState(!stage);
+  const data = useDeferredValue(useFlowData(seed, { enabled: armed }));
   const { pack } = data;
   const tickets = isTicketPack(pack);
   const noun = tickets ? 'capsule' : 'pack';
@@ -147,7 +154,6 @@ export function FocusStops({
   const overlay = usePackCardOverlay(pack.id);
   const facts = packFacts(pack);
   const n = kinds.length;
-  const stage = mode === 'stage';
 
   // the live back goes to the 3D print (a reprint when its text changes)
   const backRef = useRef(onBack);
@@ -168,6 +174,7 @@ export function FocusStops({
     if (!stage || !subscribe) return;
     return subscribe((f) => {
       setBlock(blockOf(f, n));
+      if (f >= 1 - 1e-3 && Math.abs(f - Math.round(f)) < 1e-3) setArmed(true);
       const p = n > 1 ? Math.min(1, Math.max(0, (f - 1) / (n - 1))) : 1;
       progressRef.current?.style.setProperty('--p', String(f < 1 ? 0 : p));
     });
@@ -323,13 +330,17 @@ export function FocusStops({
           <>
             {head(k, <span className={styles.line}>Recent Pulls</span>)}
             <div className={styles.pulls}>
-              <PackRecentPulls
-                pack={pack}
-                initial={data.recentPulls}
-                onOpenCard={overlay.open}
-                limit={desktop ? 8 : 4}
-                bare
-              />
+              {armed ? (
+                <PackRecentPulls
+                  pack={pack}
+                  initial={data.recentPulls}
+                  onOpenCard={overlay.open}
+                  limit={desktop ? 8 : 4}
+                  bare
+                />
+              ) : (
+                <div className={styles.wait} aria-hidden />
+              )}
             </div>
           </>
         );
