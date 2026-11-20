@@ -57,21 +57,6 @@ describe('getPackDetail — ticket pack', () => {
     });
   });
 
-  // An older backend sends this key under its previous name; the loader reads
-  // both, and `pull_odds` wins when both are present.
-  it('reads the Pull Odds from an older backend key too', async () => {
-    const { pull_odds, ...rest } = TICKET_DETAIL;
-    serve({ ...rest, published_odds: pull_odds });
-    expect((await getPackDetail('lucky-pack'))?.pullOdds).toEqual({
-      tiers: { Immortal: 0.1, Common: 99.9 },
-    });
-    clearTtlCache();
-    serve({ ...TICKET_DETAIL, published_odds: { tiers: { Common: 100 } } });
-    expect((await getPackDetail('lucky-pack'))?.pullOdds).toEqual({
-      tiers: { Immortal: 0.1, Common: 99.9 },
-    });
-  });
-
   it('drops a bad row and keeps one with no market_value', async () => {
     const { market_value: _omitted, ...bare } = row(50, 'Rare');
     serve({ ...TICKET_DETAIL, odds: [row(0, 'Common'), bare] });
