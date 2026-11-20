@@ -33,6 +33,19 @@ medusaIntegrationTestRunner({
       const adminHeaders = (): Record<string, string> => ({
         authorization: `Bearer ${adminToken}`,
       });
+      // A settled gateway top-up for the player: check-in rewards wait for
+      // RM 50 of them in the task week (owner 2026-11-20).
+      const topUpPlayer = async (amount: number) => {
+        const container = getContainer();
+        const [player] = await container
+          .resolve(Modules.CUSTOMER)
+          .listCustomers({ email: 'tasks-player@test.dev' }, { take: 1 });
+        await container
+          .resolve<PacksModuleService>(PACKS_MODULE)
+          .createCreditTransactions([
+            { customer_id: player.id, amount, reason: 'topup' },
+          ]);
+      };
 
       beforeEach(async () => {
         const container = getContainer();
@@ -177,6 +190,32 @@ medusaIntegrationTestRunner({
         );
         expect(c2.data.checked).toBe(false);
 
+        // Complete, but a check-in reward waits for RM 50 of top-ups this
+        // week: the hub says so and the claim is refused with the shortfall.
+        hub = await unwrapResponse(
+          api.get('/store/tasks', { headers: authed() }),
+        );
+        expect(hub.data.checkin_unlock).toEqual({
+          required_myr: 50,
+          topped_up_myr: 0,
+          unlocked: false,
+        });
+        expect(hub.data.tasks[0]).toMatchObject({
+          progress: { completed: true },
+          locked: true,
+          claimed: false,
+        });
+        await topUpPlayer(20);
+        const short = await unwrapResponse(
+          api.post(`/store/tasks/${taskId}/claim`, {}, { headers: authed() }),
+        );
+        expect(short.data).toEqual({
+          claimed: false,
+          reason: 'needs_topup',
+          topup: { required_myr: 50, topped_up_myr: 20, unlocked: false },
+        });
+        await topUpPlayer(30);
+
         // Claim pays RM3 exactly once.
         const claim = await unwrapResponse(
           api.post(`/store/tasks/${taskId}/claim`, {}, { headers: authed() }),
@@ -290,6 +329,7 @@ medusaIntegrationTestRunner({
         await unwrapResponse(
           api.post('/store/tasks/checkin', {}, { headers: authed() }),
         );
+        await topUpPlayer(50);
         const claim = await unwrapResponse(
           api.post(`/store/tasks/${taskId}/claim`, {}, { headers: authed() }),
         );
@@ -336,7 +376,8 @@ medusaIntegrationTestRunner({
         expect(sell.status).toBe(200);
         expect(sell.data.amount).toBe(spin.data.buyback.amount);
         expect(sell.data.rate_type).toBe('instant');
-        expect(sell.data.balance).toBe(spin.data.buyback.amount);
+        // On top of the RM 50 top-up that met the check-in bar.
+        expect(sell.data.balance).toBeCloseTo(50 + spin.data.buyback.amount, 2);
         // A free rip is a task reward: its sale is not held for packs
         // (ADR 0012), though the pull's bonus_bp is full.
         const [credit] = await getContainer()

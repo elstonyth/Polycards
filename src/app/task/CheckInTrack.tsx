@@ -1,12 +1,20 @@
 'use client';
 
-import { Check } from 'lucide-react';
+import { Check, Lock } from 'lucide-react';
 import { Pill } from '@/components/ui/pill';
 import { HelpTip } from '@/components/ui/help-tip';
+import { rmAuto } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { TaskEntry } from '@/lib/data/schemas';
 import { RewardArt, Sparkles } from './reward-art';
-import { dayWorth, isClaimable, ticketCountLabel } from './task-hub';
+import {
+  dayWorth,
+  isClaimable,
+  isWaitingOnTopUp,
+  ticketCountLabel,
+  topUpAsk,
+  type CheckinUnlock,
+} from './task-hub';
 
 const DAYS = [1, 2, 3, 4, 5, 6, 7] as const;
 
@@ -21,6 +29,14 @@ function nextLine(
     return {
       text: `Day ${ready} reward is ready: ${dayWorth(milestones.get(ready)!)}. Tap it to claim.`,
       ready: true,
+    };
+  // Earned but waiting for this week's top-up: the bar under the line says
+  // how much is left, so this line only names the prize that is waiting.
+  const waiting = days.find((d) => milestones.get(d)!.some(isWaitingOnTopUp));
+  if (waiting != null)
+    return {
+      text: `Day ${waiting} reward is waiting for this week's top-up: ${dayWorth(milestones.get(waiting)!)}.`,
+      ready: false,
     };
   for (const day of days) {
     const tasks = milestones.get(day) ?? [];
@@ -40,13 +56,63 @@ function nextLine(
       };
 }
 
+/** Where this week's top-ups stand against the bar check-in rewards wait for
+ *  (owner 2026-11-20), with the way to top up. Shown only while the bar is
+ *  unmet and the track still has a prize to unlock. */
+function TopUpBar({
+  unlock,
+  onTopUp,
+}: {
+  unlock: CheckinUnlock;
+  onTopUp: () => void;
+}) {
+  const required = unlock.required_myr;
+  const done = Math.max(0, Math.min(unlock.topped_up_myr, required));
+  const pct = required > 0 ? Math.floor((done / required) * 100) : 0;
+  return (
+    <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-3">
+      <div className="flex items-center gap-3">
+        <Lock className="h-4 w-4 shrink-0 text-neutral-400" aria-hidden />
+        <p className="min-w-0 flex-1 text-xs leading-snug text-neutral-300">
+          {topUpAsk(unlock)} to unlock your check-in rewards.
+        </p>
+        <Pill size="sm" variant="secondary" onClick={onTopUp}>
+          Top up
+        </Pill>
+      </div>
+      <div className="mt-2.5 flex items-center gap-2.5">
+        <div
+          className="flex h-1.5 flex-1 overflow-hidden rounded-full bg-white/10"
+          role="progressbar"
+          aria-valuenow={done}
+          aria-valuemin={0}
+          aria-valuemax={required}
+          aria-valuetext={`${rmAuto(done)} of ${rmAuto(required)}`}
+          aria-label="Topped up this week"
+        >
+          <span
+            className="bar-grow rounded-full bg-neutral-50"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <span className="font-heading shrink-0 text-sm leading-none whitespace-nowrap text-white tabular-nums">
+          {rmAuto(done)}
+          <span className="text-[11px] text-neutral-400">
+            /{rmAuto(required)}
+          </span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /**
  * The week's check-in track: seven card-shaped slots, Day 1…Day 7 — the COUNT
  * of check-ins this task week, which is exactly what weekly "check in on N
  * days" tasks measure (not weekdays: a player who starts on Thursday still
  * reaches Day 3). Each of those tasks sits on its slot N as the prize's own
  * art; a claimable one breathes gold and sparkles, and the slot IS the claim
- * button.
+ * button. An earned slot still waiting for this week's top-up wears a lock.
  */
 export function CheckInTrack({
   count,
@@ -57,6 +123,8 @@ export function CheckInTrack({
   onClaim,
   claimingId,
   onNotice,
+  unlock,
+  onTopUp,
 }: {
   count: number;
   checkedInToday: boolean;
@@ -66,8 +134,15 @@ export function CheckInTrack({
   onClaim: (t: TaskEntry) => void;
   claimingId: string | null;
   onNotice: (message: string) => void;
+  /** This week's top-ups against the reward bar; absent = no bar. */
+  unlock?: CheckinUnlock;
+  onTopUp: () => void;
 }) {
   const line = nextLine(count, milestones);
+  const showBar =
+    unlock != null &&
+    !unlock.unlocked &&
+    [...milestones.values()].some((tasks) => tasks.some((t) => !t.claimed));
   return (
     <section
       aria-labelledby="checkin-heading"
@@ -80,9 +155,12 @@ export function CheckInTrack({
         >
           CHECK-IN
           <HelpTip label="How check-in works">
-            Check in once a day. Every check-in fills the next slot; the track
-            and its rewards reset every Monday at 00:00 (Malaysia time), so
-            claim before then.
+            Check in once a day. Every check-in fills the next slot.
+            {unlock
+              ? ` Rewards unlock once you top up ${rmAuto(unlock.required_myr)} in the same week, and then every slot you have filled can be claimed.`
+              : ''}{' '}
+            The track and its rewards reset every Monday at 00:00 (Malaysia
+            time), so claim before then.
           </HelpTip>
         </h2>
         <p className="text-xs text-neutral-400">
@@ -103,6 +181,7 @@ export function CheckInTrack({
           const done = day <= count;
           const isNext = !checkedInToday && day === count + 1;
           const claimable = Boolean(lead && isClaimable(lead));
+          const waiting = Boolean(lead && !claimable && isWaitingOnTopUp(lead));
           const claimed = Boolean(lead && tasks.every((t) => t.claimed));
           const extra = tasks.length - 1;
           const ticketCount = lead ? ticketCountLabel(lead.reward) : null;
@@ -149,7 +228,15 @@ export function CheckInTrack({
                     ticketCount ? 'bottom-2.5' : 'bottom-1',
                   )}
                 >
-                  <Check className="h-2.5 w-2.5" strokeWidth={3} aria-hidden />
+                  {waiting ? (
+                    <Lock className="h-2 w-2" strokeWidth={3} aria-hidden />
+                  ) : (
+                    <Check
+                      className="h-2.5 w-2.5"
+                      strokeWidth={3}
+                      aria-hidden
+                    />
+                  )}
                 </span>
               )}
               {claimable && <Sparkles />}
@@ -192,10 +279,12 @@ export function CheckInTrack({
                       : onNotice(
                           claimed
                             ? `Day ${day} reward claimed: ${dayWorth(tasks)}.`
-                            : `Day ${day} reward: ${dayWorth(tasks)}. Check in ${day} ${day === 1 ? 'day' : 'days'} this week to unlock it.`,
+                            : waiting
+                              ? `Day ${day} reward: ${dayWorth(tasks)}. ${topUpAsk(unlock)} to claim it.`
+                              : `Day ${day} reward: ${dayWorth(tasks)}. Check in ${day} ${day === 1 ? 'day' : 'days'} this week to unlock it.`,
                         )
                   }
-                  aria-label={`Day ${day} reward: ${dayWorth(tasks)}. ${claimable ? 'Ready — claim it.' : claimed ? 'Claimed.' : `Unlocks at ${day} check-ins.`}`}
+                  aria-label={`Day ${day} reward: ${dayWorth(tasks)}. ${claimable ? 'Ready — claim it.' : claimed ? 'Claimed.' : waiting ? 'Waiting for this week\u2019s top-up.' : `Unlocks at ${day} check-ins.`}`}
                   className={cn(
                     tile,
                     // An OUTLINE focus ring: the claimable glow animates
@@ -226,6 +315,8 @@ export function CheckInTrack({
       >
         {line.text}
       </p>
+
+      {showBar && unlock && <TopUpBar unlock={unlock} onTopUp={onTopUp} />}
 
       <Pill
         className="mt-3 w-full"

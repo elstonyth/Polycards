@@ -12,6 +12,7 @@ import { classifyRequeryError } from '../gateway-reconcile';
 import { GmpayError, gmpaySign } from '../gmpay-client';
 import { refundsWithoutLookup } from '../withdrawal-submit';
 import { GatewayError } from '../gateway-types';
+import { MY_BANKS, SG_BANKS, banksFor, gatewayBankCode } from '../banks';
 
 const GMPAY_ENV = {
   GATEWAY_ENABLED: 'true',
@@ -228,5 +229,24 @@ describe('GMpay status check amounts', () => {
     );
     const d = await getDepositDetail('PC-1', CONFIG, FX, 'tok-1');
     expect(d.reportedAmount).toBe(100.01);
+  });
+});
+
+describe("GMpay's Singapore bank codes", () => {
+  it('pays every Singapore bank we offer except Alliance, and no Malaysian bank', () => {
+    const served = banksFor('gmpay', { env: {} }).map((b) => b.bankCode);
+    const offered = SG_BANKS.filter((b) => b.accountLengths?.length).map((b) => b.id);
+    expect(served).toEqual(offered);
+    expect(served).not.toContain('ALLIANCESG');
+    for (const bank of MY_BANKS) expect(bank.codes.gmpay).toBeUndefined();
+  });
+
+  it("sends GMpay's own codes, never A3Pay's", () => {
+    expect(gatewayBankCode('DBSSSGSG', 'gmpay', {})?.code).toBe('DBS');
+    expect(gatewayBankCode('POSBSG', 'gmpay', {})?.code).toBe('POSB');
+    expect(gatewayBankCode('HLBBSGSG', 'gmpay', {})?.code).toBe('HLBBSG');
+    expect(gatewayBankCode('MBBESGSG', 'gmpay', {})?.code).toBe('MAYBANK');
+    expect(gatewayBankCode('PAYNOWSG', 'gmpay', {})?.code).toBe('PAYNOW');
+    expect(gatewayBankCode('DBSSSGSG', 'a3pay', {})?.code).toBe('SDBS');
   });
 });

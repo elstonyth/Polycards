@@ -12,6 +12,7 @@ import {
   Layers3,
 } from 'lucide-react';
 import { Pill, pillVariants } from '@/components/ui/pill';
+import { PAGE_TITLE } from '@/components/ui/page-frame';
 import { cn } from '@/lib/utils';
 import { CoinStage } from '@/components/coin-flip/CoinStage';
 import { StaticCoin } from '@/components/coin-flip/StaticCoin';
@@ -581,9 +582,7 @@ export function CoinFlipClient({
     <>
       <header className="mb-4 flex items-end justify-between gap-4 sm:mb-6">
         <div className="min-w-0">
-          <h1 className="font-display text-3xl font-black tracking-tight text-balance">
-            Coin flip
-          </h1>
+          <h1 className={cn(PAGE_TITLE, 'text-balance')}>Coin flip</h1>
           <p className="mt-1 text-sm text-neutral-400">
             Your cards. Your call. One toss.
           </p>

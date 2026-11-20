@@ -19,7 +19,14 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { checkInToday } from '@/lib/actions/tasks';
+import { useTopUp } from '@/components/app-shell/TopUpProvider';
 import { Pill, pillVariants } from '@/components/ui/pill';
+import {
+  PAGE_COLUMN,
+  PAGE_FILL,
+  PageBody,
+  PageTitle,
+} from '@/components/ui/page-frame';
 import { HelpTip } from '@/components/ui/help-tip';
 import { TicketArt } from '@/components/TicketArt';
 import {
@@ -392,6 +399,7 @@ function DailyTab({
 } & Claim) {
   const [checkingIn, startTransition] = useTransition();
   const router = useRouter();
+  const { openTopUp } = useTopUp();
   const checkIn = () =>
     startTransition(async () => {
       const res = await checkInToday();
@@ -415,6 +423,8 @@ function DailyTab({
         onClaim={claim.onClaim}
         claimingId={claim.claimingId}
         onNotice={onNotice}
+        unlock={hub.checkin_unlock}
+        onTopUp={openTopUp}
       />
       <TaskList
         heading="Today"
@@ -537,129 +547,131 @@ export function TaskHubClient({
   const claimProps: Claim = { onClaim: claim, claimingId: pendingId };
 
   return (
-    <div className="px-fluid mx-auto w-full max-w-2xl py-6">
-      <h1 className="font-heading text-3xl text-white">TASK</h1>
+    <div className={cn(PAGE_COLUMN, PAGE_FILL, 'pt-6 pb-6')}>
+      <PageTitle>TASK</PageTitle>
 
-      {taskHub && (
-        <div className="mt-4">
-          <PendingSpins spins={taskHub.pending_spins} />
-        </div>
-      )}
+      <PageBody>
+        {taskHub && (
+          <div className="mt-4">
+            <PendingSpins spins={taskHub.pending_spins} />
+          </div>
+        )}
 
-      {/* Plain toggle buttons (aria-pressed), the leaderboard's segmented
+        {/* Plain toggle buttons (aria-pressed), the leaderboard's segmented
           pill. A gold count marks every tab holding something to claim, so
           the player knows where to look without opening each one. */}
-      <div
-        role="group"
-        aria-label="Task hub sections"
-        className="mt-4 grid grid-cols-[1fr_1fr_1.45fr] gap-1 rounded-full border border-white/10 bg-neutral-900 p-1 sm:grid-cols-3"
-      >
-        {TABS.map(({ key, label }) => {
-          const n = ready?.[key] ?? 0;
-          return (
-            <button
-              key={key}
-              type="button"
-              aria-pressed={tab === key}
-              onClick={() => setTab(key)}
-              aria-label={n > 0 ? `${label}, ${n} to claim` : label}
-              className={cn(
-                'flex min-h-11 items-center justify-center gap-1 rounded-full px-1.5 text-[13px] font-semibold transition-colors sm:gap-1.5 sm:px-2 sm:text-sm',
-                'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
-                tab === key
-                  ? 'bg-neutral-50 text-neutral-950'
-                  : 'text-neutral-400 hover:text-white',
-              )}
-            >
-              {label}
-              {n > 0 && (
-                <span
-                  aria-hidden
-                  className="bg-chase inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold text-neutral-950 tabular-nums"
-                >
-                  {n}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Always mounted, so screen readers hear every notice. */}
-      <p
-        ref={noticeRef}
-        aria-live="polite"
-        className={
-          notice
-            ? 'mt-4 scroll-mt-20 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-neutral-300'
-            : 'sr-only'
-        }
-      >
-        {notice?.text}
-        {notice?.link && (
-          <>
-            {' '}
-            <Link
-              href={notice.link.href}
-              className="font-semibold whitespace-nowrap text-white underline underline-offset-2"
-            >
-              {notice.link.label}
-            </Link>
-          </>
-        )}
-      </p>
-
-      <div className="mt-4">
-        {!taskHub || !tabs ? (
-          isLoggedIn ? (
-            <UnavailablePanel />
-          ) : (
-            <SignInPrompt
-              what={
-                tab === 'achievements'
-                  ? 'your achievements'
-                  : tab === 'weekly'
-                    ? 'your weekly tasks'
-                    : 'your daily check-in'
-              }
-            />
-          )
-        ) : tab === 'daily' ? (
-          <DailyTab
-            hub={taskHub}
-            tabs={tabs}
-            onNotice={setNotice}
-            {...claimProps}
-          />
-        ) : tab === 'weekly' ? (
-          <WeeklyTab tabs={tabs} {...claimProps} />
-        ) : (
-          <AchievementsTab hub={taskHub} tabs={tabs} {...claimProps} />
-        )}
-      </div>
-
-      {taskHub && (
-        <div className="mt-6 space-y-1 text-xs leading-relaxed text-neutral-400">
-          <p>
-            Task rewards (cards, slabs, and cards from reward packs) sell back
-            as cash you can withdraw once you’ve topped up and used your money
-            for packs. Cards from daily tasks work like the welcome pack: pay
-            for one pack yourself to unlock selling &amp; delivery. Credit
-            rewards are bonus credit for packs.{' '}
-            <Link
-              href="/wallet"
-              className="font-semibold text-neutral-300 underline-offset-2 hover:text-white hover:underline"
-            >
-              How it works <span aria-hidden="true">&rarr;</span>
-            </Link>
-          </p>
-          <p>
-            Daily and weekly tasks count packs you pay for, bonus credit
-            included. Gift packs, the welcome pack and task reward packs
-            don&rsquo;t count.
-          </p>
+        <div
+          role="group"
+          aria-label="Task hub sections"
+          className="mt-4 grid grid-cols-[1fr_1fr_1.45fr] gap-1 rounded-full border border-white/10 bg-neutral-900 p-1 sm:grid-cols-3"
+        >
+          {TABS.map(({ key, label }) => {
+            const n = ready?.[key] ?? 0;
+            return (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={tab === key}
+                onClick={() => setTab(key)}
+                aria-label={n > 0 ? `${label}, ${n} to claim` : label}
+                className={cn(
+                  'flex min-h-11 items-center justify-center gap-1 rounded-full px-1.5 text-[13px] font-semibold transition-colors sm:gap-1.5 sm:px-2 sm:text-sm',
+                  'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
+                  tab === key
+                    ? 'bg-neutral-50 text-neutral-950'
+                    : 'text-neutral-400 hover:text-white',
+                )}
+              >
+                {label}
+                {n > 0 && (
+                  <span
+                    aria-hidden
+                    className="bg-chase inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold text-neutral-950 tabular-nums"
+                  >
+                    {n}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
-      )}
+
+        {/* Always mounted, so screen readers hear every notice. */}
+        <p
+          ref={noticeRef}
+          aria-live="polite"
+          className={
+            notice
+              ? 'mt-4 scroll-mt-20 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-xs text-neutral-300'
+              : 'sr-only'
+          }
+        >
+          {notice?.text}
+          {notice?.link && (
+            <>
+              {' '}
+              <Link
+                href={notice.link.href}
+                className="font-semibold whitespace-nowrap text-white underline underline-offset-2"
+              >
+                {notice.link.label}
+              </Link>
+            </>
+          )}
+        </p>
+
+        <div className="mt-4">
+          {!taskHub || !tabs ? (
+            isLoggedIn ? (
+              <UnavailablePanel />
+            ) : (
+              <SignInPrompt
+                what={
+                  tab === 'achievements'
+                    ? 'your achievements'
+                    : tab === 'weekly'
+                      ? 'your weekly tasks'
+                      : 'your daily check-in'
+                }
+              />
+            )
+          ) : tab === 'daily' ? (
+            <DailyTab
+              hub={taskHub}
+              tabs={tabs}
+              onNotice={setNotice}
+              {...claimProps}
+            />
+          ) : tab === 'weekly' ? (
+            <WeeklyTab tabs={tabs} {...claimProps} />
+          ) : (
+            <AchievementsTab hub={taskHub} tabs={tabs} {...claimProps} />
+          )}
+        </div>
+
+        {taskHub && (
+          <div className="mt-6 space-y-1 text-xs leading-relaxed text-neutral-400">
+            <p>
+              Task rewards (cards, slabs, and cards from reward packs) sell back
+              as cash you can withdraw once you’ve topped up and used your money
+              for packs. Cards from daily tasks work like the welcome pack: pay
+              for one pack yourself to unlock selling &amp; delivery. Credit
+              rewards are bonus credit for packs.{' '}
+              <Link
+                href="/wallet"
+                className="font-semibold text-neutral-300 underline-offset-2 hover:text-white hover:underline"
+              >
+                How it works <span aria-hidden="true">&rarr;</span>
+              </Link>
+            </p>
+            <p>
+              Daily and weekly tasks count packs you pay for, bonus credit
+              included. Gift packs, the welcome pack and task reward packs
+              don&rsquo;t count.
+            </p>
+          </div>
+        )}
+      </PageBody>
     </div>
   );
 }

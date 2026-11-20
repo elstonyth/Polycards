@@ -53,6 +53,12 @@ export const rmAuto = (n: number) => (Number.isInteger(n) ? rm0(n) : rm(n));
 // into a plain space by editors and formatters, silently (see task-hub.ts).
 export const rmNbsp = (n: number) =>
   money(n, { prefix: `RM${String.fromCharCode(0xa0)}` });
+/** `rmAuto` with a non-breaking space: whole ringgit without ".00", for
+ *  figures inside running sentences. */
+export const rmAutoNbsp = (n: number) =>
+  Number.isInteger(n)
+    ? money(n, { prefix: `RM${String.fromCharCode(0xa0)}`, decimals: 0 })
+    : rmNbsp(n);
 /** Singapore dollars — what an A3Pay customer pays or receives. */
 export const sgd = (n: number) => money(n, { prefix: 'S$' });
 export const sgd0 = (n: number) => money(n, { prefix: 'S$', decimals: 0 });

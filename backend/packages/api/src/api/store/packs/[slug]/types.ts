@@ -52,7 +52,7 @@ export type StoreOddsTicketRow = {
   image: string;
 };
 
-export type StorePublishedOdds = {
+export type StorePullOdds = {
   overall: number;
   tiers: Partial<Record<string, number>>;
   decimals: number;
@@ -62,7 +62,7 @@ export type StorePackDetailResponse = {
   prize_type: 'cards' | 'tickets';
   pack: StorePackDetailPack;
   odds: (StoreOddsCardRow | StoreOddsTicketRow)[];
-  /** null = not published (the odds panel is hidden). */
-  published_odds: StorePublishedOdds | null;
+  /** null = not set (the odds panel is hidden). */
+  pull_odds: StorePullOdds | null;
   demo_odds: null;
 };

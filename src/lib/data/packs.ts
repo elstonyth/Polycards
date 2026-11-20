@@ -417,13 +417,6 @@ export interface PackDetail {
 
 // The backend's Pull Odds json (jsonb passthrough — validate at the trust
 // boundary so a malformed value can't render NaN or unknown tiers).
-//
-// An older backend sends this key under its previous name; read both until it
-// is updated. The previous name is not declared in PackDetailPageSchema
-// (looseObject passes the undeclared key through).
-const rawPullOdds = (row: Record<string, unknown>): unknown =>
-  row.pull_odds ?? row.published_odds;
-
 const parsePullOdds = (raw: unknown): PullOdds | null => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const o = raw as { tiers?: unknown };
@@ -460,7 +453,7 @@ export async function getPackDetail(slug: string): Promise<PackDetail | null> {
 function toPackDetail(
   row: ReturnType<typeof PackDetailPageSchema.parse>,
 ): PackDetail | null {
-  const pullOdds = parsePullOdds(rawPullOdds(row));
+  const pullOdds = parsePullOdds(row.pull_odds);
   if (row.prize_type === 'tickets') {
     const pool = parseList(TicketOddsRowSchema, row.odds).map((o) =>
       ticketCard(o.tickets, o.rarity),

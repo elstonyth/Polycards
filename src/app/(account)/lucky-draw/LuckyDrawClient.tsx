@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { pillVariants } from '@/components/ui/pill';
+import { PageBody, PageTitle } from '@/components/ui/page-frame';
 import { useLiveDraw } from '@/components/app-shell/LiveDrawProvider';
 import { ArenaBoundary } from '@/components/draw-arena/ArenaBoundary';
 import { ArenaShow } from '@/components/draw-arena/lazy';
@@ -324,9 +325,9 @@ export function LuckyDrawClient({
           across or no room down. */}
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-4 squat:-mt-3 squat:gap-y-2 short:-mt-3 lg:gap-x-6">
         <div className="min-w-0">
-          <h1 className="font-heading text-[clamp(1.35rem,8vw,1.875rem)] whitespace-nowrap text-white short:text-xl">
+          <PageTitle className="whitespace-nowrap short:text-xl">
             LUCKY DRAW
-          </h1>
+          </PageTitle>
           {view === 'per_prize' && event && (
             <p className="mt-1 text-sm text-neutral-400">
               {event.name} · until {mytDate(event.ends_at)}
@@ -373,85 +374,92 @@ export function LuckyDrawClient({
         )}
       </div>
 
-      <div className="mt-4 squat:mt-3 short:mt-3">
-        {tab === 'results' ? (
-          // Lists of rows, not a stage: they keep the column they were built for.
-          <div className="mx-auto max-w-4xl">
-            {/* Read again as each live draw ends, so it joins the list. */}
-            <ResultsList
-              key={liveDraw.finished}
-              held={liveDraw.held}
-              onWatchLive={liveDraw.watch}
-              onOpen={openResult}
-              onOpenEvent={openEventResult}
-            />
-          </div>
-        ) : tab === 'mine' ? (
-          <div className="mx-auto max-w-4xl">
-            <MyEntry key={liveDraw.finished} held={liveDraw.held} />
-          </div>
-        ) : !page ? (
-          <UnavailablePanel />
-        ) : gates.length > 0 ? (
-          <GateList
-            gates={gates}
-            newIds={newIds}
-            nowMs={nowMs}
-            balance={balance}
-            spinHref={spinHref}
-            onEnter={(g) => setEntering({ gateId: g.id })}
-          />
-        ) : view !== 'per_prize' || !event ? (
-          <NoPool spinHref={spinHref} onSeeResults={() => setTab('results')} />
-        ) : page.prizes.length === 0 ? (
-          <p className="text-sm text-neutral-400">
-            Prizes for this Lucky Draw are on their way.
-          </p>
-        ) : (
-          <div className="mx-auto max-w-4xl">
-            {balance <= 0 && (
-              <Panel className="mb-4 flex items-center gap-3">
-                <TicketArt width={44} className="shrink-0" />
-                <p className="flex-1 text-sm text-neutral-300">
-                  Earn tickets from tasks
-                </p>
-                <Link
-                  href="/task"
-                  className={pillVariants({ variant: 'primary', size: 'sm' })}
-                >
-                  Tasks
-                </Link>
-              </Panel>
-            )}
-            <PrizeWheel
-              prizes={page.prizes}
+      {/* Below the title row: fades in as the page arrives. The sheets
+          further down stay outside it, so nothing fixed sits in its layer. */}
+      <PageBody>
+        <div className="mt-4 squat:mt-3 short:mt-3">
+          {tab === 'results' ? (
+            // Lists of rows, not a stage: they keep the column they were built for.
+            <div className="mx-auto max-w-4xl">
+              {/* Read again as each live draw ends, so it joins the list. */}
+              <ResultsList
+                key={liveDraw.finished}
+                held={liveDraw.held}
+                onWatchLive={liveDraw.watch}
+                onOpen={openResult}
+                onOpenEvent={openEventResult}
+              />
+            </div>
+          ) : tab === 'mine' ? (
+            <div className="mx-auto max-w-4xl">
+              <MyEntry key={liveDraw.finished} held={liveDraw.held} />
+            </div>
+          ) : !page ? (
+            <UnavailablePanel />
+          ) : gates.length > 0 ? (
+            <GateList
+              gates={gates}
+              newIds={newIds}
               nowMs={nowMs}
-              details={(p) => (
-                <ul aria-label="Selected prize">
-                  <PrizeCard
-                    key={p.id}
-                    prize={p}
-                    nowMs={nowMs}
-                    opensAt={event.starts_at}
-                    balance={balance}
-                    onEnter={setEntering}
-                    onOpenResult={openResult}
-                    art={false}
-                  />
-                </ul>
-              )}
+              balance={balance}
+              spinHref={spinHref}
+              onEnter={(g) => setEntering({ gateId: g.id })}
             />
-          </div>
-        )}
-      </div>
+          ) : view !== 'per_prize' || !event ? (
+            <NoPool
+              spinHref={spinHref}
+              onSeeResults={() => setTab('results')}
+            />
+          ) : page.prizes.length === 0 ? (
+            <p className="text-sm text-neutral-400">
+              Prizes for this Lucky Draw are on their way.
+            </p>
+          ) : (
+            <div className="mx-auto max-w-4xl">
+              {balance <= 0 && (
+                <Panel className="mb-4 flex items-center gap-3">
+                  <TicketArt width={44} className="shrink-0" />
+                  <p className="flex-1 text-sm text-neutral-300">
+                    Earn tickets from tasks
+                  </p>
+                  <Link
+                    href="/task"
+                    className={pillVariants({ variant: 'primary', size: 'sm' })}
+                  >
+                    Tasks
+                  </Link>
+                </Panel>
+              )}
+              <PrizeWheel
+                prizes={page.prizes}
+                nowMs={nowMs}
+                details={(p) => (
+                  <ul aria-label="Selected prize">
+                    <PrizeCard
+                      key={p.id}
+                      prize={p}
+                      nowMs={nowMs}
+                      opensAt={event.starts_at}
+                      balance={balance}
+                      onEnter={setEntering}
+                      onOpenResult={openResult}
+                      art={false}
+                    />
+                  </ul>
+                )}
+              />
+            </div>
+          )}
+        </div>
 
-      {/* The pool tab carries the rules in its own How it works. */}
-      {(tab !== 'prizes' || view === 'per_prize') && (
-        <p className="mx-auto mt-6 max-w-4xl text-xs leading-relaxed text-neutral-400">
-          {/* No event to go by: every new event is one-winner. */}
-          {rulesCopy(event ? event.draw_mode : 'one_winner')}
-        </p>
-      )}
+        {/* The pool tab carries the rules in its own How it works. */}
+        {(tab !== 'prizes' || view === 'per_prize') && (
+          <p className="mx-auto mt-6 max-w-4xl text-xs leading-relaxed text-neutral-400">
+            {/* No event to go by: every new event is one-winner. */}
+            {rulesCopy(event ? event.draw_mode : 'one_winner')}
+          </p>
+        )}
+      </PageBody>
 
       {enterTarget && (
         <EnterSheet

@@ -579,11 +579,12 @@ envs:
   # host, so only the keys tell them apart. GMpay allow-lists our egress
   # 188.166.181.61 / .204 per merchant. GMPAY_CALLBACK_IPS is their documented
   # callback source (also the code's default). GMPAY_ENABLED opens S$ top-ups
-  # and payouts to every customer whose saved bank GMpay serves; it stays
-  # "false" until the code is live and reviewed (keys can land first, inert).
+  # and payouts to every customer whose saved bank GMpay serves. Switched on
+  # 2026-11-20, once GMpay whitelisted both egress IPs and the bank codes
+  # from their live SGD list were in banks.ts.
   - key: GMPAY_ENABLED
     scope: RUN_TIME
-    value: "false"
+    value: "true"
   - key: GMPAY_API_BASE
     scope: RUN_TIME
     value: https://xapi.payflowxz.com/v3
