@@ -229,9 +229,11 @@
 }
 
 /* Recent Pulls on the stage: a chase-tier row keeps its wash but not the line
-   down its left edge. The row sets the line inline, so the rule matches that
-   style, and needs !important to win over it. */
-.block[data-kind='pulls'] .pulls [style*='inset'] {
+   down its left edge. The row sets the line inline, so the rule matches the
+   row's wash plus its inset shadow (not `inset:`, which thumbnails use), and needs !important to win over it. */
+.block[data-kind='pulls']
+  .pulls
+  [style*='linear-gradient(90deg'][style*='inset'] {
   box-shadow: none !important;
 }
 
