@@ -22,7 +22,8 @@
  * In the free part a vertical touch is the flow's (the page follows the
  * finger, then glides) and a sideways one the browser's; the wheel
  * there is native except an up notch that crosses the paged edge, which
- * pages back to the lineup. Crossing Last's top going down wraps to the row;
+ * pages back to the lineup. Below it the end pages: the footer, the chosen
+ * pack, the row back (see the pager). Crossing Last's top going down wraps to the row;
  * Home and Escape at the lineup take the same way back.
  */
 import {
@@ -78,6 +79,8 @@ export type FlowInputGeometry = {
   /** The stage panel's height. */
   panel: number;
   viewport: number;
+  /** The height seen under the site header and above the tab bar; absent: the viewport. */
+  view?: number;
   /** The page's last section (the rise is keyed to it); null: not measured. */
   riseSection?: { top: number; bottom: number } | null;
   /** The Return spacer; null or zero height: none. */
@@ -118,7 +121,13 @@ export type FlowInputFrame = FlowPagerFrame & {
 
 /** What a key asks for. */
 export type FlowKeyIntent =
-  'next' | 'prev' | 'first' | 'last' | 'escape' | 'left' | 'right';
+  | 'next'
+  | 'prev'
+  | 'first'
+  | 'last'
+  | 'escape'
+  | 'left'
+  | 'right';
 
 /**
  * What a key did: the pager's result, or `leave`: the caller runs the
@@ -394,6 +403,13 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
       geo = g;
       build(true);
       if (!old || !table || !was || pager.busy()) return null;
+      // a page resting on an end rest stays on that rest (the footer, the chosen pack)
+      const e = old.ends.findIndex((v) => Math.abs(v - y0) < SAME_PX);
+      const keep = e >= 0 ? table.ends[e] : undefined;
+      if (keep !== undefined) {
+        lastY = keep;
+        return Math.abs(keep - scrollY) >= SAME_PX ? keep : null;
+      }
       // past the paged edge only a resize moves the page (content that grows
       // in the free part leaves it where the visitor is reading)
       if (!resized && y0 > old.edge) return null;
@@ -445,7 +461,12 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
       arm();
       if (!table) return 'free';
       if (pager.busy()) return 'swallowed';
-      if (pager.zone(scrollY) === 'free') return 'free';
+      if (pager.zone(scrollY) === 'free') {
+        // the end pages between its rests; every other key there is the browser's
+        if (intent !== 'next' && intent !== 'prev') return 'free';
+        if (repeat && pager.atEnd(scrollY)) return 'swallowed';
+        return pager.step(intent === 'next' ? 1 : -1, scrollY, now);
+      }
       if (repeat && intent !== 'escape') return 'swallowed';
       const s = stops();
       let k = 0;

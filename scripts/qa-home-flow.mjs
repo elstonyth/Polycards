@@ -2244,9 +2244,11 @@ for (const size of sizes) {
     const chosenIndex = atLineup.index;
     const t = atLineup.t;
     const exitEnd = t.exitEnd;
+    // the end's rests: the footer in view, the chosen pack alone, Last's top
+    const [E0, E1] = t.ends;
     // the middle of the free span (trimmed when the span is longer than its
     // two margins: a quarter viewport past the exit end and before the rise)
-    const free = await to((exitEnd + t.rise.start) / 2, 1500);
+    const free = await to((exitEnd + Math.min(t.rise.start, E0)) / 2, 1500);
     report(
       'wp67-free-nothing-drawn-' + size,
       free.free && !free.lapAttr && free.drawn.length === 0 && free.lap?.free,
@@ -2265,22 +2267,9 @@ for (const size of sizes) {
             (size !== 'phone' || free.gpu <= FREE_GPU_CAP)),
       `${spanText(t, vh)}; trim ${free.lap?.trim}; drawn [${free.drawn.map((d) => d.id).join(',')}] (chosen ${chosen}); GPU estimate ${MB(free.gpu)} MB in the free span, ${MB(atLineup.gpu)} MB at the lineup`,
     );
-    // the rise: one pack, the chosen one, the panel shown, the row UI out
-    const rs = t.rise;
-    const mid = await to(rs.start + (rs.end - rs.start) * 0.5, 800);
-    report(
-      'wp67-rise-one-pack-' + size,
-      mid.lapAttr &&
-        !mid.free &&
-        mid.drawn.length === 1 &&
-        mid.drawn[0].id === chosen &&
-        mid.lap &&
-        mid.lap.rise > 0.2 &&
-        mid.lap.rise < 0.8 &&
-        mid.headOp === 0,
-      `rise ${mid.lap?.rise?.toFixed(3)}; drawn ${mid.drawn.map((d) => d.id).join(',')} (chosen ${chosen}); row heading opacity ${mid.headOp}; GPU ${MB(mid.gpu)} MB`,
-    );
-    // The first section grows by 300 px: the rise stays keyed to the last section
+    // The first section grows by 300 px: the rise, the end's rests and Last
+    // stay keyed to the last section (all move by 300), and the free part
+    // leaves the page where the visitor is reading
     await page.evaluate(() => {
       const jp = document.querySelector('[data-flow-section]');
       const d = document.createElement('div');
@@ -2288,126 +2277,190 @@ for (const size of sizes) {
       d.style.height = '300px';
       jp.appendChild(d);
     });
-    await page.waitForTimeout(400);
-    const grown = await to(mid.y + 300, 800);
+    await page.waitForTimeout(600);
+    const grown = await lapState();
+    const moved = (a, b) => Math.abs(b - a - 300) < 1.5;
     report(
-      'wp67-first-section-height-does-not-move-the-rise-' + size,
-      Math.abs(grown.lap.rise - mid.lap.rise) < 0.01 &&
-        Math.abs(grown.t.rise.end - rs.end - 300) < 1.5 &&
-        Math.abs(grown.t.lastTop - t.lastTop - 300) < 1.5,
-      `rise ${mid.lap.rise.toFixed(4)} before, ${grown.lap.rise.toFixed(4)} after +300 px of the first section (scroll +300); rise end ${rs.end} to ${grown.t.rise.end}; Last top ${t.lastTop} to ${grown.t.lastTop}`,
+      'wp67-first-section-height-moves-the-end-with-it-' + size,
+      moved(t.rise.start, grown.t.rise.start) &&
+        moved(t.rise.end, grown.t.rise.end) &&
+        moved(t.lastTop, grown.t.lastTop) &&
+        t.ends.every((v, i) => moved(v, grown.t.ends[i])) &&
+        Math.abs(grown.y - free.y) < 1.5,
+      `rise ${t.rise.start}-${t.rise.end} to ${grown.t.rise.start}-${grown.t.rise.end}; ends [${t.ends}] to [${grown.t.ends}]; Last top ${t.lastTop} to ${grown.t.lastTop}; scroll ${Math.round(free.y)} to ${Math.round(grown.y)}`,
     );
     await page.evaluate(() => document.getElementById('qa-grow')?.remove());
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(600);
     const t2 = (await lapState()).t;
-    // Return: everyone back
-    const ret = await to(t2.ret.start + (t2.ret.end - t2.ret.start) * 0.6, 900);
+    const [F0, F1] = t2.ends;
+    /** The footer's links at a point, and what a tap there would hit. */
+    const footerHit = () =>
+      page.evaluate(() => {
+        const links = [
+          ...document.querySelectorAll('[data-flow-section="footer"] a[href]'),
+        ];
+        const seen = links
+          .map((a) => {
+            const r = a.getBoundingClientRect();
+            const x = r.left + r.width / 2;
+            const y = r.top + r.height / 2;
+            const inView = y > 0 && y < innerHeight;
+            const hit = inView ? document.elementFromPoint(x, y) : null;
+            return {
+              text: a.textContent.trim(),
+              inView,
+              hits: !!hit && (hit === a || a.contains(hit)),
+            };
+          })
+          .filter((l) => l.text);
+        return seen;
+      });
+    // the footer's rest: the page stays there (no snap), the footer's links in
+    // view and on top
+    const atFooter = await to(F0, 1500);
+    const links = await footerHit();
+    report(
+      'wp67-footer-rest-links-reachable-' + size,
+      Math.abs(atFooter.y - F0) < 1 &&
+        atFooter.free &&
+        !atFooter.busy &&
+        links.length >= 3 &&
+        links.every((l) => l.inView && l.hits),
+      `y ${Math.round(atFooter.y)} (footer rest ${F0}); links ${links.map((l) => l.text + (l.hits ? ' ok' : ' covered') + (l.inView ? '' : ' (out of view)')).join(', ')}`,
+    );
+    // arriving: one gesture down from just above the footer rests on it
+    await to(F0 - (s.cdp ? 150 : 60), 600);
+    await gesture(s, 1);
+    const arrived = await settle();
+    report(
+      'wp67-arrival-rests-at-the-footer-' + size,
+      Math.abs(arrived.y - F0) < 1 && arrived.free,
+      `from ${F0 - (s.cdp ? 150 : 60)} one gesture down: y ${Math.round(arrived.y)} (footer rest ${F0}, pack rest ${F1})`,
+    );
+    /**
+     * Records every frame (scroll, lap, drawn packs) from now until the flow
+     * has moved and then rested for 400 ms (or 5 s): run it, then make the
+     * gesture.
+     */
+    const recordMove = () =>
+      page.evaluate(async () => {
+        const ps = window.__packStage;
+        const head = document.querySelector('[data-stage-head]');
+        const out = [];
+        const t0 = performance.now();
+        let restSince = null;
+        let started = false;
+        while (performance.now() - t0 < 5000) {
+          await new Promise((r) => requestAnimationFrame(r));
+          const fl = ps.flow();
+          const drawn = (ps.runtime?.()?.drawn ?? []).filter(
+            (d) => d.opacity > 0,
+          );
+          const r3 = (v) => Math.round(v * 1000) / 1000;
+          out.push({
+            t: performance.now() - t0,
+            y: scrollY,
+            busy: fl.busy,
+            lap: fl.lap,
+            headOp: head ? Number(getComputedStyle(head).opacity) : null,
+            at: drawn[0]?.at ?? null,
+            drawn: drawn.map((d) => ({
+              id: d.id,
+              o: r3(d.opacity),
+              x: r3(d.x),
+              y: r3(d.y),
+              z: r3(d.z),
+              s: r3(d.scale),
+            })),
+          });
+          const moving = out.length > 1 && out.at(-1).y !== out.at(-2).y;
+          // the gesture may reach the page a while after the recording starts
+          if (fl.busy || moving) started = true;
+          if (!started || fl.busy || moving) restSince = null;
+          else if ((restSince ??= performance.now()) < performance.now() - 400)
+            break;
+        }
+        return out;
+      });
+    const gestureRecorded = async (dir) => {
+      const rec = recordMove();
+      await page.waitForTimeout(50);
+      await gesture(s, dir);
+      return rec;
+    };
+    /** The time from the first frame that moved to the first at the end, ms. */
+    const moveMs = (fr) => {
+      const y0 = fr[0].y;
+      const y1 = fr.at(-1).y;
+      const a = fr.find((f) => Math.abs(f.y - y0) > 0.5);
+      const b = fr.find((f) => Math.abs(f.y - y1) < 0.5);
+      return a && b ? Math.round(b.t - a.t) : null;
+    };
+    // one gesture at the footer: one smooth move to the chosen pack at rest
+    const toPack = await gestureRecorded(1);
+    const atPack = await settle();
+    const riseMid = toPack.find(
+      (f) => f.lap && f.lap.rise > 0.2 && f.lap.rise < 0.8,
+    );
+    const rising = toPack.filter((f) => f.lap && !f.lap.free);
+    report(
+      'wp67-one-gesture-from-the-footer-to-the-chosen-pack-' + size,
+      Math.abs(atPack.y - F1) < 1 &&
+        atPack.lap?.rise > 0.99 &&
+        !atPack.lap?.ret &&
+        atPack.drawn.length === 1 &&
+        atPack.drawn[0].id === chosen &&
+        rising.every((f, i) => i === 0 || f.y >= rising[i - 1].y),
+      `y ${Math.round(atPack.y)} (pack rest ${F1}); lap ${JSON.stringify(atPack.lap)}; drawn ${atPack.drawn.map((d) => d.id).join(',')} (chosen ${chosen}); the move took ${moveMs(toPack)} ms over ${toPack.length} frames`,
+    );
+    report(
+      'wp67-rise-one-pack-' + size,
+      !!riseMid &&
+        riseMid.drawn.length === 1 &&
+        riseMid.drawn[0].id === chosen &&
+        riseMid.headOp === 0,
+      riseMid
+        ? `mid-move: rise ${riseMid.lap.rise.toFixed(3)}; drawn ${riseMid.drawn.map((d) => d.id).join(',')} (chosen ${chosen}); row heading opacity ${riseMid.headOp}`
+        : 'no frame mid-rise',
+    );
+    // up at the chosen pack: one move back to the footer
+    const upRec = await gestureRecorded(-1);
+    const backUp = await settle();
+    const upLinks = await footerHit();
+    report(
+      'wp67-up-from-the-chosen-pack-to-the-footer-' + size,
+      Math.abs(backUp.y - F0) < 1 &&
+        backUp.free &&
+        upLinks.every((l) => l.inView && l.hits),
+      `y ${Math.round(backUp.y)} (footer rest ${F0}); the move took ${moveMs(upRec)} ms; links ${upLinks.map((l) => l.text + (l.hits ? ' ok' : ' covered')).join(', ')}`,
+    );
+    await gesture(s, 1);
+    const atPack2 = await settle();
+    // the next gesture: one move back to the full row (Return), ending on the
+    // wrap at the row
+    const toRow = await gestureRecorded(1);
+    const retMid = toRow.find(
+      (f) => f.lap && f.lap.ret > 0.3 && f.lap.ret < 0.8,
+    );
     report(
       'wp67-return-all-back-' + size,
-      ret.drawn.length >= 2 &&
-        ret.drawn.some((d) => d.id === chosen) &&
-        ret.lap?.ret > 0.5 &&
-        ret.lap?.ret < 0.7,
-      `return ${ret.lap?.ret?.toFixed(3)}; drawn ${ret.drawn.length}: ${ret.drawn.map((d) => d.id + '@' + d.o).join(', ')}; GPU ${MB(ret.gpu)} MB`,
+      !!retMid &&
+        retMid.drawn.length >= 2 &&
+        retMid.drawn.some((d) => d.id === chosen),
+      retMid
+        ? `mid-move: return ${retMid.lap.ret.toFixed(3)}; drawn ${retMid.drawn.length}: ${retMid.drawn.map((d) => d.id + '@' + d.o).join(', ')}`
+        : 'no frame mid-return',
     );
-    // the seam: just above Last's top, then across it
-    const before = await to(t2.lastTop - 2, 1500);
-    const clip = await page.evaluate(() => {
-      const r = document
-        .querySelector('[data-stage-canvas]')
-        ?.getBoundingClientRect();
-      return r
-        ? { x: r.x, y: Math.max(0, r.y), width: r.width, height: r.height }
-        : null;
-    });
-    // the canvas alone: the row's own UI (which fades in from the wrap, by
-    // design) and the site chips are hidden for both pictures
-    const hideUi = () =>
-      page.evaluate(() => {
-        const st = document.createElement('style');
-        st.id = 'qa-hide-ui';
-        st.textContent =
-          '[data-stage-head],[data-stage-info],[data-stage-nav],[data-stage-label],[data-testid="free-pack-badge"],[data-telegram-banner]{visibility:hidden!important}';
-        document.head.appendChild(st);
-      });
-    await hideUi();
-    await page.waitForTimeout(100);
-    const pngA = await page.screenshot({ clip });
-    // The seam itself: the last frame drawn before the scroll crosses Last's
-    // top and the first frame posed after it, read in the page around that one
-    // scroll. Packs idle-bob between any two frames, so the two readings must
-    // be close in time for the pose tolerances to mean "no jump"; comparing
-    // with a reading taken before the screenshot let the bob drift by however
-    // long the screenshot took, which is longer on software rendering.
-    const seam = await page.evaluate(async (target) => {
-      const ps = window.__packStage;
-      const frame = () => new Promise((r) => requestAnimationFrame(r));
-      const read = () =>
-        (ps.runtime?.()?.drawn ?? []).filter((d) => d.opacity > 0);
-      const r3 = (v) => Math.round(v * 1000) / 1000;
-      const poses = (ds) =>
-        ds.map((d) => ({
-          id: d.id,
-          x: r3(d.x),
-          y: r3(d.y),
-          z: r3(d.z),
-          s: r3(d.scale),
-        }));
-      await frame();
-      await frame();
-      const b = read();
-      const t = performance.now();
-      window.scrollTo(0, target);
-      let a = read();
-      while ((a.length === 0 || a[0].at <= t) && performance.now() - t < 2000) {
-        await frame();
-        a = read();
-      }
-      return {
-        before: { drawn: poses(b) },
-        after: { drawn: poses(a) },
-        beforeAt: b[0]?.at ?? null,
-        afterAt: a[0]?.at ?? null,
-        scrolledAt: t,
-      };
-    }, t2.lastTop + 20);
-    /** The two seam frames' pose times apart, ms (null: a frame is missing). */
-    const seamGap =
-      seam.beforeAt !== null && seam.afterAt !== null
-        ? Math.round(seam.afterAt - seam.beforeAt)
-        : null;
-    const after = await lapState();
-    // the row at R0 once the lock has landed
-    await page.waitForTimeout(1500);
-    const pngB = await page.screenshot({ clip });
-    await page.evaluate(() => document.getElementById('qa-hide-ui')?.remove());
-    let diff = null;
-    try {
-      const { default: sharp } = await import('sharp');
-      const raw = async (b) =>
-        await sharp(b)
-          .removeAlpha()
-          .raw()
-          .toBuffer({ resolveWithObject: true });
-      const a = await raw(pngA);
-      const b = await raw(pngB);
-      let sum = 0;
-      let big = 0;
-      for (let i = 0; i < a.data.length; i++) {
-        const d = Math.abs(a.data[i] - b.data[i]);
-        sum += d;
-        if (d > 48) big++;
-      }
-      diff = { mean: sum / a.data.length, bigShare: big / a.data.length };
-    } catch (e) {
-      diff = { error: String(e) };
-    }
-    const fs = await import('node:fs');
-    fs.writeFileSync(`${OUT}/${size}-seam-before.png`, pngA);
-    fs.writeFileSync(`${OUT}/${size}-seam-after.png`, pngB);
+    // the seam: the last frame before the wrap against the first after it
+    const wi = toRow.findIndex(
+      (f, i) => i > 0 && toRow[i - 1].y > t2.rise.start && f.y < t2.r0 + 400,
+    );
+    const seamBefore = wi > 0 ? toRow[wi - 1] : null;
+    const seamAfter =
+      wi > 0 ? toRow.slice(wi).find((f) => f.at !== seamBefore.at) : null;
     /** The seam frames may be at most this far apart: the idle bob moves about 0.001 per frame. */
     const SEAM_GAP_MS = 250;
-    /** The same packs, each within 2% of its offset and 0.01 in height and scale (idle bob, a 2 px scroll). */
+    /** The same packs, each within 2% of its offset and 0.01 in height and scale (idle bob). */
     const samePoses = (a, b) => {
       if (a.drawn.length === 0 || a.drawn.length !== b.drawn.length)
         return false;
@@ -2427,17 +2480,22 @@ for (const size of sizes) {
         .map((d) => [d.id, d.x, d.y, d.z, d.s].join(':'))
         .sort()
         .join(' ');
+    const seamGap =
+      seamBefore?.at != null && seamAfter?.at != null
+        ? Math.round(seamAfter.at - seamBefore.at)
+        : null;
     report(
       'wp67-seam-no-jump-' + size,
-      before.lap?.ret >= 0.99 &&
-        !after.on &&
+      Math.abs(atPack2.y - F1) < 1 &&
+        !!seamBefore &&
+        !!seamAfter &&
+        seamBefore.lap?.ret >= 0.99 &&
         seamGap !== null &&
         seamGap <= SEAM_GAP_MS &&
-        seam.afterAt > seam.scrolledAt &&
-        samePoses(seam.before, seam.after),
-      // the pixel figures compare the frame at Last with the row 1.5 s later
-      // (the idle bob and the foil move in between): kept for the record
-      `last frame before the seam vs the first frame posed after it (${seamGap ?? 'n/a'} ms apart, at most ${SEAM_GAP_MS}): drawn before [${poses(seam.before)}] after [${poses(seam.after)}]; scroll ${Math.round(before.y)} -> ${Math.round(after.y)}; canvas Last vs the landed row: mean |d| ${diff?.mean?.toFixed?.(3)}, share > 48: ${diff?.bigShare?.toFixed?.(5)} ${diff?.error ?? ''}`,
+        samePoses(seamBefore, seamAfter),
+      seamBefore && seamAfter
+        ? `last frame before the wrap (y ${Math.round(seamBefore.y)}, return ${seamBefore.lap?.ret}) vs the first after it (y ${Math.round(seamAfter.y)}), ${seamGap ?? 'n/a'} ms apart (at most ${SEAM_GAP_MS}): before [${poses(seamBefore)}] after [${poses(seamAfter)}]; the move took ${moveMs(toRow)} ms`
+        : `no wrap seen in ${toRow.length} frames (from y ${Math.round(atPack2.y)})`,
     );
     const landed = await settle();
     report(
@@ -2451,8 +2509,13 @@ for (const size of sizes) {
         !landed.lapAttr,
       `y ${Math.round(landed.y)} (R0 ${t2.r0}); focus ${landed.on}; address ${landed.path}; history ${landed.len} (start ${len0}); track ${landed.track} (chosen ${chosenIndex}); heading opacity ${landed.headOp}; GPU ${MB(landed.gpu)} MB`,
     );
-    // the wheel is swallowed during the guard; after it one notch pages to Front
-    await to(t2.lastTop - 2, 900);
+    // a native jump across Last's top (End, the scrollbar) still wraps with
+    // the 1.2 s lock: the wheel is swallowed during it; after it one notch
+    // pages to Front
+    await page.keyboard.press('End');
+    await page.waitForTimeout(200);
+    await rest(page);
+    await to(F1, 900);
     await page.evaluate((v) => window.scrollTo(0, v), t2.lastTop + 10);
     await page.waitForTimeout(250);
     if (s.cdp) await gesture(s, 1);
@@ -2482,8 +2545,11 @@ for (const size of sizes) {
     const picked = await lapState();
     await to(picked.t.exitEnd + 40, 600);
     const t3 = (await lapState()).t;
-    await to(t3.lastTop - 2, 1200);
-    await to(t3.lastTop + 15, 100);
+    // the end by keys: the footer, the chosen pack, the row
+    await to(t3.ends[0], 800);
+    await page.keyboard.press('ArrowDown');
+    await settle();
+    await page.keyboard.press('ArrowDown');
     const lap2 = await settle();
     report(
       'wp67-two-laps-with-a-pick-' + size,
@@ -2536,17 +2602,31 @@ for (const size of sizes) {
         )
         .join('; '),
     );
-    // free touch (phone): follow, glide, a tap during the glide, a diagonal
+    // free touch (phone): follow, glide, a tap during the glide; a diagonal
+    // drag that reaches the footer rests there (it does not page on)
     if (s.cdp) {
       await page.keyboard.press('End');
       await page.waitForTimeout(200);
       await rest(page);
       const tt = (await lapState()).t;
-      await to(tt.exitEnd + 200, 600);
+      await to(tt.exitEnd + 20, 600);
       const y0 = (await lapState()).y;
-      await swipe(s, 200, 650, 200, 350);
+      // a point a tap opens nothing at (the footer's links are in view here)
+      const calm = await page.evaluate(() => {
+        for (let y = innerHeight * 0.3; y < innerHeight * 0.9; y += 10)
+          for (const x of [12, innerWidth / 2, innerWidth - 12]) {
+            const el = document.elementFromPoint(x, y);
+            if (
+              el &&
+              !el.closest('a,button,[role="button"],input,label,summary')
+            )
+              return { x, y };
+          }
+        return { x: 12, y: innerHeight * 0.3 };
+      });
+      await swipe(s, 200, 650, 200, 530);
       await page.waitForTimeout(80);
-      await tap(s, 200, 500);
+      await tap(s, calm.x, calm.y);
       await page.waitForTimeout(100);
       const yA = (await lapState()).y;
       await page.waitForTimeout(1200);
@@ -2555,9 +2635,12 @@ for (const size of sizes) {
       await page.waitForTimeout(1500);
       const yC = (await lapState()).y;
       report(
-        'wp67-free-touch-follows-and-a-tap-stops-the-glide-phone',
-        yA > y0 + 250 && Math.abs(yB - yA) < 2 && yC > yB + 100,
-        `start ${Math.round(y0)}; after a 300 px swipe and a tap 80 ms later ${Math.round(yA)}, 1.2 s on ${Math.round(yB)}; a diagonal swipe then ${Math.round(yC)}`,
+        'wp67-free-touch-follows-a-tap-stops-the-glide-the-footer-holds-phone',
+        yA > y0 + 80 &&
+          yA < tt.ends[0] &&
+          Math.abs(yB - yA) < 2 &&
+          Math.abs(yC - tt.ends[0]) < 1,
+        `start ${Math.round(y0)}; after a 120 px swipe and a tap 80 ms later ${Math.round(yA)}, 1.2 s on ${Math.round(yB)}; a diagonal swipe then ${Math.round(yC)} (footer rest ${tt.ends[0]})`,
       );
     }
     report(
@@ -2712,13 +2795,6 @@ for (const size of sizes) {
       await page.waitForTimeout(wait);
       return pState();
     };
-    const sweep = async (from, upto, steps, dwell) => {
-      const seen = [];
-      for (let i = 0; i <= steps; i++) {
-        seen.push(await to(from + ((upto - from) * i) / steps, dwell));
-      }
-      return seen;
-    };
     const settle = async () => {
       await rest(page, 8000);
       await page.waitForTimeout(500);
@@ -2797,7 +2873,10 @@ for (const size of sizes) {
       const t = at.t;
       // the free span: the trimmed middle
       await phase('exit');
-      const free = await to((t.exitEnd + t.rise.start) / 2, 1800);
+      const free = await to(
+        (t.exitEnd + Math.min(t.rise.start, t.ends[0])) / 2,
+        1800,
+      );
       rec.free = {
         y: Math.round(free.y),
         free: free.free,
@@ -2809,22 +2888,45 @@ for (const size of sizes) {
         fits: trimFits(t, page.viewportSize().height),
         span: spanText(t, page.viewportSize().height),
       };
-      // the rise, then the plateau, then the return
+      // the end, by gestures as a visitor makes them: from the footer's rest
+      // one move to the chosen capsule (the rise), then one back to the row
+      // (Return), which wraps; the lean monitor samples every frame by phase
+      await to(t.ends[0], 800);
       await phase('rise');
-      const rs = (await to(t.rise.start - 2, 300)).t.rise;
-      rec.riseSteps = await sweep(rs.start, rs.end, 24, 90);
-      const t2 = (await pState()).t;
-      await phase('plateau');
-      await to(t2.ret.start - 2, 400);
+      await gesture(s, 1);
+      const t2 = (await settle()).t;
       await phase('return');
-      rec.retSteps = await sweep(t2.ret.start, t2.ret.end, 24, 90);
-      // the seam: just above Last's top, then across it
-      await phase('plateau');
-      rec.before = await to(t2.lastTop - 2, 1500);
-      await phase('wrap');
-      await page.evaluate((v) => window.scrollTo(0, v), t2.lastTop + 20);
-      await page.waitForTimeout(40);
-      rec.after = await pState();
+      // the seam: the last frame drawn before the wrap and the first after it
+      const seam = page.evaluate(async (riseStart) => {
+        const ps = window.__packStage;
+        const r3 = (v) => Math.round(v * 1000) / 1000;
+        const read = () =>
+          (ps.runtime?.()?.drawn ?? [])
+            .filter((d) => d.opacity > 0)
+            .map((d) => ({
+              id: d.id,
+              x: r3(d.x),
+              y: r3(d.y),
+              z: r3(d.z),
+              s: r3(d.scale),
+            }));
+        let before = null;
+        const t0 = performance.now();
+        while (performance.now() - t0 < 5000) {
+          await new Promise((r) => requestAnimationFrame(r));
+          if (scrollY > riseStart) before = read();
+          else if (before) {
+            await new Promise((r) => requestAnimationFrame(r));
+            return { before, after: read() };
+          }
+        }
+        return { before: before ?? [], after: [] };
+      }, t2.rise.start);
+      await page.waitForTimeout(50);
+      await gesture(s, 1);
+      const sm = await seam;
+      rec.before = { drawn: sm.before };
+      rec.after = { drawn: sm.after };
       await phase('row');
       rec.landed = await settle();
       rec.r0 = t2.r0;

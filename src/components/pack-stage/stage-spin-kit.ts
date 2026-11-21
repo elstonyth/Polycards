@@ -354,6 +354,8 @@ export function startSpin(host: SpinHost): SpinControl {
             top: r0,
             panel,
             viewport: window.innerHeight,
+            // the footer's rest: in view under the header, above the tab bar
+            view: window.innerHeight - top - bottom,
             riseSection: rise
               ? { top: rise.top, bottom: rise.top + rise.height }
               : null,
@@ -1020,7 +1022,8 @@ export function startSpin(host: SpinHost): SpinControl {
     if (loadSeen) return;
     loadSeen = true;
     const nav = performance.getEntriesByType('navigation')[0] as
-      PerformanceNavigationTiming | undefined;
+      | PerformanceNavigationTiming
+      | undefined;
     const y = flowLoadStart(nav?.type, window.scrollY, rowTop(s));
     if (y !== null) window.scrollTo(0, y);
   };

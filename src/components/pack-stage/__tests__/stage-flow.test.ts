@@ -718,3 +718,72 @@ describe('the detail band is written once', () => {
     expect(Number(band?.[2])).toBe(FLOW_DETAIL_SLOTS);
   });
 });
+
+describe('stage flow: the end rests (the footer, the chosen pack, the row back)', () => {
+  // a slim footer: 400 px, the last section
+  const END = { riseSection: { top: 11600, bottom: 12000 } };
+
+  it('the footer in view, the rise end, Last top: one rest each, ascending', () => {
+    const t = table(END);
+    // the footer's bottom at the viewport's bottom: 12000 - 800
+    expect(t.rise).toEqual({ start: 11320, end: 12000 });
+    expect(t.ends).toEqual([11200, 12000, 13000]);
+  });
+
+  it('the footer rest is measured against the height seen under the header and above the tab bar', () => {
+    expect(table({ ...END, view: 700 }).ends).toEqual([11300, 12000, 13000]);
+  });
+
+  it('stays above the rise start (nothing rises over the footer at rest) and below the exit end', () => {
+    // a footer taller than 0.65 of the viewport: the rest is one pixel above the rise
+    const tall = table({ riseSection: { top: 11000, bottom: 12000 } });
+    expect(tall.rise!.start).toBe(10720);
+    expect(tall.ends[0]).toBe(10719);
+    expect(flowAt(tall.ends[0]!, tall)).toMatchObject({ span: 'free' });
+    // a page so short the footer is in view at the exit end
+    const short = table({
+      riseSection: { top: 8100, bottom: 8300 },
+      ret: { top: 8300, height: 1000 },
+      last: { top: 9300, height: 801 },
+    });
+    expect(short.ends[0]).toBe(8000);
+  });
+
+  it('the rests sit on whole pixels except the wrap line', () => {
+    const t = table({
+      riseSection: { top: 11600.4, bottom: 12000.4 },
+      ret: { top: 12000.4, height: 1000 },
+      last: { top: 13000.4, height: 801 },
+    });
+    expect(t.ends).toEqual([11200, 12000, 13000.4]);
+    // half a pixel short of Return: rounded down, so the others stay out
+    const half = table({
+      riseSection: { top: 11600.5, bottom: 12000.5 },
+      ret: { top: 12000.5, height: 1000 },
+    });
+    expect(half.ends[1]).toBe(12000);
+    expect(flowAt(half.ends[1]!, half)).toMatchObject({ span: 'rise' });
+  });
+
+  it('none without a measured last section or without Last', () => {
+    expect(table({ riseSection: null }).ends).toEqual([]);
+    expect(table({ ...END, last: null }).ends).toEqual([]);
+  });
+
+  it('without Return the pack rest and the wrap line are one: the rests stay distinct', () => {
+    const t = table({ ...END, ret: null, last: { top: 12000, height: 801 } });
+    expect(t.ends).toEqual([11200, 12000]);
+  });
+
+  it('the chosen pack rests at the rise end: risen whole, the others not back yet', () => {
+    const t = table(END);
+    const at = flowAt(t.ends[1]!, t);
+    expect(at).toEqual({ zone: 'free', span: 'ret', t: 0 });
+    expect(lapAt(at, { rise: 1, ret: 0 }, false)).toEqual({
+      rise: 1,
+      ret: 0,
+      free: false,
+      trim: false,
+    });
+  });
+});

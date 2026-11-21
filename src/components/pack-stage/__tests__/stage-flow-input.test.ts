@@ -1002,3 +1002,68 @@ describe('flow input: the endless pick at the lineup', () => {
     expect(p.picks).toEqual([3]);
   });
 });
+
+describe('flow input: the end (the footer, the chosen pack, the row back)', () => {
+  // a slim footer: the footer rest at 11200, the pack at 12000, Last's top at 13000
+  const END_GEO = {
+    ...GEO,
+    riseSection: { top: 11600, bottom: 12000 },
+    ret: { top: 12000, height: 1000 },
+    last: { top: 13000, height: 801 },
+  };
+  const endPage = () => {
+    const p = page();
+    p.input.measure(END_GEO, 0);
+    return p;
+  };
+
+  it('the table has the end rests; the view height (header and tab bar out) sets the footer rest', () => {
+    const p = endPage();
+    expect(p.input.table()!.ends).toEqual([11200, 12000, 13000]);
+    p.input.measure({ ...END_GEO, view: 700 }, 0);
+    expect(p.input.table()!.ends).toEqual([11300, 12000, 13000]);
+  });
+
+  it('next and prev step between the end rests; prev at the footer and next above it are the browser own', () => {
+    const p = endPage();
+    expect(p.input.key('next', 11000, 0)).toBe('free');
+    expect(p.input.key('prev', 11200, 0)).toBe('free');
+    expect(p.input.key('next', 11200, 0)).toBe('moved');
+    expect(run(p.input, 11200, 16, 1600)).toBe(12000);
+    expect(p.input.key('prev', 12000, 2000)).toBe('moved');
+    expect(run(p.input, 12000, 2016, 3600)).toBe(11200);
+    // the other keys stay the browser's there
+    for (const k of ['first', 'last', 'escape'] as const)
+      expect(p.input.key(k, 11200, 4000)).toBe('free');
+  });
+
+  it('a held key in the end pages once', () => {
+    const p = endPage();
+    expect(p.input.key('next', 12000, 0, true)).toBe('swallowed');
+    expect(p.input.frame(12000, 16).scrollTo).toBeNull();
+  });
+
+  it('the moves through the end focus nothing (the free part reads from the scroll)', () => {
+    const p = endPage();
+    p.input.frame(11200, 0);
+    p.input.key('next', 11200, 0);
+    run(p.input, 11200, 16, 1600);
+    expect(p.calls).toEqual([]);
+  });
+
+  it('a re-measure keeps a page resting on an end rest on that rest, also when only the content changed', () => {
+    const p = endPage();
+    p.input.frame(12000, 0);
+    // Just Pulled grew by 300 px
+    const grown = {
+      ...END_GEO,
+      riseSection: { top: 11900, bottom: 12300 },
+      ret: { top: 12300, height: 1000 },
+      last: { top: 13300, height: 801 },
+    };
+    expect(p.input.measure(grown, 12000)).toBe(12300);
+    // a turn of the phone at the footer's rest: the new footer rest
+    p.input.frame(11500, 16);
+    expect(p.input.measure({ ...grown, view: 700 }, 11500)).toBe(11600);
+  });
+});

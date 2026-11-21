@@ -49,6 +49,11 @@ export type FlowGeometry = {
   /** The viewport height (px) the rise start is a share of. */
   viewport: number;
   /**
+   * The height seen under the site header and above the tab bar (px), for
+   * the footer's rest; absent: the viewport.
+   */
+  view?: number;
+  /**
    * The page's last section (the rise is keyed to it, whatever it is);
    * absent until it is measured.
    */
@@ -80,13 +85,21 @@ export type FlowTable = {
   ret: FlowRange | null;
   lastTop: number | null;
   lastHeight: number;
+  /**
+   * The end's rests, ascending: the footer in view (the end of the free
+   * part), the chosen pack alone (the rise's end) and Last's top (the row
+   * back, where a move there wraps). Empty without a measured last section
+   * and a Last: the free part then runs on to the wrap.
+   */
+  ends: readonly number[];
 };
 
 export type FlowSpan = 'exit' | 'free' | 'rise' | 'ret' | 'last';
 
 /** The flow position: paged (P, 0 = row, 1..n stops, n + 1 = lineup) or a free span's progress. */
 export type FlowAt =
-  { zone: 'paged'; p: number } | { zone: 'free'; span: FlowSpan; t: number };
+  | { zone: 'paged'; p: number }
+  | { zone: 'free'; span: FlowSpan; t: number };
 
 /**
  * The slots (in sections after R0) a variant with n stops rests on: evenly
@@ -130,6 +143,7 @@ export function flowTable(g: FlowGeometry): FlowTable | null {
     after = ret.end;
   }
   const hasLast = !!g.last && g.last.height > 0;
+  const lastTop = hasLast ? Math.max(after, g.last!.top) : null;
   return {
     section: S,
     r0,
@@ -141,9 +155,33 @@ export function flowTable(g: FlowGeometry): FlowTable | null {
     edge: rl + S / 2,
     rise,
     ret,
-    lastTop: hasLast ? Math.max(after, g.last!.top) : null,
+    lastTop,
     lastHeight: hasLast ? g.last!.height : 0,
+    ends: endRests(exitEnd, rise, lastTop, g.view ?? vp),
   };
+}
+
+/**
+ * The end's rests: the footer's bottom at the bottom of the view (above the
+ * rise start, so nothing rises over the footer at rest, and never above the
+ * exit end), the rise's end (rounded down), Last's top; whole pixels but the wrap line,
+ * each distinct from the one before.
+ */
+function endRests(
+  exitEnd: number,
+  rise: FlowRange | null,
+  lastTop: number | null,
+  view: number,
+): number[] {
+  if (!rise || lastTop === null) return [];
+  const footer = Math.round(
+    Math.max(exitEnd, Math.min(rise.start - 1, rise.end - Math.max(0, view))),
+  );
+  const out: number[] = [];
+  // the pack's rest never past the rise's end: a pixel into Return would draw the others
+  for (const y of [footer, Math.floor(rise.end), lastTop])
+    if (out.length === 0 || y > out[out.length - 1]! + 0.5) out.push(y);
+  return out;
 }
 
 /** The paged stops: [R0, rests..., RL] (the table's own list; do not mutate). */

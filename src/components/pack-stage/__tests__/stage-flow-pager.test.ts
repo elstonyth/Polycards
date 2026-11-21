@@ -314,11 +314,11 @@ describe('flow pager: wheel', () => {
     expect(p.busy()).toBe(false);
   });
 
-  it("keys in the free part are the browser's own", () => {
+  it("keys in the free part (above the footer's rest) are the browser's own", () => {
     const p = make();
-    expect(p.step(-1, 20000, 0)).toBe('free');
+    expect(p.step(-1, 9500, 0)).toBe('free');
     expect(p.step(1, 9500, 0)).toBe('free');
-    expect(p.goTo(0, 20000, 0)).toBe('free');
+    expect(p.goTo(0, 9500, 0)).toBe('free');
     expect(p.busy()).toBe(false);
     expect(createFlowPager().step(1, 0, 0)).toBe('free'); // no table: no flow
   });
@@ -543,7 +543,8 @@ describe('flow pager: free touch and glide', () => {
   });
 
   it('a release faster than the cap glides as far as the capped speed, no further', () => {
-    const p = make();
+    // a free part with no end rests (no last section measured), so nothing stops the glide
+    const p = make({ riseSection: null });
     let y = 9000;
     p.touchStart(200, 700, y, 0, 0);
     // 150 px every 8 ms: about 312 px per 60 Hz frame
@@ -892,7 +893,8 @@ function cadenceFlick(
   still: number,
   y0 = 9000,
 ): { release: number; end: number; wraps: number } {
-  const p = make();
+  // no end rests (no last section measured): a glide runs on to Last's top
+  const p = make({ riseSection: null });
   let y = y0;
   let finger = 700;
   let now = 0;
@@ -1141,7 +1143,8 @@ describe('flow pager: a touch on a sideways scroller in the free part', () => {
 
 describe('flow pager: the wrap', () => {
   it("a flick across Last's top wraps once to the overshoot, then the 1.2 s lock eases to the row", () => {
-    const p = make();
+    // no end rests (no last section measured): the finger can reach Last's top
+    const p = make({ riseSection: null });
     let y = 12800;
     p.touchStart(200, 600, y, 0, 0);
     for (let i = 1; i <= 3; i++) {
@@ -1189,7 +1192,7 @@ describe('flow pager: the wrap', () => {
   });
 
   it('a finger held through the wrap writes nothing, during the lock or after it', () => {
-    const p = make();
+    const p = make({ riseSection: null });
     let y = 12900;
     p.touchStart(200, 600, y, 0, 0);
     y = p.touchMove(200, 550, y, 16, 16).scrollTo!;
@@ -1298,5 +1301,208 @@ describe('flow pager: the wrap', () => {
     const p = make({ last: null });
     p.frame(12990, 0);
     expect(p.frame(13050, 16).scrollTo).toBeNull();
+  });
+});
+
+describe('flow pager: the end (the footer, the chosen pack, the row back)', () => {
+  // a slim footer: the footer rest at 11200, the pack at 12000, Last's top at 13000
+  const END = { riseSection: { top: 11600, bottom: 12000 } };
+  const E0 = 11200;
+  const E1 = 12000;
+  const C = 13000;
+  /** Runs a move to its end and returns where it landed and the frames that said wrap. */
+  const land = (p: FlowPager, y0: number, from: number, to: number) => {
+    let y = y0;
+    let wraps = 0;
+    for (let now = from; now <= to; now += 16) {
+      const f = p.frame(y, now);
+      if (f.wrap === 0) wraps++;
+      if (f.scrollTo !== null) y = f.scrollTo;
+    }
+    return { y, wraps };
+  };
+
+  it('the pager table carries the end rests', () => {
+    expect(tableFor(END).ends).toEqual([E0, E1, C]);
+  });
+
+  it('wheel: a notch that would cross the footer rest lands on it, one smooth move, and rests there', () => {
+    const p = make(END);
+    // above it the wheel is native
+    expect(p.wheel(100, 0, false, 11000, 0)).toBe(false);
+    expect(p.wheel(100, 0, false, 11150, 1000)).toBe(true);
+    expect(p.busy()).toBe(true);
+    // a trackpad's momentum: events every 16 ms, fading, through the move and after it
+    let y = 11150;
+    let dy = 100;
+    for (let now = 1016; now <= 1000 + PAGE_MS + 600; now += 16) {
+      dy = Math.max(WHEEL_MIN_DELTA, dy * 0.97);
+      expect(p.wheel(dy, 0, false, y, now)).toBe(true);
+      const f = p.frame(y, now);
+      if (f.scrollTo !== null) y = f.scrollTo;
+    }
+    expect(y).toBe(E0);
+    expect(run(p, E0, 1000 + PAGE_MS + 616, 5000)).toBe(E0);
+    // a new notch after a pause is a new gesture
+    expect(p.wheel(100, 0, false, E0, 6000)).toBe(true);
+    expect(run(p, E0, 6000, 6000 + PAGE_MS + 32)).toBe(E1);
+  });
+
+  it('wheel: down at the footer is one 1.5 s ease-out move to the chosen pack; down there one to the row, which wraps once', () => {
+    const p = make(END);
+    p.frame(E0, 0);
+    expect(p.wheel(100, 0, false, E0, 100)).toBe(true);
+    const mid = p.frame(E0, 100 + PAGE_MS / 2);
+    expect(mid.scrollTo).toBeCloseTo(E0 + (E1 - E0) * 0.875, 6);
+    expect(mid.zone).toBe('free');
+    expect(land(p, mid.scrollTo!, 116 + PAGE_MS / 2, 200 + PAGE_MS).y).toBe(E1);
+    expect(p.busy()).toBe(false);
+    expect(run(p, E1, 2000, 3000)).toBe(E1); // at rest: no snap, no drift
+    expect(p.wheel(100, 0, false, E1, 3100)).toBe(true);
+    const half = p.frame(E1, 3100 + PAGE_MS / 2);
+    expect(half.scrollTo).toBeCloseTo(E1 + (C - E1) * 0.875, 6);
+    const r = land(p, half.scrollTo!, 3116 + PAGE_MS / 2, 3200 + PAGE_MS);
+    expect(r.wraps).toBe(1);
+    expect(r.y).toBe(0);
+    // no dead lock after the move: the next notch at the row pages to Front
+    expect(p.busy()).toBe(false);
+    expect(p.wheel(100, 0, false, 0, 5000)).toBe(true);
+    expect(run(p, 0, 5000, 6600)).toBe(1000);
+  });
+
+  it('the move to the row ends on the wrap frame: R0, wrap 0, the wrap lock, then free on the next frame', () => {
+    const p = make({ ...END, top: 200 });
+    // the rows moved by 200 with the top
+    const t = tableFor({ ...END, top: 200 });
+    expect(t.ends).toEqual([E0, E1, C]);
+    p.frame(E1, 0);
+    p.wheel(100, 0, false, E1, 10);
+    let y = E1;
+    let wrapFrame = null as ReturnType<FlowPager['frame']> | null;
+    for (let now = 26; now < 10 + PAGE_MS + 32 && !wrapFrame; now += 16) {
+      const f = p.frame(y, now);
+      if (f.wrap === 0) wrapFrame = f;
+      else if (f.scrollTo !== null) y = f.scrollTo;
+    }
+    expect(y).toBeLessThan(C);
+    expect(wrapFrame).toMatchObject({ scrollTo: 200, wrap: 0, lock: 'wrap' });
+    const next = p.frame(200, 10 + PAGE_MS + 48);
+    expect(next.lock ?? null).toBeNull();
+    expect(p.busy()).toBe(false);
+  });
+
+  it('wheel: up at the chosen pack is one move back to the footer; up at the footer is native (Just Pulled scrolls)', () => {
+    const p = make(END);
+    p.frame(E1, 0);
+    expect(p.wheel(-100, 0, false, E1, 100)).toBe(true);
+    expect(land(p, E1, 116, 200 + PAGE_MS).y).toBe(E0);
+    expect(p.wheel(-100, 0, false, E0, 3000)).toBe(false);
+    expect(p.busy()).toBe(false);
+  });
+
+  it('wheel: a tiny delta at a rest in the end is swallowed and moves nothing', () => {
+    const p = make(END);
+    p.frame(E1, 0);
+    expect(p.wheel(2, 0, false, E1, 100)).toBe(true);
+    expect(p.busy()).toBe(false);
+  });
+
+  it('keys: next and prev step between the end rests; prev at the footer and next above it are the browser own', () => {
+    const p = make(END);
+    expect(p.step(1, 11000, 0)).toBe('free');
+    expect(p.step(-1, E0, 0)).toBe('free');
+    expect(p.step(1, E0, 0)).toBe('moved');
+    expect(land(p, E0, 16, 100 + PAGE_MS).y).toBe(E1);
+    expect(p.step(-1, E1, 3000)).toBe('moved');
+    expect(land(p, E1, 3016, 3100 + PAGE_MS).y).toBe(E0);
+    expect(p.step(1, E0, 6000)).toBe('moved');
+    expect(land(p, E0, 6016, 6100 + PAGE_MS).y).toBe(E1);
+    expect(p.step(1, E1, 9000)).toBe('moved');
+    const r = land(p, E1, 9016, 9100 + PAGE_MS);
+    expect(r).toEqual({ y: 0, wraps: 1 });
+  });
+
+  it('touch: a drag that reaches the footer rest stops there, and its release rests there', () => {
+    const p = make(END);
+    let y = 11000;
+    p.touchStart(200, 700, y, 0, 0);
+    p.frame(y, 0);
+    for (let i = 1; i <= 8; i++) {
+      y = p.touchMove(200, 700 - 60 * i, y, i * 16, i * 16).scrollTo ?? y;
+      p.frame(y, i * 16);
+    }
+    expect(y).toBe(E0); // the follow stops at the footer
+    p.touchEnd(y, 130, 130);
+    expect(run(p, y, 146, 3000)).toBe(E0);
+  });
+
+  it('touch: a fast flick above the footer glides to its rest and no further', () => {
+    const p = make(END);
+    const r = flick(p, 10200, 5000, 1000 / 60);
+    expect(r.end).toBe(E0);
+  });
+
+  it('touch: from the footer a swipe up the screen is one move to the chosen pack; one down the screen follows the finger', () => {
+    const p = make(END);
+    p.frame(E0, 0);
+    const [a, b] = swipe(p, E0, 100, 0, -80);
+    expect(a!.consumed && b!.consumed).toBe(true);
+    expect(b!.scrollTo).toBe(E0); // held at the footer while the finger moves
+    expect(p.busy()).toBe(true);
+    expect(land(p, E0, 164, 300 + PAGE_MS).y).toBe(E1);
+    const q = make(END);
+    q.touchStart(200, 300, E0, 0, 0);
+    const m = q.touchMove(200, 380, E0, 16, 16);
+    expect(m.consumed).toBe(true);
+    expect(m.scrollTo).toBe(E0 - 80);
+  });
+
+  it('touch: at the chosen pack a swipe pages one rest either way, over 24 px', () => {
+    const p = make(END);
+    p.frame(E1, 0);
+    swipe(p, E1, 100, 0, 80); // finger down the screen: page up
+    expect(land(p, E1, 164, 300 + PAGE_MS).y).toBe(E0);
+    const q = make(END);
+    q.frame(E1, 0);
+    swipe(q, E1, 100, 0, -20); // under 24 px: nothing
+    expect(q.busy()).toBe(false);
+    swipe(q, E1, 200, 0, -80);
+    expect(land(q, E1, 264, 400 + PAGE_MS)).toEqual({ y: 0, wraps: 1 });
+  });
+
+  it('the snap: a page left between the end rests by other means glides to the nearest after 150 ms of quiet', () => {
+    const p = make(END);
+    p.frame(11500, 0);
+    expect(p.frame(11500, SNAP_QUIET_MS - 16).scrollTo).toBeNull();
+    expect(land(p, 11500, SNAP_QUIET_MS + 16, 2000).y).toBe(E0);
+    const q = make(END);
+    q.frame(11700, 0);
+    expect(land(q, 11700, 16, 2000).y).toBe(E1);
+    // near Last's top the nearest is the row: the snap lands there and wraps
+    const w = make(END);
+    w.frame(12800, 0);
+    expect(land(w, 12800, 16, 2000)).toEqual({ y: 0, wraps: 1 });
+  });
+
+  it('a re-measure mid-move keeps the move on its rest by role', () => {
+    const p = make(END);
+    p.frame(E0, 0);
+    p.wheel(100, 0, false, E0, 0);
+    const y = p.frame(E0, 500).scrollTo!;
+    // Just Pulled grew by 300 px: every end rest moved down with it
+    p.setTable(
+      tableFor({
+        riseSection: { top: 11900, bottom: 12300 },
+        ret: { top: 12300, height: 1000 },
+        last: { top: 13300, height: 801 },
+      }),
+    );
+    expect(land(p, y, 516, 100 + PAGE_MS).y).toBe(E1 + 300);
+  });
+
+  it('without a measured last section the free part runs on as before (no end rests)', () => {
+    const p = make({ riseSection: null });
+    expect(p.wheel(100, 0, false, 11150, 0)).toBe(false);
+    expect(p.step(1, 11200, 0)).toBe('free');
   });
 });

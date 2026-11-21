@@ -24,8 +24,9 @@
 //   during a glide is swallowed and the next one still pages.
 // - reduced: a plain document ending with the footer; a tap opens the pack.
 // - nojs: exactly one footer and no spacer with height.
-// - lap: a turn of the phone at the rise, in Return and at Last keeps the
-//   lap's place; End and PageDown at Last wrap to the row.
+// - lap: a turn of the phone at the end's rests (the chosen pack, the
+//   footer) keeps the page on that rest; End and PageDown at the chosen pack
+//   land on the row.
 // - trim: scrolling normally (wheel notches, or one-finger swipes) through
 //   every stop and the lineup's exit to the middle of the free span, only the
 //   chosen pack is kept (lap.trim, at most one pack drawn) and, on the phone,
@@ -223,6 +224,7 @@ const probe = (page) =>
       rise: fl?.table?.rise ?? null,
       ret: fl?.table?.ret ?? null,
       lastTop: fl?.table?.lastTop ?? null,
+      ends: fl?.table?.ends ?? [],
       lap: fl?.lap ?? null,
       on: !!f?.on,
       focus: f?.on ? f.focus : 0,
@@ -977,16 +979,16 @@ async function lapPart(size) {
   const from = PROFILES[size].viewport;
   const s = await open(size);
   const { page } = s;
-  /** To the lineup, then to share x of a lap span (rise, ret) or Last's top. */
-  const toLap = async (span, x) => {
+  /**
+   * To the lineup, then to one of the end's rests: 0 the footer in view, 1
+   * the chosen pack alone (a visitor rests nowhere else past the free part).
+   */
+  const toLap = async (j) => {
     await load(s);
     await rest(page);
     await key(page, 'End');
     let p = await probe(page);
-    const t = p[span];
-    const y =
-      span === 'lastTop' ? p.lastTop - 2 : t.start + (t.end - t.start) * x;
-    await page.evaluate((v) => window.scrollTo(0, v), y);
+    await page.evaluate((v) => window.scrollTo(0, v), p.ends[j]);
     await page.waitForTimeout(800);
     p = await probe(page);
     return p;
@@ -1036,24 +1038,31 @@ async function lapPart(size) {
           ' back)',
     );
   };
-  let p = await toLap('rise', 0.5);
-  await turnAndBack('rotate-in-rise-' + size, p, 'rise', 0.15);
-  p = await toLap('ret', 0.5);
-  await turnAndBack('rotate-in-return-' + size, p, 'ret', 0.15);
-  p = await toLap('lastTop');
-  await turnAndBack('rotate-at-last-' + size, p, 'ret', 0.1);
-  // End and PageDown at Last are the browser's: they cross Last's top and
-  // the page wraps to the row
+  // a turn of the phone at each end rest keeps the page on that rest
+  const onRest = async (name, j, field) => {
+    const p0 = await toLap(j);
+    await turnAndBack(name, p0, field, 0.01);
+    const q = await probe(page);
+    report(
+      name + '-on-the-rest',
+      Math.abs(q.y - q.ends[j]) < 1.5,
+      'scrollY ' + q.y + ', rest ' + q.ends[j] + ' (ends ' + q.ends + ')',
+    );
+  };
+  await onRest('rotate-at-the-chosen-pack-' + size, 1, 'rise');
+  await onRest('rotate-at-the-footer-' + size, 0, 'rise');
+  // End (the browser's: past Last's top) and PageDown (one move to the row
+  // back) at the chosen pack both land on the row
   const wraps = [];
   for (const k of ['End', 'PageDown']) {
-    p = await toLap('lastTop');
+    await toLap(1);
     await page.keyboard.press(k);
     await page.waitForTimeout(1800);
     const q = await rest(page);
     wraps.push({ k, ok: restIndex(q) === 0 && !q.on, y: q.y });
   }
   report(
-    'keys-wrap-at-last-' + size,
+    'keys-wrap-at-the-chosen-pack-' + size,
     wraps.every((w) => w.ok),
     wraps
       .map(

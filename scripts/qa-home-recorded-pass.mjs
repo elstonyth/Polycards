@@ -2,9 +2,10 @@
 // It records; it does not judge feel. It fails only on a page error, a thrown step, or a leg it could not reach.
 //   Forward: the row, a tap on the centred pack, every stop, the lineup, a sideways pick, the free part with the
 //            Just Pulled drawer, the rise, the return, and the loop back to the row.
+//   End:      from the footer's rest, one gesture each: the chosen pack, the footer, the pack, the row.
 //   Backward: from the lineup up to the row.
 // A labelled frame every 200 ms (written as <size>-<leg>-<nnn>-<phase>.jpg) and two contact sheets per size
-// (SHEET-<size>-forward.png, SHEET-<size>-backward.png) go to --out (default: the kit's output folder).
+// (SHEET-<size>-forward.png, SHEET-<size>-end.png, SHEET-<size>-backward.png) go to --out (default: the kit's output folder).
 // Real gestures only: CDP touch swipes and taps on the phone, wheel notches, keys and clicks on the desktop.
 // Run from the repo root, through the machine's test queue, one size per job so each stays under 3 minutes:
 //   node <tools>/qa-with-lock.mjs --runner=<lane> -- node scripts/qa-home-recorded-pass.mjs --only=phone [--base=URL]
@@ -30,7 +31,10 @@ const where = (s) =>
     // the table first (the focus stays on past the stops), then the stop,
     // then the row
     let phase = 'row';
+    const ends = t?.ends ?? [];
     if (t && t.lastTop != null && y >= t.lastTop - 1) phase = 'wrap';
+    else if (ends.length > 1 && Math.abs(y - ends[1]) < 2) phase = 'pack';
+    else if (ends.length > 0 && Math.abs(y - ends[0]) < 2) phase = 'footer';
     else if (t && t.ret && y >= t.ret.start) phase = 'return';
     else if (t && t.rise && y >= t.rise.start) phase = 'rise';
     else if (t && y > t.exitEnd) phase = 'free';
@@ -43,6 +47,7 @@ const where = (s) =>
       phase,
       busy: !!fl?.busy,
       r0: Math.round(r0),
+      ends: ends.map(Math.round),
       id: ps?.state?.focusOn?.id ?? null,
       jpInView: !!jb && jb.bottom > 0 && jb.top < innerHeight,
       jpLive: !!document.querySelector('[data-jp][data-jp-live="1"]'),
@@ -236,6 +241,18 @@ try {
         }
         maxY = Math.max(maxY, r.y);
         if (maxY > r.r0 + 2000 && r.y < r.r0 + 400) wrapped = true;
+        else if (r.phase === 'pack') {
+          // at the chosen pack one more gesture is the move back to the row,
+          // which ends on the wrap (no lock after it, so a further gesture
+          // would page on into the stops)
+          await stage.rest(s);
+          await scrollOn(s);
+          await stage.rest(s);
+          r = await where(s);
+          seen.add(r.phase);
+          wrapped = r.y < r.r0 + 400;
+          break;
+        }
       }
       await stage.rest(s);
       r = await where(s);
@@ -256,8 +273,8 @@ try {
       );
       check(
         'forward-rise-and-return [' + size + ']',
-        seen.has('rise') && seen.has('return'),
-        [...seen].join(', '),
+        framed.has('rise') && framed.has('return'),
+        [...framed].join(', '),
       );
       check(
         'forward-looped-to-the-row [' + size + ']',
@@ -265,6 +282,48 @@ try {
         'y' + r.y + ' r0 ' + r.r0 + ' phase ' + r.phase,
       );
       await contactSheet(browser, size, 'forward', fwd);
+
+      // the end: from the footer's rest, one gesture each: the chosen pack,
+      // back to the footer, the pack again, the row
+      await s.tap(
+        ...(await (async () => {
+          const c = await stage.centreTile(s);
+          return c ? [c.x, c.y] : [0, 0];
+        })()),
+      );
+      await stage.rest(s);
+      r = await stepWhile(s, 1, (w) => w.phase !== 'lineup', 10);
+      if (r.phase !== 'lineup' || r.ends.length < 3)
+        throw new Error(
+          'could not reach the lineup for the end leg (phase ' + r.phase + ')',
+        );
+      await s.page.evaluate((v) => window.scrollTo(0, v), r.ends[0]);
+      await stage.rest(s);
+      rec = recorder(s, 'end');
+      await s.page.waitForTimeout(600);
+      const endWay = [(await where(s)).phase];
+      for (const dir of [1, -1, 1, 1]) {
+        await s.step(dir);
+        await stage.rest(s);
+        await s.page.waitForTimeout(400);
+        endWay.push((await where(s)).phase);
+      }
+      r = await where(s);
+      await s.page.waitForTimeout(600);
+      const endFrames = await rec.stop();
+      const endSeen = new Set(endFrames.map((f) => f.phase));
+      check(
+        'end-footer-pack-footer-pack-row [' + size + ']',
+        endWay.join(' > ') === 'footer > pack > footer > pack > row' &&
+          Math.abs(r.y - r.r0) < 2,
+        endWay.join(' > ') + '; y' + r.y + ' r0 ' + r.r0,
+      );
+      check(
+        'end-frames-show-the-rise-and-the-return [' + size + ']',
+        endSeen.has('rise') && endSeen.has('return'),
+        [...endSeen].join(', '),
+      );
+      await contactSheet(browser, size, 'end', endFrames);
 
       // backward: down to the lineup first (by position, not recorded), then
       // up to the row
