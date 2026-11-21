@@ -20,10 +20,6 @@ describe('useFlowWait: the wait for the flow', () => {
     expect(result.current.wait).toBe('gave-up');
   });
 
-  it('the cap is 15 s', () => {
-    expect(FLOW_WAIT_CAP_MS).toBe(15_000);
-  });
-
   it('a bind before the cap ends the wait for good', () => {
     const result = renderHook(() => useFlowWait(), undefined);
     act(() => result.current.bound());

@@ -20,7 +20,8 @@ import { FOCUS_SEEDS_ID } from '@/components/pack-stage/stage-focus-seeds';
 import { flowStart } from '@/components/pack-flow/flow-start';
 import { packPagePath } from '@/components/pack-stage/stage-focus-marks';
 import { homePreviewOn } from '@/lib/preview-switch';
-import { packMetadata } from '@/app/slots/[slug]/pack-metadata';
+import { UNKNOWN_PACK_TITLE, packMetadata } from '@/lib/pack-metadata';
+import { flowEntryScript } from '@/components/pack-stage/stage-loader-script';
 import type {
   GateMode,
   StageOverride,
@@ -29,8 +30,8 @@ import type {
 const ROBOTS: Metadata['robots'] = { index: false, follow: false };
 
 /**
- * The preview's title; a load onto a pack's own address (`?focus=<id>`)
- * carries that pack's title, as the pack page does.
+ * The preview's title; a load onto a pack's own address (`?focus=<id>`) the
+ * flow can start on carries that pack's title, as the pack page does.
  */
 export async function generateMetadata({
   searchParams,
@@ -39,20 +40,23 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { focus } = await searchParams;
   if (homePreviewOn() && typeof focus === 'string' && focus) {
-    const { title } = await packMetadata(focus);
-    if (title) return { title, robots: ROBOTS };
+    // Only a pack the flow can start on (read from the catalogue the page
+    // reads anyway); every other focus costs no pack read and is sent on.
+    const categories = (await getPackCategories()).filter(
+      (c) => c.packs.length > 0,
+    );
+    const ids = Object.fromEntries(
+      categories.flatMap((c) => c.packs.map((p) => [p.id, true])),
+    );
+    const tabs = packTabs(categories);
+    if (flowStart({ categories, tabs, seeds: ids, id: focus })) {
+      const { title } = await packMetadata(focus);
+      if (title && title !== UNKNOWN_PACK_TITLE)
+        return { title, robots: ROBOTS };
+    }
   }
   return { title: 'Home preview', robots: ROBOTS };
 }
-
-/**
- * Reduced motion never gets the flow, so a load onto a pack's address takes
- * today's pack page before the stage paints.
- */
-const reducedLeave = (id: string) =>
-  `if(window.matchMedia('(prefers-reduced-motion: reduce)').matches)location.replace(${JSON.stringify(
-    packPagePath(id),
-  )})`.replace(/</g, '\\u003c');
 
 const STAGE_MODES: readonly GateMode[] = ['flat', '3d', 'lite'];
 
@@ -150,7 +154,11 @@ export default async function HomePreviewPage({
   return (
     <div className="w-full">
       {start && (
-        <script dangerouslySetInnerHTML={{ __html: reducedLeave(focus) }} />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: flowEntryScript(focus, packPagePath(focus)),
+          }}
+        />
       )}
       <StageNoScript />
       <script

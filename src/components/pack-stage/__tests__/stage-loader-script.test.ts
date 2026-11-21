@@ -2,10 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { BRAND_LOADER_SESSION_KEY } from '@/components/loader/first-visit';
 import { STAGE_CRASH_KEY } from '../crash-guard';
 import {
+  ENTRY_LOADER_MAX_MS,
+  FLOW_COVER_ATTR,
+  FLOW_ENTRY_ATTR,
   HOME_LOADER_MAX_MS,
   STAGE_LOADER_ATTR,
   STAGE_LOADER_PATHS,
   loaderMaxMs,
+  flowEntryScript,
   stageLoaderScript,
 } from '../stage-loader-script';
 
@@ -69,6 +73,7 @@ function run(script: string, env: Env = {}) {
   );
   return {
     shown: attrs[STAGE_LOADER_ATTR] === '1',
+    entry: attrs[FLOW_ENTRY_ATTR] ?? null,
     styles,
     store: typeof store === 'object' ? store : null,
   };
@@ -173,5 +178,86 @@ describe('loader hold cap', () => {
     expect(loaderMaxMs(400)).toBe(2600);
     expect(loaderMaxMs(2500)).toBe(800);
     expect(loaderMaxMs(9000)).toBe(800);
+  });
+});
+
+describe("the layout's pre-paint script never handles a pack's address", () => {
+  it('reads no focus and never marks an entry: the head of every page stays as it was', () => {
+    expect(script).not.toContain('focus');
+    expect(script).not.toContain(FLOW_ENTRY_ATTR);
+    expect(run(script, { search: '?focus=151' }).entry).toBeNull();
+  });
+});
+
+/** Runs the flow page's entry script against a fake window. */
+function runEntry(
+  id: string,
+  env: { loader?: boolean; reducedMotion?: boolean } = {},
+) {
+  const attrs: Record<string, string> = env.loader
+    ? { [STAGE_LOADER_ATTR]: '1' }
+    : {};
+  const styles: string[] = [];
+  const replaced: string[] = [];
+  const window = {
+    location: { replace: (to: string) => replaced.push(to) },
+    matchMedia: (q: string) => ({
+      matches: q.includes('reduced-motion') && env.reducedMotion === true,
+    }),
+  };
+  const document = {
+    createElement: () => ({ textContent: '' }),
+    head: {
+      appendChild: (el: { textContent: string }) => styles.push(el.textContent),
+    },
+    documentElement: {
+      hasAttribute: (k: string) => k in attrs,
+      setAttribute: (k: string, v: string) => {
+        attrs[k] = v;
+      },
+    },
+  };
+  new Function(
+    'window',
+    'document',
+    flowEntryScript(id, `/slots/${encodeURIComponent(id)}?count=1`),
+  )(window, document);
+  return {
+    entry: attrs[FLOW_ENTRY_ATTR] ?? null,
+    cover: FLOW_COVER_ATTR in attrs,
+    styles,
+    replaced,
+  };
+}
+
+describe("the flow page's script for a load onto a pack's address", () => {
+  it('a load the loader covers is marked with the pack being placed', () => {
+    expect(runEntry('151', { loader: true }).entry).toBe('151');
+    expect(runEntry('151', { loader: true }).cover).toBe(true);
+    expect(runEntry('a b', { loader: true }).entry).toBe('a b');
+    expect(runEntry('151', { loader: true }).replaced).toEqual([]);
+  });
+
+  it('a load with no loader is never marked', () => {
+    const r = runEntry('151');
+    expect(r.entry).toBeNull();
+    expect(r.cover).toBe(false);
+    expect(r.styles).toEqual([]);
+  });
+
+  it("reduced motion takes today's pack page and is never marked", () => {
+    const r = runEntry('151', { loader: true, reducedMotion: true });
+    expect(r.replaced).toEqual(['/slots/151?count=1']);
+    expect(r.entry).toBeNull();
+  });
+
+  it("holds the pre-cover until the entry's own limit", () => {
+    const [css] = runEntry('151', { loader: true }).styles;
+    expect(css).toContain(`html[${FLOW_COVER_ATTR}][${STAGE_LOADER_ATTR}]`);
+    expect(css).toContain(`animation-delay:${ENTRY_LOADER_MAX_MS / 1000 + 1}s`);
+  });
+
+  it('cannot be broken out of by a pack id', () => {
+    expect(flowEntryScript('</script><b>', '/slots/x')).not.toContain('<');
   });
 });

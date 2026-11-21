@@ -12,6 +12,17 @@ export function homePreviewOn(
 }
 
 /**
+ * Whether a pack's own address opens the flow: only with HOME_PREVIEW=1, so
+ * development alone keeps the pack page (the preview page itself stays
+ * available there).
+ */
+export function packFlowOn(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): boolean {
+  return env.HOME_PREVIEW === '1';
+}
+
+/**
  * Where the pack's own address (`/slots/<slug>`) opens under the switch: the
  * flow page focused on that pack, its other query kept (each key given once;
  * `focus` is ours). Null when the address carries a `count` (the pack page's

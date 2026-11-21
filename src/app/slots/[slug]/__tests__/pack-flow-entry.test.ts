@@ -16,8 +16,6 @@ const redirect = vi.fn((to: string) => {
   throw new Redirect(to);
 });
 vi.mock('next/navigation', () => ({ notFound: vi.fn(), redirect }));
-const headers = vi.fn(async () => new Headers());
-vi.mock('next/headers', () => ({ headers }));
 const getPackBaseForViewer = vi.fn(async () => null);
 vi.mock('@/lib/data/packs', () => ({ getPackBaseForViewer }));
 vi.mock('@/lib/data/pack-page', () => ({ loadPackPage }));
@@ -57,7 +55,6 @@ beforeEach(() => {
   vi.unstubAllEnvs();
   loadPackPage.mockClear();
   redirect.mockClear();
-  headers.mockClear();
   getPackBaseForViewer.mockClear();
 });
 const metadata = (search: Record<string, string>) =>
@@ -83,12 +80,12 @@ describe('a pack address with the preview switch off', () => {
     expect(redirect).not.toHaveBeenCalled();
   });
 
-  it('never reads the request headers', async () => {
+  it('development alone keeps the pack page, title included', async () => {
+    vi.stubEnv('NODE_ENV', 'development');
     vi.stubEnv('HOME_PREVIEW', '');
-    await render({});
-    await render({ count: '2' });
-    await metadata({});
-    expect(headers).not.toHaveBeenCalled();
+    expect(await render({})).toBe(today(1));
+    expect(redirect).not.toHaveBeenCalled();
+    expect(await metadata({})).toEqual({ title: 'Pack' });
   });
 
   it('reads the pack for its title', async () => {
@@ -107,7 +104,6 @@ describe('a pack address with the preview switch on', () => {
     await expect(render({ stage: '3d' })).rejects.toThrow(
       '/home-preview?stage=3d&focus=151',
     );
-    expect(headers).not.toHaveBeenCalled();
     expect(loadPackPage).not.toHaveBeenCalled();
   });
 

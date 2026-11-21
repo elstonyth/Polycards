@@ -8,18 +8,22 @@ import {
 import { useStage3d } from './Stage3dProvider';
 import { StageLoaderMark, markRevealElapsed } from './stage-loader-mark';
 import {
+  ENTRY_LOADER_MAX_MS,
+  FLOW_ENTRY_ATTR,
+  FLOW_LEAVE_ATTR,
   HOME_LOADER_MAX_MS,
   LOADER_LATE_AT_MS,
   STAGE_LOADER_ATTR,
   loaderTimings,
 } from './stage-loader-script';
+import { goToPackPage, pendingEntry } from './stage-entry-cover';
 import styles from './pack-stage.module.css';
 
 function subscribe(onChange: () => void) {
   const observer = new MutationObserver(onChange);
   observer.observe(document.documentElement, {
     attributes: true,
-    attributeFilter: [STAGE_LOADER_ATTR],
+    attributeFilter: [STAGE_LOADER_ATTR, FLOW_ENTRY_ATTR],
   });
   return () => observer.disconnect();
 }
@@ -57,11 +61,31 @@ type Plan = { at: number; timings: LoaderTimings; readyAt: number | null };
  * hydrating after LOADER_LATE_AT_MS lets go at once, with no exit. `onLeave`
  * fires as the exit fade starts; the end of the fade, or unmounting, drops
  * the html attribute.
+ *
+ * A load onto a pack's own address (`html[data-flow-entry]`) is different:
+ * the cover stays, whenever the page hydrates, until the flow has placed the
+ * pack on its stop (it removes that attribute), so the visitor never sees the
+ * row; at ENTRY_LOADER_MAX_MS it takes today's pack page instead.
  */
 export default function StageLoader({ onLeave }: { onLeave?: () => void }) {
   const up = useStageLoaderUp(true);
   const stage3d = useStage3d();
-  const ready = stage3d.ready || stage3d.mode === 'flat';
+  // the pack being placed by this load onto its address (null: none, or placed)
+  const entry = useSyncExternalStore(
+    subscribe,
+    () => pendingEntry(),
+    () => null,
+  );
+  // whether this load is one onto a pack's address (read once, at hydration)
+  const [entryLoad] = useState(() =>
+    typeof document === 'undefined' ? false : pendingEntry() !== null,
+  );
+  // gone for today's pack page: the cover stays, whatever happens meanwhile
+  const [leavingPage, setLeavingPage] = useState(false);
+  const ready =
+    (stage3d.ready || stage3d.mode === 'flat') &&
+    !(entryLoad && entry) &&
+    !leavingPage;
   const [leaving, setLeaving] = useState(false);
   const shellRef = useRef<HTMLDivElement>(null);
   const planRef = useRef<Plan | null>(null);
@@ -74,6 +98,20 @@ export default function StageLoader({ onLeave }: { onLeave?: () => void }) {
 
   useEffect(() => {
     if (!up) return;
+    if (entryLoad) {
+      // not placed in time: today's pack page, with the cover still up
+      const limit = window.setTimeout(
+        () => {
+          const id = pendingEntry();
+          if (id === null) return dropAttr();
+          document.documentElement.setAttribute(FLOW_LEAVE_ATTR, '');
+          setLeavingPage(true);
+          goToPackPage(id);
+        },
+        Math.max(0, ENTRY_LOADER_MAX_MS - performance.now()),
+      );
+      return () => window.clearTimeout(limit);
+    }
     // Hydrated too late for an exit (a slow device or network; the CSS
     // failsafe is about to show the page): just let go.
     if (performance.now() > LOADER_LATE_AT_MS) {
@@ -85,7 +123,7 @@ export default function StageLoader({ onLeave }: { onLeave?: () => void }) {
       Math.max(0, GIVE_UP_MS - performance.now()),
     );
     return () => window.clearTimeout(giveUp);
-  }, [up]);
+  }, [up, entryLoad]);
 
   // The exit timer, planned once at hydration so `ready` flipping never
   // restarts it: the reveal goes on from where the CSS clock is.
@@ -93,20 +131,24 @@ export default function StageLoader({ onLeave }: { onLeave?: () => void }) {
     if (!up || leaving) return;
     const now = performance.now();
     if (!planRef.current) {
-      if (now > LOADER_LATE_AT_MS) return;
+      if (now > LOADER_LATE_AT_MS && !entryLoad) return;
+      const timings = loaderTimings(now, markRevealElapsed(shellRef.current));
       planRef.current = {
         at: now,
-        timings: loaderTimings(now, markRevealElapsed(shellRef.current)),
+        // an entry load has no cap of its own here: it leaves once placed
+        timings: entryLoad ? { ...timings, maxMs: Infinity } : timings,
         readyAt: null,
       };
     }
     const plan = planRef.current;
     const elapsed = now - plan.at;
     if (ready && plan.readyAt === null) plan.readyAt = elapsed;
-    const wait = Math.max(0, leaveAtMs(plan.readyAt, plan.timings) - elapsed);
+    const leaveAt = leaveAtMs(plan.readyAt, plan.timings);
+    if (!Number.isFinite(leaveAt)) return;
+    const wait = Math.max(0, leaveAt - elapsed);
     const id = window.setTimeout(() => setLeaving(true), wait);
     return () => window.clearTimeout(id);
-  }, [up, ready, leaving]);
+  }, [up, ready, leaving, entryLoad]);
 
   useEffect(() => {
     if (!leaving) return;

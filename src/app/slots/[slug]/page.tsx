@@ -3,9 +3,9 @@ import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import { loadPackPage } from '@/lib/data/pack-page';
 import { ProductJsonLd } from '@/lib/product-share';
-import { homePreviewOn, packFlowAddress } from '@/lib/preview-switch';
+import { packFlowAddress, packFlowOn } from '@/lib/preview-switch';
+import { packMetadata } from '@/lib/pack-metadata';
 import PackPage from './PackPage';
-import { packMetadata } from './pack-metadata';
 
 // The /slots pack detail — configurator/Top-Hits/odds; the "Open Pack" CTA
 // launches the slot-machine reel (./spin). Backend-driven (catalog + gacha
@@ -28,12 +28,12 @@ export async function generateMetadata({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams?: Promise<Query>;
+  searchParams: Promise<Query>;
 }): Promise<Metadata> {
   const { slug } = await params;
   // Preview switch only: the pack's own address is never shown (see below),
   // so its pack is not read for a title.
-  if (homePreviewOn() && searchParams) {
+  if (packFlowOn()) {
     const query = await searchParams;
     if (packFlowAddress(slug, paramsOf(query)) !== null) return {};
   }
@@ -54,7 +54,7 @@ export default async function SlotsPackDetailPage({
   // links always carry one) opens the home flow on that pack, which puts this
   // address back once it has loaded. A document load is sent there by the
   // proxy before anything renders; a move inside the site takes this redirect.
-  if (homePreviewOn()) {
+  if (packFlowOn()) {
     const to = packFlowAddress(slug, paramsOf(query));
     if (to) redirect(to);
   }

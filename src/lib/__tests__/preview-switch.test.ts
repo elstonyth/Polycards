@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { homePreviewOn, packFlowAddress } from '../preview-switch';
+import { homePreviewOn, packFlowAddress, packFlowOn } from '../preview-switch';
 
 describe('homePreviewOn: the preview switch', () => {
   it('on with HOME_PREVIEW=1 or in development, off otherwise', () => {
@@ -12,6 +12,22 @@ describe('homePreviewOn: the preview switch', () => {
       homePreviewOn({ NODE_ENV: 'production', HOME_PREVIEW: 'true' }),
     ).toBe(false);
     expect(homePreviewOn({ NODE_ENV: 'test' })).toBe(false);
+  });
+});
+
+describe('packFlowOn: whether a pack address opens the flow', () => {
+  it('only with HOME_PREVIEW=1, never in development alone', () => {
+    expect(packFlowOn({ NODE_ENV: 'production', HOME_PREVIEW: '1' })).toBe(
+      true,
+    );
+    expect(packFlowOn({ NODE_ENV: 'development', HOME_PREVIEW: '1' })).toBe(
+      true,
+    );
+    expect(packFlowOn({ NODE_ENV: 'development' })).toBe(false);
+    expect(packFlowOn({ NODE_ENV: 'production' })).toBe(false);
+    expect(packFlowOn({ NODE_ENV: 'production', HOME_PREVIEW: 'true' })).toBe(
+      false,
+    );
   });
 });
 

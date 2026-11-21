@@ -609,6 +609,22 @@
   --stage-failsafe: 3.5s;
 }
 
+/* A load onto a pack's own address keeps the cover until the pack is placed
+   (StageLoader), up to its own limit (15 s, then today's pack page), so its
+   failsafe comes a second after that limit. Keyed on the mark kept for the
+   whole document: the one the placement removes would bring back the 3.5 s
+   failsafe, long past, and hide the cover with no exit. */
+:global(html[data-flow-cover]) .shell,
+:global(html[data-flow-cover]) .stage {
+  --stage-failsafe: 16s;
+}
+
+/* Gone for today's pack page: the cover stays until that page replaces this
+   one, however long it takes. */
+:global(html[data-flow-leave]) .shell {
+  animation: none;
+}
+
 /* Its own stacking context at the overlay's height: the failsafe's opacity
    animation makes the shell a stacking context, and at z-index auto that
    context (and the overlay's z-1000 inside it) painted under the stage. */

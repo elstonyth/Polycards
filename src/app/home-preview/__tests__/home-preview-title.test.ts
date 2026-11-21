@@ -13,7 +13,16 @@ const getPackBaseForViewer = vi.fn(async (slug: string) =>
 );
 vi.mock('@/lib/data/packs', () => ({
   getPackBaseForViewer,
-  getPackCategories: async () => [],
+  getPackCategories: async () => [
+    {
+      id: 'pokemon',
+      heading: 'Pokemon',
+      packs: [
+        { id: '151', name: '151' },
+        { id: 'gone', name: 'Gone' },
+      ],
+    },
+  ],
   getPackHighlights: async () => null,
   getRecentPulls: async () => [],
 }));
@@ -36,10 +45,20 @@ describe('the flow page title', () => {
     expect(await title({ focus: '151' })).toBe('151 — Pokemon');
   });
 
-  it('the preview itself, or a pack it cannot find: the preview title', async () => {
+  it('the preview itself: the preview title', async () => {
     vi.stubEnv('HOME_PREVIEW', '1');
     expect(await title({})).toBe('Home preview');
-    expect(await title({ focus: 'nope' })).toBe('Pack');
+  });
+
+  it('a focus the flow cannot start on: the preview title, no pack read', async () => {
+    vi.stubEnv('HOME_PREVIEW', '1');
+    expect(await title({ focus: 'nope' })).toBe('Home preview');
+    expect(getPackBaseForViewer).not.toHaveBeenCalled();
+  });
+
+  it('a catalogue pack whose own read finds nothing: the preview title', async () => {
+    vi.stubEnv('HOME_PREVIEW', '1');
+    expect(await title({ focus: 'gone' })).toBe('Home preview');
   });
 
   it('switch off: reads no pack', async () => {

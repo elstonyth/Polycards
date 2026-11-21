@@ -22,6 +22,33 @@ import { STAGE_CRASH_KEY } from './crash-guard';
 
 /** The loader's hold cap, in ms from NAVIGATION start (not from hydration). */
 export const HOME_LOADER_MAX_MS = 3000;
+/**
+ * A load onto a pack's own address (`?focus=<id>`) keeps the cover until the
+ * flow has placed the pack on its stop, up to this (ms from navigation start),
+ * then takes today's pack page. Measured on a throttled phone (400 ms latency,
+ * 200 KB/s) the pack was placed at 14.5 s; past this the visitor is better
+ * served by the plain pack page. The flow's own wait gives up at the same time.
+ */
+export const ENTRY_LOADER_MAX_MS = 15_000;
+
+/**
+ * The html attribute the script sets on such a load, holding the pack's id;
+ * the flow removes it once the pack rests on its stop.
+ */
+export const FLOW_ENTRY_ATTR = 'data-flow-entry';
+
+/**
+ * Set with it and kept for the whole document (the placement never removes
+ * it): the cover's failsafes wait for ENTRY_LOADER_MAX_MS on such a load.
+ */
+export const FLOW_COVER_ATTR = 'data-flow-cover';
+
+/**
+ * Set once such a load has gone for today's pack page: the cover stays, its
+ * failsafe off, until that page replaces this one.
+ */
+export const FLOW_LEAVE_ATTR = 'data-flow-leave';
+
 /** Never cut the loader's exit shorter than this after it mounts. */
 const MIN_HOLD_MS = 800;
 
@@ -111,4 +138,34 @@ export function stageLoaderScript(
     `d.documentElement.setAttribute('${STAGE_LOADER_ATTR}','1');` +
     `}catch(e){}})();`
   );
+}
+
+/**
+ * The pre-cover's failsafe on a load onto a pack's own address: a second
+ * after ENTRY_LOADER_MAX_MS, not the usual 3.5 s.
+ */
+const ENTRY_PRE_COVER_CSS =
+  `html[${FLOW_COVER_ATTR}][${STAGE_LOADER_ATTR}]:not(:has([${STAGE_LOADER_SHELL_ATTR}]))::before{` +
+  `animation-delay:${ENTRY_LOADER_MAX_MS / 1000 + 1}s}`;
+
+/**
+ * The preview page's own inline script for a load onto pack `id`'s address,
+ * written first in the page (before the loader shell), never in the layout's
+ * head: reduced motion never gets the flow, so it takes today's pack page
+ * (`packPage`) before the stage paints; a load the loader covers is marked
+ * `html[data-flow-entry=<id>]`, so the cover stays until the pack is placed,
+ * and its pre-cover failsafe waits as long.
+ */
+export function flowEntryScript(id: string, packPage: string): string {
+  return (
+    `(function(){var d=document.documentElement;` +
+    `if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){window.location.replace(${JSON.stringify(packPage)});return}` +
+    `try{if(!d.hasAttribute('${STAGE_LOADER_ATTR}'))return;` +
+    `d.setAttribute('${FLOW_ENTRY_ATTR}',${JSON.stringify(id)});` +
+    `d.setAttribute('${FLOW_COVER_ATTR}','');` +
+    `var s=document.createElement('style');` +
+    `s.textContent=${JSON.stringify(ENTRY_PRE_COVER_CSS)};` +
+    `document.head.appendChild(s);` +
+    `}catch(e){}})();`
+  ).replace(/</g, '\\u003c');
 }

@@ -57,6 +57,7 @@ import {
   holdStands,
   panelState,
 } from './stage-flow-gate';
+import { placeInstantly } from './stage-entry-cover';
 
 /**
  * The measured stage a CSS row is projected into (host px; the art box is
@@ -1050,8 +1051,11 @@ export function startSpin(host: SpinHost): SpinControl {
       next.panel.addEventListener('click', onTap, { capture: true });
       // a press loads the focused view ahead of its tap (when idle has not yet)
       next.panel.addEventListener('pointerdown', preload, quiet);
-      // a load onto a pack's address opens on its stop, placed, not moved to
-      setTimeout(() => resume(true), 0);
+      // the document's load onto a pack's address opens on its stop, placed
+      // (under the loader when it shows), not moved to; any later bind (the
+      // stage mounted again, Back from the reel) moves there as usual
+      const instant = placeInstantly();
+      setTimeout(() => resume(instant), 0);
       if (!live) {
         live = document.createElement('p');
         live.className = 'sr-only';

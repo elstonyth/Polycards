@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { isPlausibleCardHandle } from '@/lib/card-handle';
-import { homePreviewOn, packFlowAddress } from '@/lib/preview-switch';
+import { packFlowAddress, packFlowOn } from '@/lib/preview-switch';
 
 // A form-encoded POST to / skips the home page's route cache: Next treats any
 // `application/x-www-form-urlencoded` POST as a possible server action and
@@ -127,7 +127,10 @@ function packFlowRedirect(request: NextRequest): NextResponse | null {
   }
   const to = packFlowAddress(slug, request.nextUrl.searchParams);
   if (!to) return null;
-  return NextResponse.redirect(new URL(to, request.url), 307);
+  const res = NextResponse.redirect(new URL(to, request.url), 307);
+  // never kept by a cache: with the switch off this address is the pack page
+  res.headers.set('cache-control', 'no-store');
+  return res;
 }
 
 export function proxy(request: NextRequest) {
@@ -148,7 +151,7 @@ export function proxy(request: NextRequest) {
   }
   if (pathname.startsWith('/api/')) return;
   if (!isKnownRoute(pathname)) return notFound();
-  if (homePreviewOn()) {
+  if (packFlowOn()) {
     const toFlow = packFlowRedirect(request);
     if (toFlow) return toFlow;
   }

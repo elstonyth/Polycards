@@ -174,16 +174,12 @@ export default function PackStage({
   );
   // A load onto a pack's address: its tab, and the entry marked for the flow
   // (once, at mount; the flow reads the mark when it binds). Reduced motion
-  // never gets the flow: today's pack page instead (read from the media query
-  // itself, since the hook answers false while hydrating).
+  // never gets here: the page's inline script sends it to today's pack page
+  // before the stage paints.
   const startRef = useRef(start);
   useEffect(() => {
     const s = startRef.current;
     if (!s) return;
-    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      window.location.replace(packPagePath(s.id));
-      return;
-    }
     if (s.category !== active) pick(s.category);
     startEntry(window.history, window.location, {
       id: s.id,

@@ -353,6 +353,13 @@ describe("a pack's own address under the home preview switch", () => {
     }
   });
 
+  it('development alone never sends a pack address anywhere', () => {
+    vi.stubEnv('NODE_ENV', 'development');
+    vi.stubEnv('HOME_PREVIEW', '');
+    expect(get('/slots/151')).toBeUndefined();
+    expect(get('/slots/151?stage=3d')).toBeUndefined();
+  });
+
   it('switch on: a document load of a bare pack address goes to the flow page before anything renders', () => {
     vi.stubEnv('HOME_PREVIEW', '1');
     const res = get('/slots/151?stage=3d');
@@ -360,6 +367,9 @@ describe("a pack's own address under the home preview switch", () => {
     expect(res?.headers.get('location')).toBe(
       'https://polycards.gg/home-preview?stage=3d&focus=151',
     );
+    // never kept by a cache: the same address serves the pack page with the
+    // switch off
+    expect(res?.headers.get('cache-control')).toBe('no-store');
     expect(get('/slots/151/')?.headers.get('location')).toBe(
       'https://polycards.gg/home-preview?focus=151',
     );

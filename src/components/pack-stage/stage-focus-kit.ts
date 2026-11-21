@@ -43,6 +43,7 @@ import {
 import { createFocusAddress, type FocusEntryKind } from './stage-focus-address';
 import { readFocusSeeds } from './stage-focus-seeds';
 import { STAGE_DESKTOP_QUERY } from './stage-gate';
+import { entryPlaced, pendingEntry } from './stage-entry-cover';
 
 export { FOCUS_DURATIONS, FOCUS_WINDOW } from './stage-focus-keys';
 export { blockAt, power1InOut } from './stage-focus';
@@ -173,8 +174,10 @@ export type FocusRun = {
   release(): void;
   /** One frame; true when at rest. */
   frame(now: number, f: FocusFrame): boolean;
-  /** The page shows a focus entry of ours (Back from the reel, Forward): focus that pack. */
-  /** `instant`: the page is placed on the entry's stop with no move. */
+  /**
+   * The page shows a focus entry of ours (Back from the reel, Forward): focus
+   * that pack. `instant`: the page is placed on the entry's stop with no move.
+   */
   resume(instant?: boolean): boolean;
   /** Debug: the stops and timing of the last moves. */
   debug(): unknown;
@@ -332,6 +335,8 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       : false;
   };
   let savedK = 0;
+  /** A document load onto the pack's address: the loader waits for the rest. */
+  let entryCover = false;
   window.addEventListener('popstate', onPop);
   /** The pack at `index` of the shown row, with its seed (null: not focusable). */
   const packAt = (index: number) => {
@@ -443,7 +448,9 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
           // storage blocked: Front
         }
       savedK = at;
-      // a document load: there within a frame, under the loader's cover
+      // a document load: there within a frame, under the loader's cover,
+      // which lets go once the pack rests on that stop
+      entryCover = pendingEntry() !== null;
       if (page) d.go(at, o.instant ? { ms: 1 } : undefined);
       trace.push([now(), -1, 1]);
       d.loop();
@@ -547,6 +554,10 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       if (f.idle && !settled && f.focus >= 1 - 1e-3 && !(handoff > 0)) {
         settled = true;
         publish();
+      }
+      if (entryCover && f.idle && f.focus >= 1 - 1e-3) {
+        entryCover = false;
+        entryPlaced();
       }
       // the stop this entry rests on, for Back and Forward
       const k = f.target;

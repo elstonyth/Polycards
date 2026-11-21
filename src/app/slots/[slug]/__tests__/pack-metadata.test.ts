@@ -28,7 +28,10 @@ vi.mock('../PackPage', () => ({ default: () => null }));
 const { default: PackPage, generateMetadata } = await import('../page');
 
 const metadataFor = (slug: string) =>
-  generateMetadata({ params: Promise.resolve({ slug }) });
+  generateMetadata({
+    params: Promise.resolve({ slug }),
+    searchParams: Promise.resolve({}),
+  });
 
 describe('pack page metadata', () => {
   it('describes the pack itself, not the home page', async () => {

@@ -1,0 +1,144 @@
+// @vitest-environment jsdom
+import { createElement, act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// A load onto a pack's own address keeps the loader's cover up until the
+// flow has placed the pack on its stop, and gives up to today's pack page
+// at its own limit; a plain load keeps its usual cap.
+
+const goToPackPage = vi.fn();
+vi.mock('../stage-entry-cover', async (orig) => ({
+  ...(await orig<typeof import('../stage-entry-cover')>()),
+  goToPackPage,
+}));
+
+const { default: StageLoader } = await import('../StageLoader');
+const {
+  ENTRY_LOADER_MAX_MS,
+  FLOW_ENTRY_ATTR,
+  FLOW_LEAVE_ATTR,
+  HOME_LOADER_MAX_MS,
+  STAGE_LOADER_ATTR,
+} = await import('../stage-loader-script');
+
+const html = document.documentElement;
+let root: Root | null = null;
+let container: HTMLDivElement | null = null;
+
+const mount = () => {
+  container = document.createElement('div');
+  document.body.appendChild(container);
+  act(() => {
+    root = createRoot(container!);
+    root.render(createElement(StageLoader));
+  });
+};
+/** Moves the clock (timers and performance.now) on in 50 ms steps, so timers
+ *  set by the renders a step causes run too. */
+const advance = async (ms: number) => {
+  for (let t = 0; t < ms; t += 50)
+    await act(async () => {
+      vi.advanceTimersByTime(Math.min(50, ms - t));
+    });
+};
+const coverUp = () => html.hasAttribute(STAGE_LOADER_ATTR);
+
+beforeEach(() => {
+  vi.useFakeTimers({
+    toFake: ['setTimeout', 'clearTimeout', 'performance', 'Date'],
+  });
+  goToPackPage.mockClear();
+  html.setAttribute(STAGE_LOADER_ATTR, '1');
+});
+afterEach(() => {
+  act(() => root?.unmount());
+  container?.remove();
+  root = null;
+  html.removeAttribute(STAGE_LOADER_ATTR);
+  html.removeAttribute(FLOW_ENTRY_ATTR);
+  html.removeAttribute(FLOW_LEAVE_ATTR);
+  vi.useRealTimers();
+});
+
+describe('the stage loader on a plain load', () => {
+  it('lets go by its usual cap', async () => {
+    mount();
+    await advance(HOME_LOADER_MAX_MS + 2000);
+    expect(coverUp()).toBe(false);
+    expect(goToPackPage).not.toHaveBeenCalled();
+  });
+});
+
+describe("the stage loader on a load onto a pack's address", () => {
+  beforeEach(() => html.setAttribute(FLOW_ENTRY_ATTR, '151'));
+
+  it('stays up past its usual cap while the pack is not placed', async () => {
+    mount();
+    await advance(ENTRY_LOADER_MAX_MS - 500);
+    expect(coverUp()).toBe(true);
+    expect(goToPackPage).not.toHaveBeenCalled();
+  });
+
+  it('lets go once the pack is placed on its stop', async () => {
+    mount();
+    await advance(6000);
+    expect(coverUp()).toBe(true);
+    await act(async () => html.removeAttribute(FLOW_ENTRY_ATTR));
+    await advance(2000);
+    expect(coverUp()).toBe(false);
+    expect(goToPackPage).not.toHaveBeenCalled();
+  });
+
+  it("goes to today's pack page at its own limit, the cover still up", async () => {
+    mount();
+    await advance(ENTRY_LOADER_MAX_MS + 100);
+    expect(goToPackPage).toHaveBeenCalledWith('151');
+    expect(coverUp()).toBe(true);
+  });
+
+  it("once it has gone for today's pack page, the cover stays even if the pack is placed meanwhile", async () => {
+    mount();
+    await advance(ENTRY_LOADER_MAX_MS + 100);
+    expect(goToPackPage).toHaveBeenCalledWith('151');
+    await act(async () => html.removeAttribute(FLOW_ENTRY_ATTR));
+    await advance(3000);
+    expect(coverUp()).toBe(true);
+    expect(html.hasAttribute(FLOW_LEAVE_ATTR)).toBe(true);
+  });
+
+  it('a page that hydrates late still keeps the cover until the pack is placed', async () => {
+    vi.advanceTimersByTime(HOME_LOADER_MAX_MS + 1000);
+    mount();
+    await advance(1000);
+    expect(coverUp()).toBe(true);
+    await act(async () => html.removeAttribute(FLOW_ENTRY_ATTR));
+    await advance(2000);
+    expect(coverUp()).toBe(false);
+  });
+});
+
+describe('the failsafe on such a load', () => {
+  const css = () =>
+    readFileSync(
+      join(process.cwd(), 'src/components/pack-stage/pack-stage.module.css'),
+      'utf8',
+    );
+
+  it("hides the cover with no script only a second after the entry's limit, keyed on a mark the placement never removes", () => {
+    const rule =
+      /:global\(html\[data-flow-cover\]\) \.shell,\s*:global\(html\[data-flow-cover\]\) \.stage \{\s*--stage-failsafe: ([\d.]+)s;/.exec(
+        css(),
+      );
+    expect(Number(rule?.[1]) * 1000).toBe(ENTRY_LOADER_MAX_MS + 1000);
+    expect(css()).not.toContain('html[data-flow-entry])');
+  });
+
+  it("never hides the cover while it goes to today's pack page", () => {
+    expect(css()).toMatch(
+      /:global\(html\[data-flow-leave\]\) \.shell \{\s*animation: none;/,
+    );
+  });
+});
