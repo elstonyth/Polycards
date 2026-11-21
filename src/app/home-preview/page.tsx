@@ -1,7 +1,12 @@
 import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
 import { getPackCategories, getPackHighlights } from '@/lib/data/packs';
-import { packTabs, type PackCard, type PackCategory } from '@/lib/packs-data';
+import {
+  CAT_ICON,
+  packTabs,
+  type PackCard,
+  type PackCategory,
+} from '@/lib/packs-data';
 import { ShelfCategoryProvider } from '@/components/home/ShelfCategory';
 import PackStage from '@/components/pack-stage/PackStage';
 import { Stage3dProvider } from '@/components/pack-stage/Stage3dProvider';
@@ -57,19 +62,37 @@ const QA_COPY = /^(.+)~qa\d+$/;
 const qaSource = (id: string) => QA_COPY.exec(id)?.[1] ?? id;
 
 /**
- * The preview's QA catalogue: `hidden` packs left out, then `more` copies
- * of the first row's packs appended to it under new ids.
+ * The preview's QA catalogue: `hidden` packs left out, `grouped` packs moved
+ * to a new group (as an admin category the storefront names by its id), then
+ * `more` copies of the first row's packs appended to it under new ids.
  */
 function qaCatalogue(
   catalogue: PackCategory[],
   hidden: ReadonlySet<string>,
   more: number,
+  grouped: ReadonlySet<string>,
 ): PackCategory[] {
-  if (hidden.size === 0 && more === 0) return catalogue;
-  const kept = catalogue.map((c) => ({
-    ...c,
-    packs: c.packs.filter((p) => !hidden.has(p.id)),
-  }));
+  if (hidden.size === 0 && more === 0 && grouped.size === 0) return catalogue;
+  const moved = catalogue
+    .flatMap((c) => c.packs)
+    .filter((p) => grouped.has(p.id));
+  const kept = [
+    ...catalogue.map((c) => ({
+      ...c,
+      packs: c.packs.filter((p) => !hidden.has(p.id) && !grouped.has(p.id)),
+    })),
+    ...(moved.length > 0
+      ? [
+          {
+            id: 'basketball',
+            tab: 'Basketball',
+            heading: 'Basketball Packs',
+            icon: CAT_ICON.basketball,
+            packs: moved,
+          },
+        ]
+      : []),
+  ];
   const first = kept.find((c) => c.packs.length > 0);
   if (!first || more === 0) return kept;
   const copies = Array.from({ length: more }, (_, k) => {
@@ -146,6 +169,8 @@ export default async function HomePreviewPage({
   const hidden = new Set(one('hide').split(',').filter(Boolean));
   const more = Math.min(48, Math.max(0, Math.floor(Number(one('more')) || 0)));
   const no3d = new Set(one('no3d').split(',').filter(Boolean));
+  // `?group=<id>,<id>` moves those packs into a group of their own (a new tab).
+  const grouped = new Set(one('group').split(',').filter(Boolean));
 
   // shortcut: duplicated from src/app/page.tsx (catalogue and top-chase
   // lookups). Remove at integration. The sections below the lineup read only
@@ -154,7 +179,7 @@ export default async function HomePreviewPage({
     getPackCategories(),
     loadFlowData(),
   ]);
-  const reshaped = qaCatalogue(catalogue, hidden, more);
+  const reshaped = qaCatalogue(catalogue, hidden, more, grouped);
   const categories =
     forcedSoldOut.size === 0 && forcedJp.size === 0
       ? reshaped
