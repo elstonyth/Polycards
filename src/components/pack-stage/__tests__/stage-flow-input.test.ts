@@ -297,7 +297,7 @@ describe('flow input: Closing to the free part', () => {
 describe('flow input: the wrap', () => {
   const FULL = {
     ...GEO,
-    telegram: { top: 11000, bottom: 12000 },
+    riseSection: { top: 11000, bottom: 12000 },
     ret: { top: 12000, height: 1000 },
     last: { top: 13000, height: 801 },
   };
@@ -354,7 +354,7 @@ describe('flow input: a re-measure keeps P', () => {
     ...GEO,
     panel,
     viewport: panel,
-    telegram: { top: 11000 * k, bottom: 12000 * k },
+    riseSection: { top: 11000 * k, bottom: 12000 * k },
     ret: { top: 12000 * k, height: 1000 * k },
     last: { top: 13000 * k, height: 801 },
     sections: [

@@ -10,12 +10,6 @@ vi.mock('next/image', () => ({
   default: ({ src, alt }: { src: string; alt: string }) =>
     createElement('img', { src, alt, loading: 'lazy' }),
 }));
-vi.mock('@/components/home/PullsMarquee', () => ({
-  default: () => createElement('div', { 'data-mock': 'ticker' }),
-}));
-vi.mock('@/components/home/TheGame', () => ({
-  default: () => createElement('div', { 'data-mock': 'collectors' }),
-}));
 
 const { FlowJustPulled } = await import('../FlowJustPulled');
 
@@ -49,9 +43,7 @@ const pulls = [
   }),
 ];
 const feed: RecentFeed = { pulls, drought: { Immortal: 1401, Legendary: 3 } };
-const html = renderToStaticMarkup(
-  createElement(FlowJustPulled, { feed, topRippers: [] }),
-);
+const html = renderToStaticMarkup(createElement(FlowJustPulled, { feed }));
 const src = (p: string) =>
   readFileSync(join(process.cwd(), 'src/components/pack-flow', p), 'utf8');
 const at = (needle: string) => {
@@ -61,17 +53,22 @@ const at = (needle: string) => {
 };
 
 describe('Just Pulled on the server (the no-JavaScript form, and the drawer at rest)', () => {
-  it('is one root with the section attribute, the drawer before the ticker and Top Collectors', () => {
-    expect(html.startsWith('<div data-flow-section="just-pulled"')).toBe(true);
+  it('is the drawer alone: heading, counters, tier filter, then the pulls', () => {
+    // the section's attribute comes from the list (FlowSections), not here
+    expect(html).not.toContain('data-flow-section');
+    expect(html.startsWith('<div data-jp')).toBe(true);
     const order = [
       'JUST PULLED',
       'data-jp-counter',
       'Filter pulls by tier',
       'data-jp-drawer',
-      'data-mock="ticker"',
-      'data-mock="collectors"',
     ].map(at);
     expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it('no longer carries the live ticker or Top Collectors', () => {
+    const own = src('FlowJustPulled.tsx');
+    expect(own).not.toMatch(/PullsMarquee|TheGame|topRippers/);
   });
 
   it('renders every pull as a card, in feed order, with its place in the stack', () => {

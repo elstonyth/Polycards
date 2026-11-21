@@ -42,12 +42,12 @@
   overscroll-behavior-y: none;
 }
 
-/* ---- One footer: the copy inside the Telegram section ------------------ */
+/* ---- One footer: the copy inside the footer section --------------------- */
 
 /* The layout renders the site footer as a child of <body>; on this page the
-   Telegram section renders the same footer, so the layout's copy is hidden
+   footer section (FlowFooter) renders the same footer, so the layout's copy is hidden
    in every state (display: none also takes it out of the accessibility
    tree). Browsers without :has() show both footers. */
-:global(body):has(.telegram) > :global(footer[data-site-chrome]) {
+:global(body):has(.footer) > :global(footer[data-site-chrome]) {
   display: none;
 }

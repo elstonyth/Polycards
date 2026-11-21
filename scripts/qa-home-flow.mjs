@@ -2238,9 +2238,9 @@ for (const size of sizes) {
         mid.headOp === 0,
       `rise ${mid.lap?.rise?.toFixed(3)}; drawn ${mid.drawn.map((d) => d.id).join(',')} (chosen ${chosen}); row heading opacity ${mid.headOp}; GPU ${MB(mid.gpu)} MB`,
     );
-    // Just Pulled grows by 300 px: the rise stays keyed to the Telegram section
+    // The first section grows by 300 px: the rise stays keyed to the last section
     await page.evaluate(() => {
-      const jp = document.querySelector("[data-flow-section='just-pulled']");
+      const jp = document.querySelector('[data-flow-section]');
       const d = document.createElement('div');
       d.id = 'qa-grow';
       d.style.height = '300px';
@@ -2249,11 +2249,11 @@ for (const size of sizes) {
     await page.waitForTimeout(400);
     const grown = await to(mid.y + 300, 800);
     report(
-      'wp67-just-pulled-height-does-not-move-the-rise-' + size,
+      'wp67-first-section-height-does-not-move-the-rise-' + size,
       Math.abs(grown.lap.rise - mid.lap.rise) < 0.01 &&
         Math.abs(grown.t.rise.end - rs.end - 300) < 1.5 &&
         Math.abs(grown.t.lastTop - t.lastTop - 300) < 1.5,
-      `rise ${mid.lap.rise.toFixed(4)} before, ${grown.lap.rise.toFixed(4)} after +300 px of Just Pulled (scroll +300); rise end ${rs.end} to ${grown.t.rise.end}; Last top ${t.lastTop} to ${grown.t.lastTop}`,
+      `rise ${mid.lap.rise.toFixed(4)} before, ${grown.lap.rise.toFixed(4)} after +300 px of the first section (scroll +300); rise end ${rs.end} to ${grown.t.rise.end}; Last top ${t.lastTop} to ${grown.t.lastTop}`,
     );
     await page.evaluate(() => document.getElementById('qa-grow')?.remove());
     await page.waitForTimeout(400);

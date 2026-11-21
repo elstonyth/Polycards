@@ -339,18 +339,23 @@ export function startSpin(host: SpinHost): SpinControl {
       const r = on && el ? el.getBoundingClientRect() : null;
       return r ? { top: r.top + window.scrollY - top, height: r.height } : null;
     };
-    tgEl = src.flow.querySelector<HTMLElement>(
-      "[data-flow-section='telegram']",
+    // the page's sections in their order; the rise is keyed to the last one,
+    // whichever it is (the stage never names a section)
+    const sectionEls = src.flow.querySelectorAll<HTMLElement>(
+      '[data-flow-section]',
     );
+    riseEl = sectionEls[sectionEls.length - 1] ?? null;
     retEl = src.flow.querySelector<HTMLElement>("[data-flow-spacer='return']");
-    const tg = rectOf(tgEl);
+    const rise = rectOf(riseEl);
     const keep = input.measure(
       on
         ? {
             top: r0,
             panel,
             viewport: window.innerHeight,
-            telegram: tg ? { top: tg.top, bottom: tg.top + tg.height } : null,
+            riseSection: rise
+              ? { top: rise.top, bottom: rise.top + rise.height }
+              : null,
             ret: rectOf(retEl),
             last: rectOf(
               src.flow.querySelector<HTMLElement>("[data-flow-spacer='last']"),
@@ -385,14 +390,14 @@ export function startSpin(host: SpinHost): SpinControl {
   let hidden = false;
   let inert = false;
   let lapOn = false;
-  /** The Telegram section and the Return spacer: the lap reads their live rects. */
-  let tgEl: HTMLElement | null = null;
+  /** The last section and the Return spacer: the lap reads their live rects. */
+  let riseEl: HTMLElement | null = null;
   let retEl: HTMLElement | null = null;
   /** The rise and the return from the live rects (viewport under the header). */
   const liveLap = () => {
     const top = headerHeight();
     const vh = window.innerHeight;
-    const a = tgEl?.getBoundingClientRect();
+    const a = riseEl?.getBoundingClientRect();
     const b = retEl?.getBoundingClientRect();
     return {
       rise: a ? riseProgress(a.top - top, a.bottom - top, vh) : 0,

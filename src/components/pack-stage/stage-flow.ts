@@ -5,10 +5,11 @@
  * The page is one table of scroll positions. The paged part: the row rest
  * R0, the focused pack's stops spread over a band of six sections, and the
  * lineup rest RL. The free part: the lineup exit, from the lineup rest over
- * the Lineup spacer (ending where Just Pulled's top meets the viewport top),
- * so the row starts leaving on the first pixel of scroll below RL and Just
- * Pulled rises in as it leaves; then the free content, the rise
- * (keyed to the Telegram section), Return and Last. One value, the flow
+ * the Lineup spacer (ending where the first section's top meets the viewport top),
+ * so the row starts leaving on the first pixel of scroll below RL and the
+ * first section rises in as it leaves; then the free content, the rise
+ * (keyed to the last section, whichever the page lists last), Return and
+ * Last. One value, the flow
  * position P, is read from the scroll; every pose and text switch is a
  * function of P only, so scrolling back retraces the way down exactly.
  *
@@ -26,7 +27,7 @@ export const FLOW_SECTION_PANELS = 1.25;
 export const FLOW_DETAIL_SLOTS = 6;
 /** The lineup rest sits one section after the band: R0 + 7 S. */
 export const FLOW_LINEUP_SLOT = FLOW_DETAIL_SLOTS + 1;
-/** The rise starts when the Telegram top reaches this share of the viewport (296 of 844 px on a phone). */
+/** The rise starts when the last section's top reaches this share of the viewport (296 of 844 px on a phone). */
 export const RISE_START_VIEWPORT = 0.35;
 /** The others' row spacing at the start of the hand-off and of Return, in row steps. */
 export const FLOW_SPREAD_FROM = 5;
@@ -47,8 +48,11 @@ export type FlowGeometry = {
   stops: number;
   /** The viewport height (px) the rise start is a share of. */
   viewport: number;
-  /** The Telegram section; absent until it is measured. */
-  telegram?: { top: number; bottom: number } | null;
+  /**
+   * The page's last section (the rise is keyed to it, whatever it is);
+   * absent until it is measured.
+   */
+  riseSection?: { top: number; bottom: number } | null;
   /** The Return spacer; absent or zero height until it is built. */
   ret?: { top: number; height: number } | null;
   /** The Last spacer; its top is the wrap line. Absent or zero height: no wrap. */
@@ -106,15 +110,16 @@ export function flowTable(g: FlowGeometry): FlowTable | null {
   // whole pixels, as the focus kit rounds its stops
   const rests = flowSlots(g.stops).map((s) => Math.round(r0 + s * S));
   const rl = Math.round(r0 + FLOW_LINEUP_SLOT * S);
-  // the exit runs over the Lineup spacer: RL to RL + S, where Just Pulled starts
+  // the exit runs over the Lineup spacer: RL to RL + S, where the first section starts
   const exitStart = rl;
   const exitEnd = Math.round(rl + S);
   const vp = Math.max(0, g.viewport);
   let after = exitEnd;
   let rise: FlowRange | null = null;
-  if (g.telegram) {
-    const start = Math.max(after, g.telegram.top - RISE_START_VIEWPORT * vp);
-    const end = Math.max(start, g.telegram.bottom);
+  if (g.riseSection) {
+    const s = g.riseSection;
+    const start = Math.max(after, s.top - RISE_START_VIEWPORT * vp);
+    const end = Math.max(start, s.bottom);
     rise = { start, end };
     after = end;
   }
@@ -234,10 +239,10 @@ export function flowPosition(at: FlowAt, t: FlowTable): number {
 }
 
 /**
- * The rise from the Telegram section's live rect (viewport pixels): 0 when
- * its top reaches 0.35 of the viewport, 1 when its bottom reaches the top
- * . It reads only this section, so Just Pulled's height
- * never moves it.
+ * The rise from the last section's live rect (viewport pixels): 0 when its
+ * top reaches 0.35 of the viewport, 1 when its bottom reaches the top. It
+ * reads only this section, so the height of the sections above never moves
+ * it.
  */
 export function riseProgress(
   rectTop: number,

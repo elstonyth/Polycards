@@ -35,7 +35,7 @@ const GEO: FlowGeometry = {
   panel: 800,
   stops: 6,
   viewport: 800,
-  telegram: { top: 11000, bottom: 12000 },
+  riseSection: { top: 11000, bottom: 12000 },
   ret: { top: 12000, height: 1000 },
   last: { top: 13000, height: 801 },
 };
@@ -124,7 +124,7 @@ describe('stage flow: the section table', () => {
     expect(flowStops(t)).toEqual([0, 7000]);
   });
 
-  it('the rise runs from the Telegram top at 0.35 of the viewport to its bottom at the top', () => {
+  it("the rise runs from the last section's top at 0.35 of the viewport to its bottom at the top", () => {
     expect(RISE_START_VIEWPORT).toBe(0.35);
     const t = table();
     expect(t.rise).toEqual({ start: 10720, end: 12000 });
@@ -184,14 +184,14 @@ describe('stage flow: the flow position P', () => {
     expect(flowAt(13000, t)).toEqual({ zone: 'free', span: 'last', t: 0 });
   });
 
-  it('without a measured Telegram section the free span runs on, at progress 0', () => {
-    const n = table({ telegram: null, ret: null, last: null });
+  it('without a measured last section the free span runs on, at progress 0', () => {
+    const n = table({ riseSection: null, ret: null, last: null });
     expect(n.rise).toBeNull();
     expect(flowAt(50000, n)).toEqual({ zone: 'free', span: 'free', t: 0 });
   });
 
   it('a page shorter than the rise start clamps the spans in order', () => {
-    const s = table({ telegram: { top: 7600, bottom: 8200 } });
+    const s = table({ riseSection: { top: 7600, bottom: 8200 } });
     expect(s.rise!.start).toBe(8000);
     expect(s.rise!.end).toBe(8200);
     expect(s.ret!.start).toBeGreaterThanOrEqual(s.rise!.end);
@@ -208,7 +208,7 @@ describe('stage flow: the flow position P', () => {
     const narrow = table({
       panel: 312, // 390 px tall landscape at 0.8
       viewport: 390,
-      telegram: { top: 5000, bottom: 5600 },
+      riseSection: { top: 5000, bottom: 5600 },
       ret: { top: 5600, height: 390 },
       last: { top: 5990, height: 391 },
     });
@@ -240,6 +240,109 @@ describe('stage flow: the flow position P', () => {
   });
 });
 
+describe('stage flow: the table follows whatever sections the page lists', () => {
+  // The sections stack from the exit's end (8000: one section past the
+  // lineup rest), then Return (one section) and Last. The table knows only
+  // the last section's rect, never a section by name.
+  const VP = 800;
+  const shape = (heights: number[]) => {
+    let y = 8000;
+    const rects = heights.map((h) => {
+      const r = { top: y, bottom: y + h };
+      y += h;
+      return r;
+    });
+    const t = table({
+      viewport: VP,
+      riseSection: rects[rects.length - 1]!,
+      ret: { top: y, height: 1000 },
+      last: { top: y + 1000, height: VP + 1 },
+    });
+    return { t, rects, end: y };
+  };
+  const cases: [string, number[]][] = [
+    ['one section, shorter than the viewport', [400]],
+    ['one section, taller than the viewport', [1500]],
+    ['three sections, the last shorter than the viewport', [1800, 900, 400]],
+    ['three sections, the last taller than the viewport', [1800, 900, 1500]],
+  ];
+
+  for (const [name, heights] of cases) {
+    it(`${name}: exit end, free span, rise, Return, Last and the wrap`, () => {
+      const { t, rects, end } = shape(heights);
+      const lastRect = rects[rects.length - 1]!;
+      // the exit ends where the first section starts
+      expect(t.exitEnd).toBe(8000);
+      expect(rects[0]!.top).toBe(t.exitEnd);
+      // the rise: the last section's top at 0.35 of the viewport, never
+      // before the exit's end, to its bottom at the top
+      const riseStart = Math.max(
+        t.exitEnd,
+        lastRect.top - RISE_START_VIEWPORT * VP,
+      );
+      expect(t.rise).toEqual({ start: riseStart, end: lastRect.bottom });
+      expect(t.ret).toEqual({ start: end, end: end + 1000 });
+      expect(t.lastTop).toBe(end + 1000);
+      // the free span runs from the exit's end to the rise
+      if (riseStart > t.exitEnd) {
+        const mid = flowAt((t.exitEnd + riseStart) / 2, t);
+        expect(mid.zone === 'free' && mid.span).toBe('free');
+      } else {
+        // nothing between the exit and the rise: the first pixel past the
+        // exit is the rise
+        const next = flowAt(t.exitEnd + 1, t);
+        expect(next.zone === 'free' && next.span).toBe('rise');
+      }
+      const inRise = flowAt((t.rise!.start + t.rise!.end) / 2, t);
+      expect(inRise.zone === 'free' && inRise.span).toBe('rise');
+      const inRet = flowAt(end + 500, t);
+      expect(inRet).toEqual({ zone: 'free', span: 'ret', t: 0.5 });
+      expect(flowAt(t.lastTop!, t)).toEqual({
+        zone: 'free',
+        span: 'last',
+        t: 0,
+      });
+      // the wrap: a movement across Last's top keeps only its overshoot
+      expect(wrapTarget(t.lastTop! - 10, t.lastTop! + 30, t.lastTop)).toBe(30);
+      expect(wrapTarget(t.lastTop! - 40, t.lastTop! - 1, t.lastTop)).toBeNull();
+      // and the position round-trips through the whole page
+      for (let y = 0; y <= t.lastTop! + VP; y += 50)
+        expect(flowPosition(flowAt(y, t), t)).toBeCloseTo(y, 6);
+    });
+  }
+
+  it('one short section: no pack trim, since the rise follows the exit at once', () => {
+    const { t } = shape([400]);
+    for (let y = t.exitEnd; y <= t.rise!.end; y += 25)
+      expect(lapTrim(y, t, VP)).toBe(false);
+  });
+
+  it('three sections: only the chosen pack is kept between the exit and the rise', () => {
+    const { t } = shape([1800, 900, 400]);
+    expect(lapTrim(t.exitEnd + VP, t, VP)).toBe(true);
+    expect(lapTrim(t.rise!.start - VP * 0.1, t, VP)).toBe(false);
+  });
+
+  it('the rise from the live rect matches the table for a last section of any height', () => {
+    for (const heights of [[400], [1800, 900, 1500]]) {
+      const { t, rects } = shape(heights);
+      const r = rects[rects.length - 1]!;
+      for (let y = t.rise!.start; y <= t.rise!.end; y += 40) {
+        const at = flowAt(y, t);
+        const fromTable = at.zone === 'free' && at.span === 'rise' ? at.t : 1;
+        // the live rect starts the rise at 0.35 of the viewport; the table
+        // clamps its start to the exit's end, so they agree once the section
+        // top is that far up
+        if (r.top - RISE_START_VIEWPORT * VP >= t.exitEnd)
+          expect(riseProgress(r.top - y, r.bottom - y, VP)).toBeCloseTo(
+            fromTable,
+            6,
+          );
+      }
+    }
+  });
+});
+
 describe('stage flow: rise and return progress from live rects', () => {
   it('rise: 0 above its start, 1 once the section bottom reaches the top', () => {
     // viewport 800: starts with the top at 280
@@ -265,11 +368,11 @@ describe('stage flow: rise and return progress from live rects', () => {
     }
   });
 
-  it('a taller Just Pulled moves the Telegram rect, not the rise curve', () => {
-    // the same Telegram rect gives the same progress whatever sits above it
-    const short = table({ telegram: { top: 11000, bottom: 12000 } });
+  it("a taller first section moves the last section's rect, not the rise curve", () => {
+    // the same last-section rect gives the same progress whatever sits above it
+    const short = table({ riseSection: { top: 11000, bottom: 12000 } });
     const tall = table({
-      telegram: { top: 14000, bottom: 15000 },
+      riseSection: { top: 14000, bottom: 15000 },
       ret: { top: 15000, height: 1000 },
       last: { top: 16000, height: 801 },
     });
@@ -474,33 +577,33 @@ describe('stage flow: the lap at a flow position', () => {
     expect(lapTrim(10520, t, 800)).toBe(false);
     expect(lapTrim(12500, t, 800)).toBe(false);
     // no measured rise: trimmed on from a quarter viewport past the exit end
-    expect(lapTrim(20000, table({ telegram: null }), 800)).toBe(true);
+    expect(lapTrim(20000, table({ riseSection: null }), 800)).toBe(true);
     // a free span shorter than both margins: never trimmed
     expect(
-      lapTrim(8150, table({ telegram: { top: 8600, bottom: 9600 } }), 800),
+      lapTrim(8150, table({ riseSection: { top: 8600, bottom: 9600 } }), 800),
     ).toBe(false);
   });
 });
 
-describe('stage flow: Just Pulled follows the lineup directly', () => {
-  // the page as laid out now: Just Pulled starts where the Lineup spacer
+describe('stage flow: the first section follows the lineup directly', () => {
+  // the page as laid out now: the first section starts where the Lineup spacer
   // ends (R0 + 8 S)
   const page: Partial<FlowGeometry> = {
-    telegram: { top: 10000, bottom: 11000 },
+    riseSection: { top: 10000, bottom: 11000 },
     ret: { top: 11000, height: 1000 },
     last: { top: 12000, height: 801 },
   };
   const t = table(page);
   const sections = [
-    { top: 8000, height: 2000 }, // Just Pulled
-    { top: 10000, height: 1000 }, // Telegram
+    { top: 8000, height: 2000 }, // the first section
+    { top: 10000, height: 1000 }, // the last section
     { top: 11000, height: 1000 }, // Return
     { top: 12000, height: 801 }, // Last
   ];
 
-  it("the exit ends where Just Pulled's top meets the viewport top", () => {
+  it("the exit ends where the first section's top meets the viewport top", () => {
     expect(t.exitEnd).toBe(sections[0]!.top);
-    // Just Pulled enters at the viewport bottom less than a section past the lineup
+    // the first section enters at the viewport bottom less than a section past the lineup
     expect(sections[0]!.top - 800 - t.rl).toBeLessThan(t.section);
   });
 
@@ -524,7 +627,7 @@ describe('stage flow: Just Pulled follows the lineup directly', () => {
       expect(flowPosition(flowAt(y, t), t)).toBeCloseTo(y, 6);
   });
 
-  it('the first free frame keeps its place in Just Pulled across a re-measure', () => {
+  it('the first free frame keeps its place in the first section across a re-measure', () => {
     const a = freeAnchor(t.exitEnd + 1, sections, 800);
     expect(a?.i).toBe(0);
     expect(freeAnchorY(a!, sections, 800)).toBeCloseTo(t.exitEnd + 1, 6);
@@ -532,7 +635,7 @@ describe('stage flow: Just Pulled follows the lineup directly', () => {
 });
 
 describe('stage flow: the free part kept across a re-measure (rotation)', () => {
-  // sections in document scroll px: opening, Just Pulled, Telegram, Return, Last
+  // sections in document scroll px: opening, the first section, the last section, Return, Last
   const tall = [
     { top: 9000, height: 400 },
     { top: 9400, height: 1600 },

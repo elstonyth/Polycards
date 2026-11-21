@@ -123,8 +123,8 @@
 
 /* The site's floating chips (the free pack, Telegram) over the flow: shown
    at the row only. From the focus on (the stops, the lineup and its exit),
-   through the free part (where they would sit on Just Pulled and on the
-   page's own Telegram button and free pack offer) and the lap, they are
+   through the free part (where they would sit on the page's own sections)
+   and the lap, they are
    hidden; they fade back in with the row's own UI after the wrap, so no
    overlay shows at the seam. Browsers without :has() show them. */
 :global(body):has(.flow[data-flow-on]) :global([data-testid='free-pack-badge']),
@@ -161,8 +161,7 @@
 
 /* Below the desktop layout the row's Open button sits on the chips' rail
    (above the tab bar, on the right), so at the row they would cover it: over
-   the flow they never show there. The flow's last section carries the
-   Telegram button. */
+   the flow they never show there. */
 @media not all and (min-width: 64rem) {
   :global(body):has(.flow) :global([data-testid='free-pack-badge']),
   :global(body):has(.flow) :global([data-telegram-banner]) {

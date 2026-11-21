@@ -15,8 +15,8 @@
  *   tilted lineup (`handoff`, the local progress, a function of the
  *   scroll); a down gesture at RL pages through the lineup's exit
  *   (`exit`, from RL over the Lineup spacer, so it starts on the move's
- *   first frame) to the end of that spacer, where Just Pulled and the free
- *   part start; a pack that cannot be focused keeps the row alone;
+ *   first frame) to the end of that spacer, where the first section and the
+ *   free part start; a pack that cannot be focused keeps the row alone;
  * - a re-measure keeps the flow position P (a rotation never leaves the page
  *   off its section).
  * In the free part a vertical touch is the flow's (the page follows the
@@ -78,14 +78,14 @@ export type FlowInputGeometry = {
   /** The stage panel's height. */
   panel: number;
   viewport: number;
-  /** The Telegram section (the rise is keyed to it); null: not measured. */
-  telegram?: { top: number; bottom: number } | null;
+  /** The page's last section (the rise is keyed to it); null: not measured. */
+  riseSection?: { top: number; bottom: number } | null;
   /** The Return spacer; null or zero height: none. */
   ret?: { top: number; height: number } | null;
   /** The Last spacer (its top is the wrap line); null or zero height: no wrap. */
   last?: { top: number; height: number } | null;
   /**
-   * The free part's sections in page order (Just Pulled, Telegram, Return,
+   * The free part's sections in page order (every listed section, Return,
    * Last): a re-measure keeps the one under the middle.
    */
   sections?: readonly FlowSection[] | null;

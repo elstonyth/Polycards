@@ -16,7 +16,7 @@
 // 1 lazy: the drawer chunk is not an initial script tag; it is requested once
 //   the section nears the viewport; data-jp-live becomes "1".
 // 2 swap-no-shift: with the chunk held back, then released, the section and
-//   the Telegram section do not move.
+//   the page's last section do not move.
 // 3 scroll-no-change: scrolling through the section and back leaves every
 //   card (id, stack index, transform, opacity) as it was, per frame.
 // 4 arrival: a single, a double and a back-to-back arrival: front card, stack
@@ -50,7 +50,6 @@ mkdirSync(QA_DIR, { recursive: true });
 const PREVIEW = '/home-preview';
 const URL_3D = `${BASE}${PREVIEW}?stage=3d&debug=1&loader=never`;
 const SEC = '[data-flow-section="just-pulled"]';
-const TG = '[data-flow-section="telegram"]';
 const CARD = 'li[data-jp-card]';
 const FRONT = 'li[data-jp-card][data-d="0"]:not([data-leave])';
 const LIVE_ATTR = SEC + ' > [data-jp][data-jp-live="1"]';
@@ -225,19 +224,18 @@ const waitLive = (page, timeout = 20000) =>
   page.waitForSelector(LIVE_ATTR, { state: 'attached', timeout });
 
 const measure = (page) =>
-  page.evaluate(
-    ([sec, tg]) => {
-      const s = document.querySelector(sec).getBoundingClientRect();
-      const t = document.querySelector(tg).getBoundingClientRect();
-      return {
-        y: scrollY,
-        top: s.top + scrollY,
-        h: s.height,
-        tg: t.top + scrollY,
-      };
-    },
-    [SEC, TG],
-  );
+  page.evaluate((sec) => {
+    const s = document.querySelector(sec).getBoundingClientRect();
+    // the page's last section, whichever the list ends with
+    const all = document.querySelectorAll('[data-flow-section]');
+    const t = all[all.length - 1].getBoundingClientRect();
+    return {
+      y: scrollY,
+      top: s.top + scrollY,
+      h: s.height,
+      tg: t.top + scrollY,
+    };
+  }, SEC);
 
 const liveCards = (page) =>
   page.evaluate(
@@ -279,7 +277,7 @@ const diff = (a, b) => ({
   tg: Math.abs(a.tg - b.tg),
 });
 const fmtDiff = (d) =>
-  `scrollY ${d.y.toFixed(1)}, section top ${d.top.toFixed(1)}, height ${d.h.toFixed(1)}, telegram top ${d.tg.toFixed(1)}`;
+  `scrollY ${d.y.toFixed(1)}, section top ${d.top.toFixed(1)}, height ${d.h.toFixed(1)}, last section top ${d.tg.toFixed(1)}`;
 const within = (d, px) => Math.max(d.y, d.top, d.h, d.tg) <= px;
 
 /** Runs inside the page: one sample per animation frame. */

@@ -1,12 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound, redirect } from 'next/navigation';
-import {
-  getPackCategories,
-  getPackHighlights,
-  getRecentPulls,
-} from '@/lib/data/packs';
-import { getLeaderboard } from '@/lib/data/leaderboard';
-import { cached } from '@/lib/ttl-cache';
+import { getPackCategories, getPackHighlights } from '@/lib/data/packs';
 import { packTabs, type PackCard, type PackCategory } from '@/lib/packs-data';
 import { ShelfCategoryProvider } from '@/components/home/ShelfCategory';
 import PackStage from '@/components/pack-stage/PackStage';
@@ -14,7 +8,10 @@ import { Stage3dProvider } from '@/components/pack-stage/Stage3dProvider';
 import { StageNoScript } from '@/components/pack-stage/StageNoScript';
 import { toStageCategories } from '@/components/pack-stage/stage-packs';
 import { flowSeedFromHighlights } from '@/components/pack-flow/flow-seed';
-import { FlowSections } from '@/components/pack-flow/FlowSections';
+import {
+  FlowSections,
+  loadFlowData,
+} from '@/components/pack-flow/FlowSections';
 import { FOCUS_SEEDS_ID } from '@/components/pack-stage/stage-focus-seeds';
 import { flowStart } from '@/components/pack-flow/flow-start';
 import { packPagePath } from '@/components/pack-stage/stage-focus-marks';
@@ -92,10 +89,6 @@ function startOn(
   });
 }
 
-// shortcut: the same memo windows and keys as src/app/page.tsx, whose reads
-// this page duplicates. Remove the duplicate when the stage moves onto `/`.
-const FEED_TTL_MS = 5_000;
-
 /**
  * Homepage pack stage preview (docs/research/home-3d/pack-stage/plan.md).
  * 404 unless `next dev` or the server runs with HOME_PREVIEW=1. Reading
@@ -134,12 +127,12 @@ export default async function HomePreviewPage({
   // exists. Preview only; never on the real homepage.
   const forcedJp = new Set(one('jp').split(',').filter(Boolean));
 
-  // shortcut: duplicated from src/app/page.tsx (catalogue, feed, board,
-  // top-chase lookups). Remove at integration.
-  const [catalogue, feed, topRippers] = await Promise.all([
+  // shortcut: duplicated from src/app/page.tsx (catalogue and top-chase
+  // lookups). Remove at integration. The sections below the lineup read only
+  // what they list (FlowSections.tsx).
+  const [catalogue, flowData] = await Promise.all([
     getPackCategories(),
-    cached('home:recent-pulls', FEED_TTL_MS, () => getRecentPulls()),
-    getLeaderboard('weekly'),
+    loadFlowData(),
   ]);
   const categories =
     forcedSoldOut.size === 0 && forcedJp.size === 0
@@ -199,7 +192,7 @@ export default async function HomePreviewPage({
             tabs={tabs}
             start={start ? { ...start, id: focus } : undefined}
           >
-            <FlowSections feed={feed} topRippers={topRippers} />
+            <FlowSections data={flowData} />
           </PackStage>
         </Stage3dProvider>
       </ShelfCategoryProvider>

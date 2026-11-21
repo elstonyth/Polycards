@@ -48,6 +48,8 @@ describe('the flow spacers (home-flow.module.css)', () => {
     );
     expect(hide?.body).toMatch(/display:\s*none/);
     expect(hide?.selector).toMatch(/>\s*:global\(footer\[data-site-chrome\]\)/);
+    // keyed to the footer section's own class, not to any other section
+    expect(hide?.selector).toMatch(/:has\(\.footer\)/);
   });
 });
 

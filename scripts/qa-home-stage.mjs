@@ -2813,6 +2813,23 @@ async function recordFilter(label, profile, { jp = false } = {}) {
 // The page below the stage: the section order and one
 // footer, at rest, under reduced motion and while a pack is focused.
 
+/**
+ * The ids of the sections below the lineup, in order, read from the one list
+ * (src/components/pack-flow/FlowSections.tsx), so adding a section there
+ * needs no edit here. Throws when it finds none.
+ */
+function listedSectionIds() {
+  const src = readFileSync(
+    join(ROOT, 'src/components/pack-flow/FlowSections.tsx'),
+    'utf8',
+  );
+  const list = src.slice(src.indexOf('export const FLOW_SECTIONS'));
+  const ids = [...list.matchAll(/flowSection\(\s*'([^']+)'/g)].map((m) => m[1]);
+  if (ids.length === 0)
+    throw new Error('no section ids found in FlowSections.tsx');
+  return ids;
+}
+
 /** What the page below the stage shows (run in the page). */
 function sectionsProbe() {
   const shown = (e) => {
@@ -2824,21 +2841,27 @@ function sectionsProbe() {
       e.getBoundingClientRect().height > 0
     );
   };
-  const q = (sel) => document.querySelector(sel);
-  const jp = q('[data-flow-section="just-pulled"]');
-  const tg = q('[data-flow-section="telegram"]');
+  const sections = [...document.querySelectorAll('[data-flow-section]')];
+  const last = sections[sections.length - 1] ?? null;
   const feet = [...document.querySelectorAll('footer[data-site-chrome]')];
+  const below = sections.map((e) => e.textContent ?? '').join(' ');
+  // every t.me link in the sections sits inside the footer
+  const tme = sections.flatMap((e) => [
+    ...e.querySelectorAll('a[href^="https://t.me/"]'),
+  ]);
   return {
-    order: [...document.querySelectorAll('[data-flow-section]')]
-      .map((e) => e.getAttribute('data-flow-section'))
-      .join(','),
+    order: sections.map((e) => e.getAttribute('data-flow-section')).join(','),
     feet: feet.filter(shown).length,
-    footInTelegram: shown(tg?.querySelector('footer[data-site-chrome]')),
-    collectors: !!jp?.querySelector('#game-heading'),
-    justPulled: /JUST PULLED/i.test(jp?.textContent ?? ''),
-    telegram: !!tg?.querySelector('a[href="https://t.me/polycardsgg"]'),
-    trust: !!tg?.querySelector('#trust-heading'),
-    banner: /YOUR CHASE/.test(document.body.textContent ?? ''),
+    footInLast: shown(last?.querySelector('footer[data-site-chrome]')),
+    drawer: sections.some((e) => e.querySelector('[data-jp-drawer]')),
+    removed: [
+      document.querySelector('#game-heading') && 'Top Collectors',
+      document.querySelector('#trust-heading') && "Why it's real",
+      document.querySelector('[aria-label="Live pulls — browse all packs"]') &&
+        'ticker',
+      tme.some((a) => !a.closest('footer')) && 'Telegram button',
+      /YOUR CHASE/.test(below) && 'closing banner',
+    ].filter(Boolean),
   };
 }
 
@@ -2854,25 +2877,21 @@ async function checkSections(label, profile) {
         waitUntil: 'load',
       });
       await dismissChrome(page);
+      const want = listedSectionIds().join(',');
       const r = await page.evaluate(sectionsProbe);
       pass(
         `sections-order-${tag}`,
-        r.order === 'just-pulled,telegram' &&
-          r.justPulled &&
-          r.collectors &&
-          r.telegram &&
-          r.trust &&
-          !r.banner,
-        `order ${r.order}; Just Pulled ${r.justPulled}, collectors ${r.collectors}, Telegram link ${r.telegram}, trust ${r.trust}, closing banner ${r.banner}`,
+        r.order === want && r.drawer && r.removed.length === 0,
+        `order ${r.order} (listed ${want}); Just Pulled drawer ${r.drawer}; removed parts still shown: ${r.removed.join(', ') || 'none'}`,
       );
       pass(
         `sections-one-footer-${tag}`,
-        r.feet === 1 && r.footInTelegram,
-        `${r.feet} visible site footer(s); the one in the Telegram section shown: ${r.footInTelegram}`,
+        r.feet === 1 && r.footInLast,
+        `${r.feet} visible site footer(s); the one in the last section shown: ${r.footInLast}`,
       );
       if (reduced) continue;
       // Focused: the page below stays laid out over the pinned panel, so the
-      // footer is still the Telegram section's one.
+      // footer is still the last section's one.
       await page.waitForFunction(
         () =>
           window.__packStage?.ready?.() &&
@@ -2924,8 +2943,8 @@ async function checkSections(label, profile) {
       );
       pass(
         `sections-one-footer-focused-${tag}`,
-        f.feet === 1 && f.footInTelegram,
-        `${f.feet} visible site footer(s) while a pack is focused; the one in the Telegram section: ${f.footInTelegram}`,
+        f.feet === 1 && f.footInLast,
+        `${f.feet} visible site footer(s) while a pack is focused; the one in the last section: ${f.footInLast}`,
       );
     } finally {
       await ctx.close();

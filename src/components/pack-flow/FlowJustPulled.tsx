@@ -1,6 +1,3 @@
-import PullsMarquee from '@/components/home/PullsMarquee';
-import TheGame from '@/components/home/TheGame';
-import type { LeaderboardEntry } from '@/lib/data/leaderboard';
 import type { RecentFeed } from '@/lib/data/packs';
 import { stackCards, startStack } from './drawer-model';
 import { JustPulledShell } from './JustPulledShell';
@@ -18,22 +15,16 @@ const NO_SCRIPT_CSS = `
 `;
 
 /**
- * The Just Pulled section of the preview : one root with the section's data attribute, holding the drawer (the
- * heading with LIVE, the counters, the tier filter and the pulls), then the
- * live ticker and Top Collectors. The server renders the whole drawer at rest
+ * The Just Pulled section of the preview: the drawer (the heading with LIVE,
+ * the counters, the tier filter and the pulls). FlowSections wraps it in the
+ * section's data attribute. The server renders the whole drawer at rest
  * from the page's feed; only a small shell is first-load code, and it swaps
  * in the live drawer's lazy chunk as the section nears. No scroll listeners,
  * no fixed elements; its height does not change when a pull arrives.
  */
-export function FlowJustPulled({
-  feed,
-  topRippers,
-}: {
-  feed: RecentFeed;
-  topRippers: LeaderboardEntry[];
-}) {
+export function FlowJustPulled({ feed }: { feed: RecentFeed }) {
   return (
-    <div data-flow-section="just-pulled">
+    <>
       <JustPulledShell initial={feed}>
         <JustPulledView
           cards={stackCards(startStack('', feed.pulls), Infinity)}
@@ -43,11 +34,9 @@ export function FlowJustPulled({
           tab="All"
         />
       </JustPulledShell>
-      <PullsMarquee pulls={feed.pulls} />
-      <TheGame topRippers={topRippers} />
       <noscript>
         <style dangerouslySetInnerHTML={{ __html: NO_SCRIPT_CSS }} />
       </noscript>
-    </div>
+    </>
   );
 }

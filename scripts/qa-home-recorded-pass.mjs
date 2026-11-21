@@ -74,7 +74,7 @@ function recorder(s, leg) {
           join(qa.OUT, s.size + '-' + leg + '-' + n + '-' + w.phase + '.jpg'),
           buf,
         );
-        frames.push({ label, buf });
+        frames.push({ label, buf, phase: w.phase });
       } catch (e) {
         if (on)
           info(
@@ -241,10 +241,13 @@ try {
       r = await where(s);
       await s.page.waitForTimeout(800);
       const fwd = await rec.stop();
+      // the free part can be shorter than one gesture (a short first
+      // section): the recorded frames count as well as the polls
+      const framed = new Set([...seen, ...fwd.map((f) => f.phase)]);
       check(
         'forward-passed-the-free-part [' + size + ']',
-        seen.has('free'),
-        [...seen].join(', '),
+        framed.has('free'),
+        [...framed].join(', '),
       );
       check(
         'forward-saw-the-just-pulled-drawer [' + size + ']',

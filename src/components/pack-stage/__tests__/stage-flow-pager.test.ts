@@ -30,7 +30,7 @@ const GEO: FlowGeometry = {
   panel: 800,
   stops: 6,
   viewport: 800,
-  telegram: { top: 11000, bottom: 12000 },
+  riseSection: { top: 11000, bottom: 12000 },
   ret: { top: 12000, height: 1000 },
   last: { top: 13000, height: 801 },
 };
@@ -598,7 +598,7 @@ describe('flow pager: free touch and glide', () => {
       return run(p, y + (g?.top ?? 0), 256, 6000);
     };
     // a free section grew (an image loaded): same paged part, same glide
-    expect(glideOn({ telegram: { top: 11400, bottom: 12400 } })).toBeCloseTo(
+    expect(glideOn({ riseSection: { top: 11400, bottom: 12400 } })).toBeCloseTo(
       plain.end,
       6,
     );
@@ -1257,7 +1257,7 @@ describe('flow pager: the wrap', () => {
   it('the wrap lands on R0 plus the overshoot when the row does not start at 0', () => {
     const p = make({
       top: 200,
-      telegram: { top: 11200, bottom: 12200 },
+      riseSection: { top: 11200, bottom: 12200 },
       ret: { top: 12200, height: 1000 },
       last: { top: 13200, height: 801 },
     });
