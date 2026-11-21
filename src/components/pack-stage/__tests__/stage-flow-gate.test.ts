@@ -10,6 +10,7 @@ import {
   createTouchGate,
   FOCUS_RETRY_MS,
   flowSwitch,
+  flowOffHandover,
   panelState,
 } from '../stage-flow-gate';
 
@@ -525,5 +526,98 @@ describe('panel state past Closing', () => {
       free: true,
       lap: false,
     });
+  });
+});
+
+describe('flowOffHandover: the flow switching off under a focus ends it at the row', () => {
+  it('a focus (a stop or the lineup) when the flow goes off: the row shows the pack drawn', () => {
+    expect(
+      flowOffHandover({
+        was: true,
+        on: false,
+        focused: true,
+        track: 3,
+        count: 6,
+      }),
+    ).toBe(3);
+    // the lineup mid-pick: the pack nearest the centre
+    expect(
+      flowOffHandover({
+        was: true,
+        on: false,
+        focused: true,
+        track: 3.6,
+        count: 6,
+      }),
+    ).toBe(4);
+  });
+
+  it('nothing to end: no focus, the flow staying on, or switching on', () => {
+    expect(
+      flowOffHandover({
+        was: true,
+        on: false,
+        focused: false,
+        track: 2,
+        count: 6,
+      }),
+    ).toBeNull();
+    expect(
+      flowOffHandover({
+        was: true,
+        on: true,
+        focused: true,
+        track: 2,
+        count: 6,
+      }),
+    ).toBeNull();
+    expect(
+      flowOffHandover({
+        was: false,
+        on: true,
+        focused: true,
+        track: 2,
+        count: 6,
+      }),
+    ).toBeNull();
+    expect(
+      flowOffHandover({
+        was: false,
+        on: false,
+        focused: true,
+        track: 2,
+        count: 6,
+      }),
+    ).toBeNull();
+  });
+
+  it('a track outside the row is kept inside it; an empty row ends the focus on no pack', () => {
+    expect(
+      flowOffHandover({
+        was: true,
+        on: false,
+        focused: true,
+        track: 7.2,
+        count: 6,
+      }),
+    ).toBe(5);
+    expect(
+      flowOffHandover({
+        was: true,
+        on: false,
+        focused: true,
+        track: -1,
+        count: 6,
+      }),
+    ).toBe(0);
+    expect(
+      flowOffHandover({
+        was: true,
+        on: false,
+        focused: true,
+        track: 0,
+        count: 0,
+      }),
+    ).toBe(-1);
   });
 });

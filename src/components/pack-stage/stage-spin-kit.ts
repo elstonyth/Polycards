@@ -54,6 +54,7 @@ import {
   HOLD_MAX_MS,
   createFocusLoad,
   createTouchGate,
+  flowOffHandover,
   flowSwitch,
   holdStands,
   panelState,
@@ -356,6 +357,22 @@ export function startSpin(host: SpinHost): SpinControl {
       src.flow.toggleAttribute('data-flow-last', on);
       if (!on) clearPast(src);
       restore(on);
+      // a focus (a stop, the lineup) ends with the flow: the row, as at its start
+      const row = host.row?.();
+      const handover = flowOffHandover({
+        was,
+        on,
+        focused: !!focus?.active(),
+        track: stage.state.track,
+        count: row?.packs.length ?? 0,
+      });
+      if (handover !== null) {
+        if (row && handover >= 0) {
+          if (row.track.get() !== handover) row.track.set(handover);
+          row.go(handover);
+        }
+        focus?.release();
+      }
       // the plain page opens at the row, or at the same place in the sections
       if (leaving) {
         const top = headerHeight();

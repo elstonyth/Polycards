@@ -124,6 +124,25 @@ export function flowSwitch(o: {
   return o.was || o.scrollY <= o.r0 + o.panel / 2;
 }
 
+/**
+ * The flow switching off under a focus (a phone turned on its side, reduced
+ * motion switched on, the focused view lost) ends the focus as the wrap
+ * does: the row shows the pack the stage draws (the focused one, or the
+ * lineup's pick), at rest. Returns that pack's index in a row of `count`
+ * (-1: an empty row), or null when there is no focus to end.
+ */
+export function flowOffHandover(o: {
+  was: boolean;
+  on: boolean;
+  focused: boolean;
+  track: number;
+  count: number;
+}): number | null {
+  if (!o.was || o.on || !o.focused) return null;
+  if (o.count <= 0) return -1;
+  return Math.max(0, Math.min(o.count - 1, Math.round(o.track)));
+}
+
 /** A failed load is tried again by a call this long after it at the earliest. */
 export const FOCUS_RETRY_MS = 1000;
 /**
