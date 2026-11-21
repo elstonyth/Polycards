@@ -25,9 +25,11 @@
  * - Snap: at rest in the paged zone the scroll is always on a rest; a page
  *   left off one glides to the nearest after 150 ms of quiet, in 600 ms.
  * - Free part: the wheel and the keys are native, except an up notch that
- *   would cross the edge, which pages to RL. Touch follows the finger 1:1; on
- *   release it glides `sign * |v|^1.7` px (v: the scroll change in the last
- *   frame, scaled to a 60 Hz frame), eased by lerp 0.075 per 60 Hz frame. An
+ *   would cross the edge, which pages to RL (whatever its size: never to the
+ *   exit end). Touch follows the finger 1:1; on release it glides
+ *   `sign * |v|^1.7` px (v: the finger's speed between its last two moves,
+ *   from their own times, as px per 60 Hz frame; 0 when the finger has not
+ *   moved for 100 ms), eased by lerp 0.075 per 60 Hz frame. An
  *   up glide that comes within a few px of the edge pages to RL: scrolling
  *   back always stops at the lineup. A re-measure keeps a glide unless the
  *   paged part changed shape.
@@ -67,6 +69,10 @@ export const SNAP_MS = 600;
 export const GLIDE_POWER = 1.7;
 /** ... eased by this lerp per frame [code, P §C], applied as a 60 Hz rate so frame time cannot change it [ours]. */
 export const GLIDE_LERP = 0.075;
+/** A finger still this long before it lifts gets no glide [ours]. */
+export const RELEASE_HOLD_MS = 100;
+/** Moves handled closer than this (a busy page) count as one for the speed [ours]. */
+const MOVE_MERGE_MS = 4;
 /** An up glide this close to the paged edge hands over to the move to RL [ours]. */
 export const GLIDE_HANDOFF_PX = 4;
 /** Positions this close count as the same. */
@@ -105,7 +111,7 @@ export function flowPagerTable(
   };
 }
 
-/** The free glide's length for a last-frame scroll change v (px per 60 Hz frame). */
+/** The free glide's length for a release speed v (px per 60 Hz frame). */
 export function glideDistance(v: number): number {
   return v === 0 ? 0 : Math.sign(v) * Math.pow(Math.abs(v), GLIDE_POWER);
 }
@@ -202,8 +208,11 @@ type Touch = {
   free: boolean;
   strip: boolean;
   follow: number;
+  /** When the follow last changed (the last move's time). */
+  movedAt: number;
+  /** The follow and its time one move earlier: the speed's base. */
   prevFollow: number;
-  v: number;
+  prevAt: number;
 };
 /** `t0` null: starts on the next frame (that frame reports wrap 0). */
 type Lock = { t0: number | null; from: number; kind: FlowLock };
@@ -384,8 +393,8 @@ export function createFlowPager(): FlowPager {
     if (t) {
       // a held finger belongs to the lock now: rebased, and it writes nothing
       t.start = t.follow = t.prevFollow = overshoot;
+      t.prevAt = t.movedAt;
       t.y0 = t.y;
-      t.v = 0;
       t.free = false;
       t.ignored = true;
     }
@@ -453,8 +462,9 @@ export function createFlowPager(): FlowPager {
       if (zoneOf(scrollY) === 'free') {
         glide = null; // the native wheel takes over
         if (dy < 0 && scrollY + dy <= table.edge) {
-          const k = targetFrom(scrollY, -1);
-          if (k !== null && begin(scrollY, k, now)) quiet = true;
+          // to the last paged stop, never past it (the exit end is below it)
+          const k = table.stops.length - 1;
+          if (k >= 0 && begin(scrollY, k, now)) quiet = true;
           return true;
         }
         return false;
@@ -483,7 +493,7 @@ export function createFlowPager(): FlowPager {
       lock = { t0: null, from: scrollY, kind: 'home' };
       return 'moved';
     },
-    touchStart(x, y, scrollY, _now, o) {
+    touchStart(x, y, scrollY, now, o) {
       if (!table) {
         touch = null;
         return;
@@ -499,11 +509,12 @@ export function createFlowPager(): FlowPager {
         free: zoneOf(scrollY) === 'free',
         strip: !!o?.strip,
         follow: scrollY,
+        movedAt: now,
         prevFollow: scrollY,
-        v: 0,
+        prevAt: now,
       };
     },
-    touchMove(x, y) {
+    touchMove(x, y, _scrollY, now) {
       const t = touch;
       if (!t || !table) return { consumed: false, axis: null, scrollTo: null };
       t.y = y;
@@ -524,6 +535,12 @@ export function createFlowPager(): FlowPager {
       }
       if (t.ignored || !t.free)
         return { consumed: true, axis: 'y', scrollTo: null };
+      // moves handled back to back count as one: the base stays one move back
+      if (now - t.movedAt >= MOVE_MERGE_MS) {
+        t.prevFollow = t.follow;
+        t.prevAt = t.movedAt;
+        t.movedAt = now;
+      }
       t.follow = Math.max(table.edge, t.start + (t.y0 - y));
       return { consumed: true, axis: 'y', scrollTo: t.follow };
     },
@@ -540,10 +557,15 @@ export function createFlowPager(): FlowPager {
         if (k !== null) begin(scrollY, k, now, PAGE_MS);
         return;
       }
-      // a last move no frame has sampled yet (it and the release landed in
-      // the same frame): its movement is the release speed
-      if (t.follow !== t.prevFollow) t.v = t.follow - t.prevFollow;
-      const target = scrollY + glideDistance(t.v);
+      // the finger's speed over its last two moves, from their own times
+      // (frames in between change nothing); a finger that stopped first
+      // lifts with none
+      const span = t.movedAt - t.prevAt;
+      const v =
+        now - t.movedAt > RELEASE_HOLD_MS || span <= 0
+          ? 0
+          : ((t.follow - t.prevFollow) * FRAME_MS) / span;
+      const target = scrollY + glideDistance(v);
       // held against the edge (the follow stops there; the device-pixel
       // grid can leave the scroll a fraction past it): the lineup takes over
       const held =
@@ -592,11 +614,6 @@ export function createFlowPager(): FlowPager {
       const crossed = wrapTarget(prevY ?? scrollY, scrollY, lastTop);
       if (crossed !== null) return startWrap(crossed, now);
       prevY = scrollY;
-      if (touch && touch.free && !touch.ignored && dt > 0) {
-        // px per 60 Hz frame, so the glide is the same at any frame rate
-        touch.v = ((touch.follow - touch.prevFollow) * FRAME_MS) / dt;
-        touch.prevFollow = touch.follow;
-      }
       if (move) {
         const m = move;
         const to = ext[m.k] ?? m.from;

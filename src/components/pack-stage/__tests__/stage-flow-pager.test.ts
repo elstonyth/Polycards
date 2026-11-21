@@ -287,6 +287,12 @@ describe('flow pager: wheel', () => {
     expect(run(p, 7600, 2000, 3600)).toBe(7000);
   });
 
+  it('a very large up delta in the free part pages to the lineup, never stopping at the exit end', () => {
+    const p = make();
+    expect(p.wheel(-3000, 0, false, 9500, 0)).toBe(true);
+    expect(run(p, 9500, 0, 1600)).toBe(7000);
+  });
+
   it('keys step and go to a stop; swallowed while a move runs', () => {
     const p = make();
     expect(p.step(1, 0, 0)).toBe('moved');
@@ -529,9 +535,10 @@ describe('flow pager: free touch and glide', () => {
     q.touchStart(200, 600, y, 0);
     y = q.touchMove(200, 500, y, 16).scrollTo!;
     q.frame(y, 16);
-    q.frame(y, 32); // the finger held still for a frame
-    q.touchEnd(y, 40);
-    expect(run(q, y, 48, 1000)).toBe(9100);
+    // the finger held still for 150 ms (past the 100 ms hold), frames running
+    for (let now = 32; now <= 160; now += 16) q.frame(y, now);
+    q.touchEnd(y, 166);
+    expect(run(q, y, 176, 1000)).toBe(9100);
   });
 
   it('the glide is the same length at 120, 60 and 30 Hz frames (1920 px/s glides about 362 px)', () => {
@@ -848,7 +855,108 @@ describe('flow pager: a flick whose last move and release land in the same frame
     // the fourth move and the release, with no frame between them
     y = p.touchMove(200, 600 - 32 * 4, y, 128).scrollTo ?? y;
     p.touchEnd(y, 130);
-    expect(run(p, y, 144, 3000)).toBeGreaterThan(y + 150);
+    // 32 px per 32 ms is 16.7 px per 60 Hz frame: about 119 px of glide
+    const end = run(p, y, 144, 3000);
+    expect(end).toBeGreaterThan(y + 110);
+    expect(end).toBeLessThan(y + 130);
+  });
+});
+
+/**
+ * A free flick with the finger at `speed` px/s (positive: finger up):
+ * frames every `frameMs`, a move every `moveMs` landing just before a
+ * frame, six moves; then `still` ms after the last move (frames run on,
+ * none of them with a move) before the release. Frames run on for 6 s.
+ */
+function cadenceFlick(
+  frameMs: number,
+  moveMs: number,
+  speed: number,
+  still: number,
+  y0 = 9000,
+): { release: number; end: number; wraps: number } {
+  const p = make();
+  let y = y0;
+  let finger = 700;
+  let now = 0;
+  let lastMove = 0;
+  let next = moveMs;
+  let moves = 0;
+  p.touchStart(200, finger, y, 0);
+  p.frame(y, 0);
+  while (moves < 6) {
+    now += frameMs;
+    if (now >= next - 1e-6) {
+      finger -= (speed * moveMs) / 1000;
+      lastMove = now - 0.5;
+      y = p.touchMove(200, finger, y, lastMove).scrollTo ?? y;
+      next += moveMs;
+      moves++;
+    }
+    p.frame(y, now);
+  }
+  while (now + frameMs < lastMove + still) {
+    now += frameMs;
+    p.frame(y, now);
+  }
+  const release = y;
+  p.touchEnd(y, lastMove + still);
+  let wraps = 0;
+  for (let t = now + frameMs; t <= now + 6000; t += frameMs) {
+    const f = p.frame(y, t);
+    if (f.wrap === 0) wraps++;
+    if (f.scrollTo !== null) y = f.scrollTo;
+  }
+  return { release, end: y, wraps };
+}
+
+describe('flow pager: the release speed comes from the moves, not the frames', () => {
+  // 1920 px/s is 32 px per 60 Hz frame: a glide of about 361 px
+  const SPEED = 1920;
+  it('a frame with no move before the release keeps the glide, at any frame and touch rate', () => {
+    for (const [frameMs, moveMs] of [
+      [1000 / 60, 1000 / 60], // 60 Hz screen, 60 Hz touch
+      [1000 / 120, 1000 / 60], // 120 Hz screen, 60 Hz touch
+      [31, 62], // a slow page: 31 ms frames, a move every 62 ms
+    ] as const) {
+      const r = cadenceFlick(frameMs, moveMs, SPEED, frameMs + 2);
+      const glide = r.end - r.release;
+      expect(glide, frameMs + ' ms frames').toBeGreaterThan(350);
+      expect(glide, frameMs + ' ms frames').toBeLessThan(372);
+    }
+  });
+
+  it('two moves handled back to back (a busy page) count as one: no runaway glide', () => {
+    const p = make();
+    let y = 9000;
+    p.touchStart(200, 700, y, 0);
+    p.frame(y, 0);
+    let now = 0;
+    for (let i = 1; i <= 4; i++) {
+      now = i * 16;
+      y = p.touchMove(200, 700 - 32 * i, y, now).scrollTo ?? y;
+      p.frame(y, now);
+    }
+    // the fifth move's handler runs half a millisecond after the fourth's
+    y = p.touchMove(200, 700 - 32 * 5, y, now + 0.5).scrollTo ?? y;
+    p.touchEnd(y, now + 18);
+    const end = run(p, y, now + 32, 6000);
+    // 64 px over the two moves' 16 ms: 66.7 px per 60 Hz frame, about 1260 px
+    expect(end - y).toBeGreaterThan(1200);
+    expect(end - y).toBeLessThan(1320);
+  });
+
+  it('a finger held still for 150 ms before lifting does not glide', () => {
+    const r = cadenceFlick(1000 / 60, 1000 / 60, SPEED, 150);
+    expect(r.end).toBe(r.release);
+  });
+
+  it("a glide that crosses Last's top after a frame with no move wraps once and ends at the row", () => {
+    // Last's top at 13000: 192 px of drag to 12800, then about 361 px of glide
+    const r = cadenceFlick(1000 / 60, 1000 / 60, SPEED, 1000 / 60 + 2, 12608);
+    expect(r.release).toBe(12800);
+    expect(r.wraps).toBe(1);
+    expect(r.end).toBe(0);
   });
 });
 
