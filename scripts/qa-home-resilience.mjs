@@ -33,8 +33,34 @@
 //   restores the row (no trim, more than one pack drawn).
 // - touchcancel (phone): a drag ended by touchCancel at a stop leaves the page
 //   on that stop; in the free span it leaves no glide.
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { chromium, webkit } from 'playwright';
+
+/** The pack trim's margin at each end of the free span, in viewports, read
+ * from the page's own source (stage-flow.ts) so the checks follow it. */
+const LAP_TRIM_MARGIN = (() => {
+  const src = readFileSync(
+    new URL('../src/components/pack-stage/stage-flow.ts', import.meta.url),
+    'utf8',
+  );
+  const m = /export const LAP_TRIM_MARGIN = ([\d.]+);/.exec(src);
+  if (!m) throw new Error('LAP_TRIM_MARGIN not found in stage-flow.ts');
+  return Number(m[1]);
+})();
+/** Whether the trim can turn on: the free span (exit end to rise start, from
+ * the page's flow table) is longer than its two margins. */
+const trimFits = (t, vh) =>
+  !t.rise || t.rise.start - t.exitEnd > 2 * LAP_TRIM_MARGIN * vh;
+const spanText = (t, vh) =>
+  'free span ' +
+  (t.rise ? Math.round(t.rise.start - t.exitEnd) : 'open') +
+  ' px, two margins ' +
+  Math.round(2 * LAP_TRIM_MARGIN * vh) +
+  ' px (trim ' +
+  (trimFits(t, vh) ? 'expected in the middle' : 'must stay off') +
+  ')';
+/** The GPU estimate's cap in the free span (trim-gpu-free-span-phone). */
+const FREE_GPU_CAP = 40 * 1048576;
 
 const args = process.argv.slice(2);
 const BASE =
@@ -1079,6 +1105,10 @@ const trimProbe = (page) =>
       lap,
       drawn: Array.isArray(d) ? d.length : Number(d),
       ids: list.map((e) => (typeof e === 'string' ? e : (e?.id ?? '?'))),
+      shown: list
+        .filter((e) => typeof e !== 'string' && e?.opacity > 0)
+        .map((e) => e.id),
+      chosen: ps?.state?.focusOn?.id ?? null,
       free: !!document.querySelector('[data-flow-free]'),
       y: Math.round(scrollY * 10) / 10,
     };
@@ -1147,6 +1177,8 @@ async function trimPart(size) {
   await page.waitForTimeout(1200);
   p = await rest(page);
   const t = await trimProbe(page);
+  const vh = await page.evaluate(() => innerHeight);
+  const fits = trimFits(p, vh);
   await shot(page, 'trim-free-span-' + size);
   const stopsText =
     'rests passed ' +
@@ -1157,10 +1189,12 @@ async function trimPart(size) {
     'trim-free-span-' + size,
     !!t.lap &&
       t.lap.free === true &&
-      t.lap.trim === true &&
       t.free &&
-      t.drawn <= 1,
-    'by ' +
+      (fits
+        ? t.lap.trim === true && t.drawn <= 1
+        : t.lap.trim === false && t.shown.every((id) => id === t.chosen)),
+    spanText(p, vh) +
+      '; by ' +
       way +
       ' to scrollY ' +
       t.y +
@@ -1177,6 +1211,11 @@ async function trimPart(size) {
       '; drawn ' +
       t.drawn +
       (t.ids.length ? ' [' + t.ids.join(',') + ']' : '') +
+      ', shown [' +
+      t.shown.join(',') +
+      '] (chosen ' +
+      t.chosen +
+      ')' +
       '; ' +
       stopsText,
   );
@@ -1199,9 +1238,14 @@ async function trimPart(size) {
       requestAnimationFrame(f);
     });
     await page.waitForTimeout(2000);
-    await drag(s, 195, 600, 400, { steps: 10, delay: 30, hold: 120 });
+    // down and back up by a drag that stays inside the free span
+    const room = p.rise
+      ? Math.min(p.rise.start - p.y, p.y - p.exitEnd) - 20
+      : 200;
+    const d = Math.max(0, Math.min(200, Math.floor(room)));
+    await drag(s, 195, 600, 600 - d, { steps: 10, delay: 30, hold: 120 });
     await rest(page);
-    await drag(s, 195, 400, 600, { steps: 10, delay: 30, hold: 120 });
+    await drag(s, 195, 600 - d, 600, { steps: 10, delay: 30, hold: 120 });
     await rest(page);
     await page.waitForTimeout(1000);
     const g = await page.evaluate(() => ({
@@ -1212,10 +1256,14 @@ async function trimPart(size) {
     const mb = Math.round((g.peak / 1048576) * 100) / 100;
     report(
       'trim-gpu-free-span-phone',
-      live && g.has && g.free && mb <= 40,
+      live && g.has && g.free && g.peak <= FREE_GPU_CAP,
       'peak ' +
         mb +
-        ' MB (cap 40); drawer loaded ' +
+        ' MB (cap 40) over drags of ' +
+        d +
+        ' px each way; ' +
+        spanText(p, vh) +
+        '; drawer loaded ' +
         live +
         '; estimate present ' +
         g.has +

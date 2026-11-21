@@ -53,8 +53,34 @@
 //   the GPU estimate's peak during them; ArrowLeft and ArrowRight pick at
 //   the lineup only; (desktop) one sideways wheel gesture steps one pack; a
 //   pick then the exit keeps the picked pack.
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { chromium } from 'playwright';
+
+/** The pack trim's margin at each end of the free span, in viewports, read
+ * from the page's own source (stage-flow.ts) so the checks follow it. */
+const LAP_TRIM_MARGIN = (() => {
+  const src = readFileSync(
+    new URL('../src/components/pack-stage/stage-flow.ts', import.meta.url),
+    'utf8',
+  );
+  const m = /export const LAP_TRIM_MARGIN = ([\d.]+);/.exec(src);
+  if (!m) throw new Error('LAP_TRIM_MARGIN not found in stage-flow.ts');
+  return Number(m[1]);
+})();
+/** Whether the trim can turn on: the free span (exit end to rise start, from
+ * the page's flow table) is longer than its two margins. */
+const trimFits = (t, vh) =>
+  !t.rise || t.rise.start - t.exitEnd > 2 * LAP_TRIM_MARGIN * vh;
+const spanText = (t, vh) =>
+  'free span ' +
+  (t.rise ? Math.round(t.rise.start - t.exitEnd) : 'open') +
+  ' px, two margins ' +
+  Math.round(2 * LAP_TRIM_MARGIN * vh) +
+  ' px (trim ' +
+  (trimFits(t, vh) ? 'expected in the middle' : 'must stay off') +
+  ')';
+/** The GPU estimate's cap in the free span (trim-gpu-free-span-phone). */
+const FREE_GPU_CAP = 40 * 1048576;
 
 const args = process.argv.slice(2);
 const BASE =
@@ -1170,7 +1196,8 @@ for (const size of sizes) {
     );
 
     // the free part draws nothing and keeps only the chosen pack (trimmed,
-    // not sent away), and the lineup's packs come back on the way up
+    // not sent away, where the span is longer than its two trim margins;
+    // shorter, the trim stays off), and the lineup's packs come back on the way up
     const vh = page.viewportSize().height;
     const trimY = t.rise ? (t.exitEnd + t.rise.start) / 2 : t.exitEnd + vh;
     await page.evaluate((v) => window.scrollTo(0, v), trimY);
@@ -1183,6 +1210,7 @@ for (const size of sizes) {
     await page.waitForTimeout(400);
     const e2 = await engineAt();
     const MB = (b) => (b === null ? null : Math.round((b / 1048576) * 10) / 10);
+    const fits = trimFits(t, vh);
     report(
       'engine-trims-in-the-free-part-' + size,
       e0.present === true &&
@@ -1190,12 +1218,16 @@ for (const size of sizes) {
         e1.live.length === 0 &&
         e1.gpu !== null &&
         e0.gpu !== null &&
-        e1.gpu < e0.gpu &&
+        e1.lap?.free === true &&
+        (fits
+          ? e1.lap.trim === true && e1.gpu < e0.gpu
+          : e1.lap.trim === false && e1.gpu <= FREE_GPU_CAP) &&
         e2.present === true &&
         e2.running &&
         near(r.y, lineupY) &&
         e2.live.length > 0,
-      'Closing: present ' +
+      spanText(t, vh) +
+        '; Closing: present ' +
         e0.present +
         ', running ' +
         e0.running +
@@ -2210,18 +2242,25 @@ for (const size of sizes) {
     const chosenIndex = atLineup.index;
     const t = atLineup.t;
     const exitEnd = t.exitEnd;
-    // the trimmed middle of the free span (a quarter viewport past the exit
-    // end to a quarter viewport before the rise)
+    // the middle of the free span (trimmed when the span is longer than its
+    // two margins: a quarter viewport past the exit end and before the rise)
     const free = await to((exitEnd + t.rise.start) / 2, 1500);
     report(
       'wp67-free-nothing-drawn-' + size,
       free.free && !free.lapAttr && free.drawn.length === 0 && free.lap?.free,
       `at ${Math.round(free.y)}: drawn ${free.drawn.length}, lap ${JSON.stringify(free.lap)}, GPU ${MB(free.gpu)} MB (lineup ${MB(atLineup.gpu)} MB)`,
     );
+    const vh = page.viewportSize().height;
+    const fits = trimFits(t, vh);
     report(
       'wp67-free-keeps-only-the-chosen-pack-' + size,
-      free.lap?.trim === true && free.gpu > 0 && free.gpu < atLineup.gpu,
-      `GPU estimate ${MB(free.gpu)} MB in the free span, ${MB(atLineup.gpu)} MB at the lineup`,
+      free.gpu > 0 &&
+        (fits
+          ? free.lap?.trim === true && free.gpu < atLineup.gpu
+          : free.lap?.trim === false &&
+            free.drawn.every((d) => d.id === chosen) &&
+            free.gpu <= FREE_GPU_CAP),
+      `${spanText(t, vh)}; trim ${free.lap?.trim}; drawn [${free.drawn.map((d) => d.id).join(',')}] (chosen ${chosen}); GPU estimate ${MB(free.gpu)} MB in the free span, ${MB(atLineup.gpu)} MB at the lineup`,
     );
     // the rise: one pack, the chosen one, the panel shown, the row UI out
     const rs = t.rise;
@@ -2764,6 +2803,8 @@ for (const size of sizes) {
         held: free.held,
         gpu: free.gpu,
         gpuLineup: at.gpu,
+        fits: trimFits(t, page.viewportSize().height),
+        span: spanText(t, page.viewportSize().height),
       };
       // the rise, then the plateau, then the return
       await phase('rise');
@@ -2860,36 +2901,42 @@ for (const size of sizes) {
         flatRestPhases.join(', ') +
         ']',
     );
-    // (2) the free span holds and draws only the chosen capsule
+    // (2) the free span draws only the chosen capsule, and holds only it
+    // where the span is longer than its two trim margins (shorter, the trim
+    // stays off: every capsule stays held, under the GPU cap)
     report(
       'poly-free-span-only-the-chosen-capsule-' + size,
       laps.every(
         (l) =>
           l.free.free &&
           !l.free.lapAttr &&
-          l.free.held.length === 1 &&
-          l.free.held[0] === l.id &&
           l.free.drawn.every((d) => d === l.id) &&
-          l.free.gpu < l.free.gpuLineup,
+          (l.free.fits
+            ? l.free.held.length === 1 &&
+              l.free.held[0] === l.id &&
+              l.free.gpu < l.free.gpuLineup
+            : l.free.held.includes(l.id) && l.free.gpu <= FREE_GPU_CAP),
       ),
-      laps
-        .map(
-          (l) =>
-            'index ' +
-            l.index +
-            ' (' +
-            l.id +
-            '): held [' +
-            l.free.held.join(',') +
-            '], drawn [' +
-            l.free.drawn.join(',') +
-            '], GPU ' +
-            MB(l.free.gpu) +
-            ' MB (lineup ' +
-            MB(l.free.gpuLineup) +
-            ' MB)',
-        )
-        .join('; '),
+      (laps[0]?.free.span ?? '') +
+        '; ' +
+        laps
+          .map(
+            (l) =>
+              'index ' +
+              l.index +
+              ' (' +
+              l.id +
+              '): held [' +
+              l.free.held.join(',') +
+              '], drawn [' +
+              l.free.drawn.join(',') +
+              '], GPU ' +
+              MB(l.free.gpu) +
+              ' MB (lineup ' +
+              MB(l.free.gpuLineup) +
+              ' MB)',
+          )
+          .join('; '),
     );
     // the stops, read while focused (at the lineup) on every lap's capsule
     const row0 = { kinds: laps[0]?.kinds ?? [] };
