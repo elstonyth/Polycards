@@ -34,6 +34,84 @@ function loadDrawer(): Promise<ComponentType<DrawerProps>> {
 }
 
 /**
+ * Calls onNear once the section comes within a screen and a half of the
+ * viewport, in the layout the visitor gets. Not before the page has loaded,
+ * nor while the flow is off: its spacers have no height then, which puts
+ * this section within reach of the row. That holds before the flow comes on
+ * and when it drops out for a while (the focused view's chunk is late) and
+ * comes back. Without the flow (reduced motion, no flow root, or the flow off
+ * for FLOW_WAIT_MS straight) the plain page is measured as it is. Returns
+ * the cleanup.
+ */
+export function watchNear(el: HTMLElement, onNear: () => void): () => void {
+  const root = el.closest('[data-home-flow]');
+  let loaded = false;
+  let done = false;
+  /** The flow has been off for FLOW_WAIT_MS straight: it is not coming. */
+  let waited = false;
+  let wait: ReturnType<typeof setTimeout> | undefined;
+  const plain = () =>
+    !root ||
+    waited ||
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const trusted = () => plain() || !!root?.hasAttribute('data-flow-on');
+  const io = new IntersectionObserver(
+    (entries) => {
+      if (done || !trusted() || !entries.some((e) => e.isIntersecting)) return;
+      done = true;
+      stop();
+      onNear();
+    },
+    { rootMargin: '150% 0px' },
+  );
+  /** Watches only while the layout can be trusted; observing again gives a
+   *  fresh measurement of the layout now on the page. */
+  const measure = () => {
+    if (!loaded || done) return;
+    io.unobserve(el);
+    if (trusted()) io.observe(el);
+  };
+  /** Each time the flow goes off (or is not on yet) the wait starts over. */
+  const restartWait = () => {
+    clearTimeout(wait);
+    waited = false;
+    if (trusted()) return;
+    wait = setTimeout(() => {
+      waited = true;
+      measure();
+    }, FLOW_WAIT_MS);
+  };
+  const watch = root
+    ? new MutationObserver(() => {
+        restartWait();
+        measure();
+      })
+    : null;
+  if (root)
+    watch?.observe(root, {
+      attributes: true,
+      attributeFilter: ['data-flow-on'],
+    });
+  const afterLoad = () => {
+    loaded = true;
+    restartWait();
+    measure();
+  };
+  function stop() {
+    io.disconnect();
+    window.removeEventListener('load', afterLoad);
+    watch?.disconnect();
+    clearTimeout(wait);
+  }
+  if (document.readyState === 'complete') afterLoad();
+  else window.addEventListener('load', afterLoad, { once: true });
+  return () => {
+    done = true;
+    stop();
+  };
+}
+
+/**
  * Just Pulled's only first-load code: it shows the server's markup (the
  * drawer at rest, already complete) and fetches the live drawer's chunk when
  * the section comes within a screen and a half of the viewport, or on a first
@@ -60,16 +138,10 @@ export function JustPulledShell({
     const el: HTMLDivElement = host;
     let asked = false;
     let alive = true;
-    const io = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) want();
-      },
-      { rootMargin: '150% 0px' },
-    );
     function want() {
       if (asked) return;
       asked = true;
-      io.disconnect();
+      stopWatch();
       loadDrawer().then(
         (D) => {
           if (!alive) return;
@@ -85,48 +157,12 @@ export function JustPulledShell({
         },
       );
     }
-    // Not before the page has loaded, nor while the flow is still laying
-    // out the page (its spacers have no height until it is on, which puts
-    // this section within reach of the row). Without the flow (reduced
-    // motion, or it never comes on) the plain page is measured as it is.
-    const root = el.closest('[data-home-flow]');
-    const flowOn = () => !root || root.hasAttribute('data-flow-on');
-    let started = false;
-    let watch: MutationObserver | null = null;
-    let fallback: ReturnType<typeof setTimeout> | undefined;
-    const start = () => {
-      if (started) return;
-      started = true;
-      watch?.disconnect();
-      clearTimeout(fallback);
-      io.observe(el);
-    };
-    const afterLoad = () => {
-      if (
-        !root ||
-        flowOn() ||
-        window.matchMedia('(prefers-reduced-motion: reduce)').matches
-      )
-        return start();
-      watch = new MutationObserver(() => {
-        if (flowOn()) start();
-      });
-      watch.observe(root, {
-        attributes: true,
-        attributeFilter: ['data-flow-on'],
-      });
-      fallback = setTimeout(start, FLOW_WAIT_MS);
-    };
-    if (document.readyState === 'complete') afterLoad();
-    else window.addEventListener('load', afterLoad, { once: true });
+    const stopWatch = watchNear(el, want);
     el.addEventListener('pointerdown', want);
     el.addEventListener('focusin', want);
     return () => {
       alive = false;
-      io.disconnect();
-      window.removeEventListener('load', afterLoad);
-      watch?.disconnect();
-      clearTimeout(fallback);
+      stopWatch();
       el.removeEventListener('pointerdown', want);
       el.removeEventListener('focusin', want);
     };

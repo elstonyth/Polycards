@@ -201,11 +201,11 @@ export function JustPulledView({
                 <div
                   key={r}
                   data-jp-counter=""
-                  className="rounded-2xl border bg-neutral-900/90 px-3.5 pt-3 pb-3.5 lg:px-5 lg:pt-4 lg:pb-[18px]"
-                  style={{
-                    borderColor: `rgba(${rgb}, 0.4)`,
-                    boxShadow: `inset 0 -28px 40px -36px rgba(${rgb}, 0.7)`,
-                  }}
+                  className={cn(
+                    'rounded-2xl border bg-neutral-900/90 px-3.5 pt-3 pb-3.5 lg:px-5 lg:pt-4 lg:pb-[18px]',
+                    styles.counter,
+                  )}
+                  style={{ '--t': rgb } as CSSProperties}
                 >
                   <p className="font-heading text-[56px] leading-none tracking-[-0.02em] text-white tabular-nums lg:text-[64px]">
                     <span
@@ -255,8 +255,11 @@ export function JustPulledView({
                   {t !== 'All' && (
                     <span
                       aria-hidden
-                      className="h-1.5 w-1.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: `rgb(${rarityRgb(t)})` }}
+                      className={cn(
+                        'h-1.5 w-1.5 shrink-0 rounded-full',
+                        styles.dot,
+                      )}
+                      style={{ '--t': rarityRgb(t) } as CSSProperties}
                     />
                   )}
                   {t}

@@ -53,7 +53,7 @@
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 16px;
-  background: #151515;
+  background: var(--color-neutral-900);
   /* Waiting behind: one tab higher and a little smaller per place. */
   transform-origin: 50% 0;
   transform: translateY(calc(var(--d) * var(--tab-h) * -1))
@@ -116,6 +116,17 @@
 .chase {
   border-color: rgba(var(--t), 0.55);
   box-shadow: 0 0 30px -12px rgba(var(--t), 0.7);
+}
+
+/* A tier's counter card, tinted by its tier (--t). */
+.counter {
+  border-color: rgba(var(--t), 0.4);
+  box-shadow: inset 0 -28px 40px -36px rgba(var(--t), 0.7);
+}
+
+/* A tier tab's dot. */
+.dot {
+  background-color: rgb(var(--t));
 }
 
 .tab {

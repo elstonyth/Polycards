@@ -214,8 +214,8 @@ describe('the focused back at the hand-off (full-flow plan 2.12, risk 4)', () =>
     expect(focusBackWanted(1)).toBe(false);
   });
 
-  // 151's half picture (pack-3d manifest, restated as stage-spin-memory's
-  // test does): the biggest half fronts are about this size
+  // 151's half picture (pack-3d manifest): the biggest half fronts are
+  // about this size
   const HALF: [number, number] = [466, 833];
   const half = textureBytes(...HALF);
   /** The back printed from the full plate: twice the half each way. */
