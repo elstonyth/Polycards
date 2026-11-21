@@ -11,8 +11,10 @@
  *   the next one (so browser Back still unfocuses), else replaces
  *   `/slots/<id>`. The end of the focus at the row puts the base path back
  *   the same way.
- * So the history holds at most one entry from a tap, and none from scrolling
- * or laps. The entry's state records whether it was pushed and the base
+ * A pick in the lineup renames the entry's pack: coming back up steps onto
+ * the pushed entry as before and writes the picked pack's address there,
+ * still marked as pushed. So the history holds at most one entry from a tap,
+ * and none from scrolling, picks or laps. The entry's state records whether it was pushed and the base
  * path, so a resumed entry (Back from the pack page) follows the same rules.
  *
  * A step back or forward is asynchronous: until its popstate arrives nothing
@@ -40,6 +42,11 @@ export type FocusAddress = {
   enter(id: string, how: FocusEntryKind, entry: string): void;
   /** The page is in the details (true) or has left them downwards (false). */
   show(on: boolean): void;
+  /**
+   * The focused pack changed (a pick in the lineup): the same entry now
+   * names pack `id`; written in place when it shows, else when it next does.
+   */
+  pack(id: string): void;
   /** The focus ended at the row: the base path again. */
   end(): void;
   /** The address already moved (browser Back): forget the entry, write nothing. */
@@ -145,7 +152,13 @@ export function createFocusAddress(
       h.forward();
       return;
     }
-    h.replaceState({ [FOCUS_MARK]: entry, [BASE]: base }, '', path);
+    // in place: a pushed entry stays pushed (stepped onto after a pick)
+    const state: Record<string, unknown> = {
+      [FOCUS_MARK]: entry,
+      [BASE]: base,
+    };
+    if (ours() && fields(h.state)[PUSHED] === true) state[PUSHED] = true;
+    h.replaceState(state, '', path);
   };
   /** The last pending step has landed: the address as last asked for. */
   const settle = () => {
@@ -205,6 +218,11 @@ export function createFocusAddress(
       if (on === shown) return;
       if (on) reveal();
       else hide();
+    },
+    pack(id) {
+      if (entry === null || ended) return;
+      path = packPath(id);
+      if (pending === 0 && shown) reveal();
     },
     end() {
       if (entry === null) return;

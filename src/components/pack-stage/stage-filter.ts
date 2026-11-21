@@ -118,3 +118,12 @@ export function filterLabel(
 /** A stable key for a row (category, chip, language). */
 export const rowKeyOf = (categoryId: string, f: StageFilter): string =>
   `${categoryId}|${f.shelf}|${f.language ?? ''}`;
+
+/** What the live region says once the track rests on a pack. */
+export function stageAnnouncement(
+  pack: Pick<StagePack, 'name' | 'priceLabel' | 'soldOut'>,
+  index: number,
+  count: number,
+): string {
+  return `${pack.name}, ${pack.priceLabel}${pack.soldOut ? ', sold out' : ''}. ${index + 1} of ${count}.`;
+}

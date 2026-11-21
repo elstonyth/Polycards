@@ -39,8 +39,13 @@ import {
   type FlowPagerFrame,
   type FlowPagerTable,
 } from './stage-flow-pager';
+import { createFlowLine, type FlowLineFrame } from './stage-flow-line';
 import { blockAt } from './stage-focus';
+import { AXIS_LOCK_PX } from './stage-pager';
 import { clamp01 } from './stage-spin-math';
+
+/** The pick is carried this long after the lineup comes to rest [code: debounced 150 ms]. */
+export const LINE_PICK_MS = 150;
 
 /** What the flow reads of the page. */
 export type FlowInputDeps = {
@@ -52,6 +57,15 @@ export type FlowInputDeps = {
   kinds(): readonly string[];
   /** Focus the centred pack without paging (the flow pages); false: it cannot be. */
   enter(): boolean;
+  /**
+   * The lineup's row while a pack is focused: the row's track, its length
+   * and the focused pack's index (null: no row to pick in).
+   */
+  line?(): { track: number; count: number; index: number } | null;
+  /** The pick: the focused view is rebuilt for the pack at `index`; false: it could not be. */
+  pick?(index: number): boolean;
+  /** Whether the pack at `index` can be picked (focused). */
+  canPick?(index: number): boolean;
 };
 
 /** The live geometry in document scroll pixels. */
@@ -83,10 +97,16 @@ export type FlowInputFrame = FlowPagerFrame & {
    * way, as `blockAt`). The address follows it (plan 2.8).
    */
   past: boolean;
+  /**
+   * The lineup's pick while it moves (and on the frame it comes to rest):
+   * the caller writes `track` to the row. Null: the row is not the line's.
+   */
+  line: FlowLineFrame | null;
 };
 
 /** What a key asks for (plan 2.10). */
-export type FlowKeyIntent = 'next' | 'prev' | 'first' | 'last' | 'escape';
+export type FlowKeyIntent =
+  'next' | 'prev' | 'first' | 'last' | 'escape' | 'left' | 'right';
 
 /**
  * What a key did: the pager's result, or `leave`: the caller runs the
@@ -106,8 +126,9 @@ type KeyLike = {
 /**
  * The flow's keys: ArrowDown, PageDown and Space go to the next stop;
  * ArrowUp, PageUp and Shift+Space to the previous; Home to the row; End to
- * the last paged stop; Escape back to the row. With Ctrl, Alt or Meta held a
- * key is the browser's.
+ * the last paged stop; Escape back to the row; ArrowLeft and ArrowRight pick
+ * at the lineup (elsewhere the browser's). With Ctrl, Alt or Meta held a key
+ * is the browser's.
  */
 export function flowKeyIntent(e: KeyLike): FlowKeyIntent | null {
   if (e.ctrlKey || e.altKey || e.metaKey) return null;
@@ -126,6 +147,10 @@ export function flowKeyIntent(e: KeyLike): FlowKeyIntent | null {
       return 'last';
     case 'Escape':
       return 'escape';
+    case 'ArrowLeft':
+      return 'left';
+    case 'ArrowRight':
+      return 'right';
     default:
       return null;
   }
@@ -187,10 +212,22 @@ export interface FlowInput {
   touchEnd(scrollY: number, now: number): void;
   /** The touch's tracking is dropped: nothing pages, the snap and the idle report come back. */
   touchCancel(): void;
+  /** A mouse press (desktop); true: the lineup's drag may follow (the caller cancels it). */
+  mouseDown(x: number, y: number, scrollY: number, now: number): boolean;
+  /** True: the lineup is being dragged (the caller cancels the move). */
+  mouseMove(x: number, y: number, now: number): boolean;
+  mouseUp(now: number): void;
   frame(scrollY: number, now: number): FlowInputFrame;
   busy(): boolean;
   /** The last gesture was a down gesture at the row that no focusable pack could take. */
   refused(): boolean;
+  /** The lineup's pick, for the debug read-out. */
+  lineState(): {
+    pos: number;
+    index: number;
+    moving: boolean;
+    pending: boolean;
+  };
 }
 
 /** A page this close to the row counts as on it. */
@@ -203,6 +240,18 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
   let kindsKey = '';
   /** A touch that started in the free part: the browser's own. */
   let nativeTouch = false;
+  /** The lineup's endless pick (plan 2.4). */
+  const line = createFlowLine({ canPick: (i) => d.canPick?.(i) ?? true });
+  /** A touch that may drag the lineup: where it landed. */
+  let lineTouch: { x0: number } | null = null;
+  /** A mouse press that may drag the lineup, and its locked axis. */
+  let mouse: { x0: number; y0: number; axis: 'x' | 'y' | null } | null = null;
+  /** The line has been taken by a gesture in this focus. */
+  let lineUsed = false;
+  /** The focused pack the line was last aligned with (its sync, or its last pick). */
+  let lineFocus: number | null = null;
+  /** When the line came to rest on a pack not yet carried (null: none). */
+  let restAt: number | null = null;
 
   const kindsNow = (): readonly string[] =>
     d.focused() ? d.kinds() : (d.centreKinds() ?? []);
@@ -248,6 +297,52 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
   const stops = (): readonly number[] =>
     table ? (table.rests.length > 0 ? table.stops : [table.r0]) : [];
 
+  /**
+   * The lineup can be dragged: a pack is focused and its row known, the page
+   * within half a section of the lineup rest, and no move playing.
+   */
+  const lineLive = (scrollY: number): boolean => {
+    const t = table;
+    if (!t || t.rests.length === 0 || !d.focused() || pager.busy())
+      return false;
+    if (!d.line?.()) return false;
+    return Math.abs(scrollY - t.rl) <= t.section / 2;
+  };
+  /** The line takes the row as it rests (ignored while it moves). */
+  const syncLine = () => {
+    const l = d.line?.();
+    if (!l) return;
+    line.sync(l.track, l.count);
+    lineUsed = true;
+    lineFocus = l.index;
+  };
+  /** The chosen pack is not the focused one: carry it now. */
+  const pickDue = (): number | null => {
+    if (!lineUsed) return null;
+    const l = d.line?.();
+    // the focus ended, or another pack was focused by other means: the
+    // line's pick no longer stands (the next gesture takes the row afresh)
+    if (!l || l.index !== lineFocus) {
+      lineUsed = false;
+      restAt = null;
+      return null;
+    }
+    const k = line.index();
+    return k !== l.index ? k : null;
+  };
+  const carry = (k: number) => {
+    restAt = null;
+    if (d.pick?.(k)) lineFocus = k;
+    // a pick that cannot be made is dropped, never retried frame by frame
+    else lineUsed = false;
+    build();
+  };
+  /** Before a vertical gesture: a pick not yet carried is carried at once. */
+  const flush = () => {
+    const k = pickDue();
+    if (k !== null) carry(k);
+  };
+
   return {
     measure(g, scrollY) {
       const old = table;
@@ -262,18 +357,36 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
     table: () => table,
     stops,
     wheel(dy, dx, shift, scrollY, now) {
+      // sideways at the lineup: one pack per gesture
+      if ((shift || Math.abs(dx) > Math.abs(dy)) && lineLive(scrollY)) {
+        syncLine();
+        return line.wheel(shift && dx === 0 ? dy : dx, now);
+      }
+      // the row is held: no page moves under it
+      if (line.held()) return true;
+      flush();
       arm();
       const used = pager.wheel(dy, dx, shift, scrollY, now);
       entered();
       return used;
     },
     goTo(k, scrollY, now, ms) {
+      flush();
       arm();
       const ok = pager.goTo(k, scrollY, now, ms) === 'moved';
       entered();
       return ok;
     },
     key(intent, scrollY, now, repeat = false) {
+      if (intent === 'left' || intent === 'right') {
+        if (!lineLive(scrollY)) return 'free';
+        if (repeat) return 'swallowed';
+        syncLine();
+        line.step(intent === 'right' ? 1 : -1);
+        return 'moved';
+      }
+      if (line.held()) return 'swallowed';
+      flush();
       arm();
       if (!table) return 'free';
       if (pager.busy()) return 'swallowed';
@@ -311,26 +424,85 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
       // a finger that lands during a move (one crossing the paged edge
       // included) is the pager's, which ignores it: the move always lands
       nativeTouch = pager.zone(scrollY) === 'free' && !pager.busy();
+      lineTouch = !nativeTouch && lineLive(scrollY) ? { x0: x } : null;
       if (!nativeTouch) pager.touchStart(x, y, scrollY, now, o);
     },
     touchMove(x, y, scrollY, now) {
       if (nativeTouch) return false;
-      return pager.touchMove(x, y, scrollY, now).consumed;
+      const r = pager.touchMove(x, y, scrollY, now);
+      if (r.axis === 'x' && lineTouch) {
+        // the lineup follows the finger (from where it landed); the page stays
+        if (!line.held()) {
+          syncLine();
+          line.grab(lineTouch.x0, now);
+        }
+        line.drag(x, now);
+        return true;
+      }
+      return r.consumed;
     },
     touchEnd(scrollY, now) {
+      lineTouch = null;
       if (nativeTouch) {
         nativeTouch = false;
         return;
       }
+      if (line.held()) {
+        line.release(now);
+        pager.touchCancel();
+        return;
+      }
+      flush();
       arm();
       pager.touchEnd(scrollY, now);
       entered();
     },
     touchCancel() {
       nativeTouch = false;
+      lineTouch = null;
+      if (line.held()) line.release(0, false);
       pager.touchCancel();
     },
+    mouseDown(x, y, scrollY) {
+      mouse = lineLive(scrollY) ? { x0: x, y0: y, axis: null } : null;
+      return mouse !== null;
+    },
+    mouseMove(x, y, now) {
+      const m = mouse;
+      if (!m) return false;
+      if (m.axis === null) {
+        const dx = Math.abs(x - m.x0);
+        const dy = Math.abs(y - m.y0);
+        if (Math.max(dx, dy) < AXIS_LOCK_PX) return false;
+        m.axis = dx > dy ? 'x' : 'y';
+        if (m.axis === 'x') {
+          syncLine();
+          line.grab(m.x0, now);
+        }
+      }
+      if (m.axis !== 'x') return false;
+      line.drag(x, now);
+      return true;
+    },
+    mouseUp(now) {
+      mouse = null;
+      if (line.held()) line.release(now);
+    },
     frame(scrollY, now) {
+      // the lineup's pick: it eases on its own (also under a vertical move),
+      // and is carried once it has rested on a new pack for 150 ms
+      let lf: FlowLineFrame | null = null;
+      if (line.moving() || restAt !== null || pickDue() !== null) {
+        const was = line.moving();
+        lf = line.frame(now);
+        if (!was && !lf.moving && restAt === null) lf = null;
+        if (line.moving()) restAt = null;
+        else if (pickDue() !== null) {
+          restAt ??= now;
+          if (now - restAt >= LINE_PICK_MS) carry(line.index());
+        } else restAt = null;
+      }
+      const lineBusy = line.moving() || restAt !== null;
       build();
       let f: FlowPagerFrame;
       if (nativeTouch && !pager.busy())
@@ -358,8 +530,17 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
         d.enter()
       )
         build();
+      if (lineBusy) f = { ...f, idle: false };
       if (!t)
-        return { ...f, at: null, focus: 0, handoff: 0, exit: 0, past: false };
+        return {
+          ...f,
+          at: null,
+          focus: 0,
+          handoff: 0,
+          exit: 0,
+          past: false,
+          line: lf,
+        };
       const at = flowAt(y, t);
       const n = t.rests.length;
       const focus = at.zone === 'paged' ? Math.min(n, at.p) : n;
@@ -373,9 +554,16 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
         }
       }
       const past = at.zone === 'free' || blockAt(at.p, n + 1) > n;
-      return { ...f, at, focus, handoff, exit, past };
+      return { ...f, at, focus, handoff, exit, past, line: lf };
     },
     busy: () => pager.busy(),
     refused: () => pager.refused(),
+    lineState: () => ({
+      pos: line.pos(),
+      index: line.index(),
+      moving: line.moving(),
+      // a pick not yet carried (at rest, its 150 ms not yet over)
+      pending: restAt !== null || pickDue() !== null,
+    }),
   };
 }

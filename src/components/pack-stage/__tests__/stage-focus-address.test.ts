@@ -503,3 +503,86 @@ describe('focus address: guards', () => {
     expect(b.length()).toBe(2);
   });
 });
+
+describe('focus address: a pick in the lineup (work package 5)', () => {
+  it("coming back up after a pick steps onto the tap's entry and shows the picked pack there", () => {
+    const b = browser();
+    const a = createFocusAddress(b.h, b.loc);
+    a.enter('151', 'tap', '151:1');
+    a.show(false);
+    b.deliver();
+    a.popped();
+    a.pack('mega');
+    // nothing is written while the address shows the base path
+    expect(b.url()).toBe('/home-preview');
+    a.show(true);
+    b.deliver();
+    expect(a.popped()).toBe(true);
+    expect(b.url()).toBe('/slots/mega');
+    expect(b.index()).toBe(1);
+    expect(b.length()).toBe(2);
+    expect(a.onPack()).toBe(true);
+  });
+
+  it('after a pick the entry is still the pushed one: leaving again steps back, no entry added', () => {
+    const b = browser();
+    const a = createFocusAddress(b.h, b.loc);
+    a.enter('151', 'tap', '151:1');
+    a.show(false);
+    b.deliver();
+    a.popped();
+    a.pack('mega');
+    a.show(true);
+    b.deliver();
+    a.popped();
+    a.show(false);
+    b.deliver();
+    expect(a.popped()).toBe(true);
+    expect(b.url()).toBe('/home-preview');
+    expect(b.index()).toBe(0);
+    expect(b.length()).toBe(2);
+  });
+
+  it('a scrolled entry: coming back up after a pick replaces the picked pack', () => {
+    const b = browser();
+    const a = createFocusAddress(b.h, b.loc);
+    a.enter('151', 'scroll', '151:1');
+    a.show(false);
+    a.pack('mega');
+    a.show(true);
+    expect(b.url()).toBe('/slots/mega');
+    expect(b.length()).toBe(1);
+  });
+
+  it('a pick before the step back has landed: coming back up still shows the picked pack', () => {
+    const b = browser();
+    const a = createFocusAddress(b.h, b.loc);
+    a.enter('151', 'tap', '151:1');
+    a.show(false);
+    a.pack('mega');
+    a.show(true);
+    b.deliver();
+    a.popped();
+    // the step back landed; the address is brought to the pack, as asked
+    b.deliver();
+    a.popped();
+    expect(b.url()).toBe('/slots/mega');
+    expect(b.length()).toBe(2);
+  });
+
+  it('a pick while the address shows the pack replaces it in place', () => {
+    const b = browser();
+    const a = createFocusAddress(b.h, b.loc);
+    a.enter('151', 'scroll', '151:1');
+    a.pack('mega');
+    expect(b.url()).toBe('/slots/mega');
+    expect(b.length()).toBe(1);
+  });
+
+  it('no focus: a pick writes nothing', () => {
+    const b = browser();
+    const a = createFocusAddress(b.h, b.loc);
+    a.pack('mega');
+    expect(b.url()).toBe('/home-preview');
+  });
+});

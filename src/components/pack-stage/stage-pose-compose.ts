@@ -75,7 +75,8 @@ function handoffOf(
  * A pack's whole opacity, the hand-off included (the runtime and the CSS
  * tiles draw with it). `copy`: a repeat of the row (`ciaoCopies`), whose
  * category fade the caller adds. In the hand-off the chosen pack stays whole
- * and the others (its own repeats included) fade in with h at the row's
+ * while it is the centred one (moved off centre by the pick, it takes the
+ * row's reach as h comes in) and the others (its own repeats included) fade in with h at the row's
  * reach; otherwise the reach, the category switch and the focus fade, as
  * before.
  */
@@ -96,8 +97,10 @@ export function composeOpacity(
     return stageOpacity(st as StageState, i, desktop, count, ctx) * fade;
   }
   const swap = copy === 0 ? 1 - stageSpring(clamp01(st.swap)) : 1;
-  if (copy === 0 && i === ho.focus.index) return swap;
   const row = ctx.spinOpacity!({ ...st, spin: 1 }, i, desktop, count, copy);
+  // the chosen pack is whole in its slot; once the lineup has moved it
+  // (the pick) it fades at the row's reach like any other pack
+  if (copy === 0 && i === ho.focus.index) return swap * (1 + (row - 1) * ho.h);
   return ho.h * row * swap;
 }
 

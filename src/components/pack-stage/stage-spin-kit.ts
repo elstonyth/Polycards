@@ -26,7 +26,9 @@ import type {
   StageState,
 } from './contract';
 import type { FocusRun } from './stage-focus-kit';
+import type { StageTrackHandle } from './StageTrack';
 import { STAGE_DESKTOP_QUERY } from './stage-gate';
+import { stageAnnouncement } from './stage-filter';
 import { tileVars } from './StageTile';
 import { cancelFrame, frame, type FrameData } from './stage-motion';
 import { poseAt } from './stage-pose';
@@ -214,6 +216,8 @@ export type SpinHost = {
   };
   /** Renders the focused view's blocks over the panel. */
   ui?: (node: ReactNode) => void;
+  /** The shown row's track (the lineup's pick moves it and selects its pack). */
+  row?: () => StageTrackHandle | null;
 };
 
 export type SpinControl = {
@@ -256,6 +260,23 @@ export function startSpin(host: SpinHost): SpinControl {
     focused: () => !!focus?.active(),
     kinds: () => focus?.kinds() ?? [],
     enter: () => !!focus?.enter(centre(), { how: 'scroll', page: false }),
+    // the lineup's endless pick (plan 2.4): the shown row, while focused
+    line: () => {
+      const r = host.row?.();
+      const fo = stage.state.focusOn;
+      if (!r || !fo || !focus?.active() || r.packs.length === 0) return null;
+      return {
+        track: r.track.get(),
+        count: r.packs.length,
+        index: fo.ctx.index,
+      };
+    },
+    pick: (i) => {
+      if (!focus?.pick(i)) return false;
+      announce(i);
+      return true;
+    },
+    canPick: (i) => !!focus?.kindsAt(i),
   });
   const flowOn = () => !!src?.flow.hasAttribute('data-flow-on');
 
@@ -404,6 +425,7 @@ export function startSpin(host: SpinHost): SpinControl {
       return;
     }
     const f = input.frame(window.scrollY, t);
+    if (f.line) moveRow(f.line.track, f.line.moving ? null : f.line.index);
     if (f.scrollTo !== null && Math.abs(f.scrollTo - window.scrollY) >= 0.5)
       window.scrollTo(0, f.scrollTo);
     const y = window.scrollY;
@@ -426,6 +448,25 @@ export function startSpin(host: SpinHost): SpinControl {
         })
       : true;
     if (f.idle && rest && t - wokeAt > 250) stopLoop();
+  };
+  /**
+   * The lineup's pick moves the shown row's track (the canvas and the tiles
+   * follow it); once it rests, the row selects that pack (its info block).
+   * A pick that is carried is named by a polite region outside the inert
+   * panel (made when the flow binds, so its first words are read).
+   */
+  let live: HTMLElement | null = null;
+  const moveRow = (track: number, rested: number | null) => {
+    const r = host.row?.();
+    if (!r) return;
+    if (r.track.get() !== track) r.track.set(track);
+    if (rested !== null) r.go(rested);
+  };
+  const announce = (i: number) => {
+    const r = host.row?.();
+    const p = r?.packs[i];
+    if (r && p && live)
+      live.textContent = stageAnnouncement(p, i, r.packs.length);
   };
   const stopLoop = () => {
     if (!looping) return;
@@ -519,9 +560,47 @@ export function startSpin(host: SpinHost): SpinControl {
     }
     wake();
   };
+  // The lineup's mouse drag (desktop): the panel is inert there, so the
+  // window listens; a press on a control or in a dialog is not a drag.
+  const onPointerDown = (e: PointerEvent) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0 || !flowOn()) return;
+    if (inDialog(e.target)) return;
+    const el = e.target instanceof Element ? e.target : null;
+    if (
+      el?.closest(
+        'header,nav,a,button,input,select,textarea,label,summary,[role="button"],[tabindex]:not([tabindex="-1"])',
+      )
+    )
+      return;
+    if (input.mouseDown(e.clientX, e.clientY, window.scrollY, now())) {
+      e.preventDefault();
+      wake();
+    }
+  };
+  const onPointerMove = (e: PointerEvent) => {
+    if (e.pointerType !== 'mouse') return;
+    // the button is up (its release was lost): the drag ends here
+    if ((e.buttons & 1) === 0) {
+      input.mouseUp(now());
+      return;
+    }
+    if (input.mouseMove(e.clientX, e.clientY, now())) {
+      e.preventDefault();
+      wake();
+    }
+  };
+  const onPointerUp = (e: PointerEvent) => {
+    if (e.pointerType !== 'mouse') return;
+    input.mouseUp(now());
+    wake();
+  };
   const active = { passive: false } as const;
   const quiet = { passive: true } as const;
   window.addEventListener('wheel', onWheel, active);
+  window.addEventListener('pointerdown', onPointerDown);
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', onPointerUp);
+  window.addEventListener('pointercancel', onPointerUp);
   window.addEventListener('touchstart', onTouchStart, quiet);
   window.addEventListener('touchmove', onTouchMove, active);
   window.addEventListener('touchend', onTouchEnd, quiet);
@@ -681,6 +760,14 @@ export function startSpin(host: SpinHost): SpinControl {
     // a link does not take Space (the page scrolls), so it pages here
     if (e.key === ' ' && t?.closest('button,[role="button"],summary,label'))
       return;
+    // the lineup's pick: at the lineup only, else the page's own arrows
+    if (intent === 'left' || intent === 'right') {
+      if (held()) return;
+      if (input.key(intent, window.scrollY, now(), e.repeat) === 'free') return;
+      e.preventDefault();
+      wake();
+      return;
+    }
     // the leave is under way: every key waits for it
     if (held()) {
       e.preventDefault();
@@ -798,6 +885,13 @@ export function startSpin(host: SpinHost): SpinControl {
       // a press loads the focused view ahead of its tap (when idle has not yet)
       next.panel.addEventListener('pointerdown', preload, quiet);
       setTimeout(resume, 0);
+      if (!live) {
+        live = document.createElement('p');
+        live.className = 'sr-only';
+        live.setAttribute('aria-live', 'polite');
+        live.setAttribute('aria-atomic', 'true');
+        document.body.appendChild(live);
+      }
       unbindPage = () => {
         ro.disconnect();
         next.panel.removeEventListener('focusin', onFocusIn);
@@ -830,6 +924,7 @@ export function startSpin(host: SpinHost): SpinControl {
       focusFailed: fload.failed(),
       inert,
       shown,
+      line: input.lineState(),
     });
   }
 
@@ -844,6 +939,12 @@ export function startSpin(host: SpinHost): SpinControl {
       bind(null);
       stopLoop();
       window.removeEventListener('wheel', onWheel);
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+      live?.remove();
+      live = null;
       window.removeEventListener('touchstart', onTouchStart);
       window.removeEventListener('touchmove', onTouchMove);
       window.removeEventListener('touchend', onTouchEnd);

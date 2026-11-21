@@ -158,6 +158,11 @@ export type FocusRun = {
   kinds(): readonly FocusStopKind[];
   /** Focus the pack at `index` of the shown row; false: not focusable here. */
   enter(index: number, o?: FocusEnter): boolean;
+  /**
+   * The pick in the lineup: the focus is rebuilt, unseen, for the pack at
+   * `index` (keys, stops, variant, back, blocks, address); false: it cannot be.
+   */
+  pick(index: number): boolean;
   /** "All packs" (and Escape, Home, browser Back); nothing past the details. */
   leave(fromHistory?: boolean): void;
   /** One frame; true when at rest. */
@@ -334,6 +339,50 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
     focusStops(
       focusVariant({ capsule: s.shape === 'capsule', back: s.back }),
     ) as FocusStopKind[];
+  /**
+   * The declaration for the pack at `index`: its keys, stops, variant and
+   * back, and the docked pack's edges for the blocks beside it. `anchorY`:
+   * the art centre in the panel at the row's rest.
+   */
+  const declare = (
+    index: number,
+    p: NonNullable<ReturnType<typeof packAt>>,
+    anchorY: number,
+  ) => {
+    const { id, s } = p;
+    const panel = d.src.panel;
+    seed = s;
+    desktop = window.matchMedia(STAGE_DESKTOP_QUERY).matches;
+    kinds = kindsOf(s);
+    const host = panel.querySelector<HTMLElement>('[data-stage-canvas]');
+    const w = host?.clientWidth ?? panel.clientWidth;
+    const h = host?.clientHeight ?? panel.clientHeight;
+    decl = focusOnFor({
+      id,
+      slug: id,
+      index,
+      desktop,
+      capsule: s.shape === 'capsule',
+      back: s.back,
+      panel: { w, h },
+      anchorY,
+    });
+    d.src.wrap.style.setProperty('--focus-n', String(kinds.length));
+    const dock = decl.ctx.keys.find((k) => k.kind === 'pulls');
+    const plate = focusPlate(id) ?? focusPlate('151');
+    if (dock && plate) {
+      const L = dock.long * h;
+      const W = (L * plate[0]) / plate[1];
+      panel.style.setProperty(
+        '--dock-bottom',
+        `${Math.round(dock.cy * h + L / 2)}px`,
+      );
+      panel.style.setProperty(
+        '--dock-left',
+        `${Math.round(dock.cx * w - W / 2)}px`,
+      );
+    }
+  };
 
   const run: FocusRun = {
     active: () => on,
@@ -347,48 +396,19 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       if (on) return false;
       const fromEntry = o.entry;
       const page = o.page ?? true;
-      const panel = d.src.panel;
       const p = packAt(index);
       if (!p) return false;
-      const { tile, id, s } = p;
-      seed = s;
-      desktop = window.matchMedia(STAGE_DESKTOP_QUERY).matches;
-      const capsule = s.shape === 'capsule';
-      kinds = kindsOf(s);
-      const host = panel.querySelector<HTMLElement>('[data-stage-canvas]');
-      const w = host?.clientWidth ?? panel.clientWidth;
-      const h = host?.clientHeight ?? panel.clientHeight;
+      const { tile, id } = p;
+      const host = d.src.panel.querySelector<HTMLElement>(
+        '[data-stage-canvas]',
+      );
+      const h = host?.clientHeight ?? d.src.panel.clientHeight;
       const art = tile.querySelector<HTMLElement>('[data-stage-art]');
-      const hr = (host ?? panel).getBoundingClientRect();
+      const hr = (host ?? d.src.panel).getBoundingClientRect();
       const ar = art?.getBoundingClientRect();
       const anchorY =
         ar && h > 0 ? (ar.top + ar.height / 2 - hr.top) / h : 0.45;
-      decl = focusOnFor({
-        id,
-        slug: id,
-        index,
-        desktop,
-        capsule,
-        back: s.back,
-        panel: { w, h },
-        anchorY,
-      });
-      d.src.wrap.style.setProperty('--focus-n', String(kinds.length));
-      // the docked pack's edges (Top Hits, Recent Pulls) for the blocks beside it
-      const dock = decl.ctx.keys.find((k) => k.kind === 'pulls');
-      const plate = focusPlate(id) ?? focusPlate('151');
-      if (dock && plate) {
-        const L = dock.long * h;
-        const W = (L * plate[0]) / plate[1];
-        panel.style.setProperty(
-          '--dock-bottom',
-          `${Math.round(dock.cy * h + L / 2)}px`,
-        );
-        panel.style.setProperty(
-          '--dock-left',
-          `${Math.round(dock.cx * w - W / 2)}px`,
-        );
-      }
+      declare(index, p, anchorY);
       d.src.wrap.setAttribute('data-focus-on', '');
       on = true;
       leftRow = false;
@@ -418,6 +438,22 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       savedK = at;
       if (page) d.go(at);
       trace.push([now(), -1, 1]);
+      d.loop();
+      return true;
+    },
+    pick(index) {
+      if (!on || leaving || !decl) return false;
+      if (index === decl.ctx.index) return true;
+      const p = packAt(index);
+      if (!p) return false;
+      // the art centre is the row's, the same for every pack (the tiles are
+      // posed in the lineup now, so it is not measured again)
+      declare(index, p, decl.ctx.anchorY);
+      // the back waits for the pack to rest at a stop, as at a tap
+      settled = false;
+      publish();
+      addr.pack(p.id);
+      render(true);
       d.loop();
       return true;
     },

@@ -15,7 +15,12 @@ import {
   type Ref,
   type RefObject,
 } from 'react';
-import { animate, observable, type AnimationControls } from './stage-motion';
+import {
+  animate,
+  observable,
+  type AnimationControls,
+  type Observable,
+} from './stage-motion';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { StagePack } from './contract';
@@ -88,6 +93,10 @@ const CAMERA_FOV_DEG = 28;
 export type StageTrackHandle = {
   /** Centre pack `index` (clamped), animated unless reduced motion. */
   go(index: number): void;
+  /** The continuous centred index (the lineup's pick writes it). */
+  track: Observable<number>;
+  /** The row on show. */
+  packs: readonly StagePack[];
 };
 
 /**
@@ -244,7 +253,7 @@ export default function StageTrack({
     [count, onSelect, onSettle, reduced, track],
   );
 
-  useImperativeHandle(handle, () => ({ go }), [go]);
+  useImperativeHandle(handle, () => ({ go, track, packs }), [go, track, packs]);
 
   // A category becoming visible, or a changed row, opens at its start.
   useLayoutEffect(() => {

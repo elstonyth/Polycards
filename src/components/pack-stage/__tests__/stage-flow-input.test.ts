@@ -262,7 +262,9 @@ describe('flow input: keys (plan 2.10)', () => {
     expect(flowKeyIntent(ev('Home'))).toBe('first');
     expect(flowKeyIntent(ev('End'))).toBe('last');
     expect(flowKeyIntent(ev('Escape'))).toBe('escape');
-    expect(flowKeyIntent(ev('ArrowLeft'))).toBeNull();
+    // the lineup's pick (work package 5); elsewhere the flow returns them
+    expect(flowKeyIntent(ev('ArrowLeft'))).toBe('left');
+    expect(flowKeyIntent(ev('ArrowRight'))).toBe('right');
     expect(flowKeyIntent(ev('Tab'))).toBeNull();
     expect(flowKeyIntent(ev('ArrowDown', { ctrlKey: true }))).toBeNull();
     expect(flowKeyIntent(ev('End', { metaKey: true }))).toBeNull();
@@ -539,5 +541,273 @@ describe('flow input: a down gesture refused at the row (review finding 1)', () 
     const q = page();
     q.input.wheel(100, 0, false, 0, 0);
     expect(q.input.refused()).toBe(false);
+  });
+});
+
+describe('flow input: the endless pick at the lineup (work package 5)', () => {
+  const CAPSULE = focusStops('capsule');
+  /**
+   * Focused on pack 2 of 5 and resting on the lineup (7000). `kindsOf`
+   * gives each pack's stops (default: all sleeves). The row's track follows
+   * the line's frames, as the spin chunk writes it.
+   */
+  function lineup(kindsOf: (i: number) => readonly string[] = () => SLEEVE) {
+    let on = false;
+    let index = 2;
+    let track = 2;
+    let refuse = false;
+    const picks: number[] = [];
+    const input = createFlowInput({
+      centreKinds: () => kindsOf(index),
+      focused: () => on,
+      kinds: () => (on ? kindsOf(index) : []),
+      enter: () => {
+        on = true;
+        return true;
+      },
+      line: () => (on ? { track, count: 5, index } : null),
+      pick: (i) => {
+        picks.push(i);
+        if (refuse) return false;
+        index = i;
+        return true;
+      },
+      canPick: () => true,
+    });
+    input.measure(GEO, 0);
+    const go = (y0: number, from: number, to: number): number => {
+      let y = y0;
+      for (let now = from; now <= to; now += 16) {
+        const f = input.frame(y, now);
+        if (f.scrollTo !== null) y = f.scrollTo;
+        if (f.line) track = f.line.track;
+      }
+      return y;
+    };
+    input.wheel(100, 0, false, 0, 0);
+    go(0, 16, 1600);
+    input.key('last', 1000, 1700);
+    expect(go(1000, 1716, 3400)).toBe(7000);
+    return {
+      input,
+      picks,
+      go,
+      track: () => track,
+      index: () => index,
+      /** Another pack focused by other means (a new focus at the row). */
+      refocus(i: number) {
+        index = i;
+        track = i;
+      },
+      refuse() {
+        refuse = true;
+      },
+      /** A swipe of (dx, dy) px from (200, 600) at 16 ms per move, then the release. */
+      swipe(dx: number, dy: number, y: number, t0: number) {
+        input.touchStart(200, 600, y, t0);
+        let consumed = true;
+        for (let k = 1; k <= 8; k++) {
+          const c = input.touchMove(
+            200 + (dx * k) / 8,
+            600 + (dy * k) / 8,
+            y,
+            t0 + 16 * k,
+          );
+          consumed = consumed && c;
+          const f = input.frame(y, t0 + 16 * k);
+          if (f.line) track = f.line.track;
+        }
+        // held still a moment: no fling
+        for (let k = 9; k <= 16; k++) {
+          const f = input.frame(y, t0 + 16 * k);
+          if (f.line) track = f.line.track;
+        }
+        input.touchEnd(y, t0 + 16 * 17);
+        return consumed;
+      },
+    };
+  }
+
+  it('a sideways swipe at 46 degrees from vertical drags the row and leaves the page on the lineup', () => {
+    const p = lineup();
+    const a = (46 * Math.PI) / 180;
+    // finger left and up: two packs on, the page stays
+    expect(p.swipe(-200, (-200 * Math.cos(a)) / Math.sin(a), 7000, 4000)).toBe(
+      true,
+    );
+    const y = p.go(7000, 4300, 6000);
+    expect(y).toBe(7000);
+    expect(p.track()).toBe(4);
+  });
+
+  it('at 44 degrees from vertical the same swipe pages (to the free part) and the row stays', () => {
+    const p = lineup();
+    const a = (44 * Math.PI) / 180;
+    p.swipe(-150, (-150 * Math.cos(a)) / Math.sin(a), 7000, 4000);
+    expect(p.go(7000, 4300, 6500)).toBe(9000);
+    expect(p.track()).toBe(2);
+    expect(p.picks).toEqual([]);
+  });
+
+  it('the pick is carried 150 ms after the row comes to rest, not before', () => {
+    const p = lineup();
+    p.swipe(-100, 0, 7000, 4000);
+    // the row eases onto pack 3; no pick while it moves
+    let now = 4300;
+    for (; now < 6000; now += 16) {
+      const f = p.input.frame(7000, now);
+      if (f.line && !f.line.moving) break;
+      expect(p.picks).toEqual([]);
+    }
+    expect(p.input.frame(7000, now + 100).idle).toBe(false);
+    expect(p.picks).toEqual([]);
+    p.input.frame(7000, now + 160);
+    expect(p.picks).toEqual([3]);
+    expect(p.input.frame(7000, now + 200).idle).toBe(true);
+  });
+
+  it('wraps across the row: from the last pack one on is the first', () => {
+    const p = lineup();
+    p.swipe(-200, 0, 7000, 4000);
+    p.go(7000, 4300, 6000);
+    expect(p.picks).toEqual([4]);
+    p.swipe(-100, 0, 7000, 7000);
+    p.go(7000, 7300, 9000);
+    expect(p.picks).toEqual([4, 0]);
+    expect(p.track()).toBe(0);
+  });
+
+  it('an up gesture with a pick pending carries it at once, before the page moves', () => {
+    const p = lineup();
+    p.swipe(-100, 0, 7000, 4000);
+    // still easing onto pack 3
+    p.go(7000, 4300, 4350);
+    expect(p.picks).toEqual([]);
+    expect(p.input.wheel(-100, 0, false, 7000, 4400)).toBe(true);
+    expect(p.picks).toEqual([3]);
+    expect(p.go(7000, 4416, 6000)).toBe(6000);
+    // the row finished its ease on the way
+    expect(p.track()).toBe(3);
+  });
+
+  it('a pick that changes the stop list (a capsule) leaves the lineup where it was; up lands on its Closing', () => {
+    const p = lineup((i) => (i === 3 ? CAPSULE : SLEEVE));
+    p.swipe(-100, 0, 7000, 4000);
+    p.go(7000, 4300, 6000);
+    expect(p.picks).toEqual([3]);
+    expect(p.input.table()!.rl).toBe(7000);
+    expect(p.input.stops()).toHaveLength(CAPSULE.length + 2);
+    expect(p.go(7000, 6016, 6500)).toBe(7000);
+    p.input.wheel(-100, 0, false, 7000, 7000);
+    expect(p.go(7000, 7016, 8700)).toBe(6000);
+  });
+
+  it("ArrowLeft and ArrowRight pick only at the lineup; elsewhere they are the browser's", () => {
+    const p = lineup();
+    expect(p.input.key('right', 7000, 4000)).toBe('moved');
+    p.go(7000, 4016, 5000);
+    expect(p.picks).toEqual([3]);
+    expect(p.input.key('left', 7000, 6000)).toBe('moved');
+    expect(p.input.key('left', 7000, 6050)).toBe('moved');
+    p.go(7000, 6066, 7000);
+    expect(p.picks).toEqual([3, 1]);
+    // at Closing and at the row: not ours
+    p.input.key('prev', 7000, 8000);
+    expect(p.go(7000, 8016, 9700)).toBe(6000);
+    expect(p.input.key('right', 6000, 10000)).toBe('free');
+    expect(p.input.key('left', 6000, 10100)).toBe('free');
+    const q = page();
+    expect(q.input.key('right', 0, 0)).toBe('free');
+  });
+
+  it('no drag during a vertical move or away from the lineup', () => {
+    const p = lineup();
+    // a move up to Closing is playing: a sideways swipe is ignored
+    p.input.wheel(-100, 0, false, 7000, 4000);
+    const y = p.go(7000, 4016, 4300);
+    p.swipe(-200, 0, y, 4316);
+    expect(p.go(y, 4620, 6000)).toBe(6000);
+    expect(p.track()).toBe(2);
+    // at Closing a sideways swipe moves nothing
+    p.swipe(-200, 0, 6000, 7000);
+    p.go(6000, 7300, 8000);
+    expect(p.track()).toBe(2);
+    expect(p.picks).toEqual([]);
+  });
+
+  it('a mouse drag picks on the desktop; a vertical mouse drag does nothing', () => {
+    const p = lineup();
+    expect(p.input.mouseDown(700, 400, 7000, 4000)).toBe(true);
+    for (let k = 1; k <= 8; k++) {
+      p.input.mouseMove(700 - 25 * k, 400, 4000 + 16 * k);
+      p.go(7000, 4000 + 16 * k, 4000 + 16 * k);
+    }
+    p.go(7000, 4144, 4300);
+    p.input.mouseUp(4310);
+    p.go(7000, 4320, 6000);
+    expect(p.picks).toEqual([4]);
+    expect(p.input.mouseDown(700, 400, 7000, 7000)).toBe(true);
+    expect(p.input.mouseMove(702, 300, 7016)).toBe(false);
+    p.input.mouseUp(7100);
+    expect(p.go(7000, 7116, 8000)).toBe(7000);
+    expect(p.picks).toEqual([4]);
+    // away from the lineup a press is not ours
+    expect(p.input.mouseDown(700, 400, 6000, 9000)).toBe(false);
+  });
+
+  it('a sideways wheel at the lineup steps one pack and is consumed; at Closing it is not', () => {
+    const p = lineup();
+    expect(p.input.wheel(2, 40, false, 7000, 4000)).toBe(true);
+    p.go(7000, 4016, 5000);
+    expect(p.picks).toEqual([3]);
+    expect(p.input.wheel(0, -40, false, 6000, 6000)).toBe(false);
+  });
+
+  it('a pick already carried is never carried again once another pack is focused', () => {
+    const p = lineup();
+    p.swipe(-200, 0, 7000, 4000);
+    p.go(7000, 4300, 6000);
+    expect(p.picks).toEqual([4]);
+    // back to the row and a new focus on pack 1 (by a tap, say)
+    p.refocus(1);
+    p.go(7000, 6016, 8000);
+    expect(p.picks).toEqual([4]);
+    expect(p.input.frame(7000, 8016).idle).toBe(true);
+  });
+
+  it('a pick that cannot be made is dropped, not tried again and again', () => {
+    const p = lineup();
+    p.refuse();
+    p.swipe(-100, 0, 7000, 4000);
+    p.go(7000, 4300, 7000);
+    expect(p.picks).toEqual([3]);
+    expect(p.input.frame(7000, 7016).idle).toBe(true);
+  });
+
+  it('a vertical gesture while the mouse holds the row is swallowed: no page, no pick', () => {
+    const p = lineup();
+    p.input.mouseDown(700, 400, 7000, 4000);
+    p.input.mouseMove(600, 400, 4016);
+    p.go(7000, 4016, 4032);
+    expect(p.input.wheel(-100, 0, false, 7000, 4050)).toBe(true);
+    expect(p.input.key('prev', 7000, 4060)).toBe('swallowed');
+    expect(p.go(7000, 4066, 4400)).toBe(7000);
+    expect(p.picks).toEqual([]);
+    p.input.mouseUp(4410);
+    p.go(7000, 4420, 6000);
+    expect(p.picks).toEqual([3]);
+  });
+
+  it('a cancelled sideways touch still comes to rest on a pack', () => {
+    const p = lineup();
+    p.input.touchStart(200, 600, 7000, 4000);
+    for (let k = 1; k <= 4; k++) {
+      p.input.touchMove(200 - 35 * k, 600, 7000, 4000 + 16 * k);
+      p.go(7000, 4000 + 16 * k, 4000 + 16 * k);
+    }
+    p.input.touchCancel();
+    p.go(7000, 4100, 6000);
+    expect(Number.isInteger(p.track())).toBe(true);
+    expect(p.picks).toEqual([3]);
   });
 });

@@ -29,23 +29,15 @@ import {
   rowPacks,
   rowStart,
   sameFilter,
+  stageAnnouncement,
   stageChips,
   stageStartIndex,
   type StageFilter,
 } from './stage-filter';
-import StageTrack from './StageTrack';
+import StageTrack, { type StageTrackHandle } from './StageTrack';
 import { loadSpinKit } from './stage-spin-load';
 import { takeArrival } from './stage-arrival';
 import styles from './pack-stage.module.css';
-
-/** What the live region says once the track rests on a pack. */
-export function stageAnnouncement(
-  pack: Pick<StagePack, 'name' | 'priceLabel' | 'soldOut'>,
-  index: number,
-  count: number,
-): string {
-  return `${pack.name}, ${pack.priceLabel}${pack.soldOut ? ', sold out' : ''}. ${index + 1} of ${count}.`;
-}
 
 const nounOf = (packs: readonly StagePack[]): 'pack' | 'capsule' =>
   packs.length > 0 && packs.every((p) => p.ticket) ? 'capsule' : 'pack';
@@ -77,6 +69,8 @@ export default function PackStage({
   const hostRef = useRef<HTMLElement>(null);
   const flowRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  // the shown row's track: the lineup's pick moves it and selects its pack
+  const trackRef = useRef<StageTrackHandle>(null);
   const empty0 = categories.length === 0;
 
   // The pin (10.2 as corrected by the Ciao motion sheet): the panel sticks
@@ -114,6 +108,7 @@ export default function PackStage({
               show: showStage,
             },
             ui: setFocusUi,
+            row: () => trackRef.current,
           });
           c.bind({ flow, wrap, panel, empty: empty0 });
           ctl = c;
@@ -379,6 +374,7 @@ export default function PackStage({
                         reduced={reduced}
                         priority={ci === 0}
                         host={hostRef}
+                        handle={isVisible ? trackRef : undefined}
                         selected={selectedIn(c)}
                         onSelect={(i) => select(c.id, i)}
                         onSettle={(i) => settle(packs, i)}

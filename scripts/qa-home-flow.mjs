@@ -46,6 +46,13 @@
 //   on at the row once it loads); a held PageDown pages once; the lineup
 //   exit moves on the gesture's first frame; neither floating chip shows
 //   from Closing to the exit's end, and both are back in the free part.
+// - (wp5, the endless pick) a 200 px drag at the lineup picks two packs on
+//   and the page stays; up to Closing shows the picked pack's name and
+//   address, with no history entry added; a detail stop is the picked pack;
+//   twelve long drags never reach an end; flings both ways rest on a pack;
+//   the GPU estimate's peak during them; ArrowLeft and ArrowRight pick at
+//   the lineup only; (desktop) one sideways wheel gesture steps one pack; a
+//   pick then the exit keeps the picked pack.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 
@@ -55,7 +62,7 @@ const BASE =
   process.env.PW_BASE ??
   'http://localhost:4300';
 const ONLY = (args.find((a) => a.startsWith('--only=')) ?? '=').split('=')[1];
-/** --part=pass,motion,nav,keys,reload,wp3c,lineup,wp4b: run only these groups. */
+/** --part=pass,motion,nav,keys,reload,wp3c,lineup,wp4b,wp5: run only these groups. */
 const PARTS = (args.find((a) => a.startsWith('--part=')) ?? '=')
   .split('=')[1]
   .split(',')
@@ -1831,6 +1838,289 @@ for (const size of sizes) {
       );
       await s.ctx.close();
     }
+  }
+
+  // ---- (wp5) the endless pick in the lineup, and the carry ----
+  if (part('wp5')) {
+    const s = await open(size);
+    const { page } = s;
+    await load(s);
+    await page.keyboard.press('End');
+    await page.waitForTimeout(200);
+    let r = await rest(page);
+    await page.waitForTimeout(600);
+    const lineupY = r.y;
+    const len0 = r.len;
+    const pick = () =>
+      page.evaluate(() => {
+        const ps = window.__packStage;
+        const ln = ps.flow().line;
+        const tiles = [
+          ...document.querySelectorAll(
+            '[data-stage-panel]:not([hidden]) [data-stage-tile]',
+          ),
+        ];
+        const id = ps.state.focusOn?.id ?? null;
+        const tile = tiles.find((t) => t.dataset.packId === id);
+        return {
+          y: scrollY,
+          track: ps.state.track,
+          n: tiles.length,
+          id,
+          index: ps.state.focusOn?.ctx?.index ?? null,
+          name:
+            tile?.querySelector('[data-stage-label] span')?.textContent ?? null,
+          ids: tiles.map((t) => t.dataset.packId),
+          pos: ln.pos,
+          lineIndex: ln.index,
+          moving: ln.moving || ln.pending,
+          gpu: ps.stats?.()?.gpuBytesEstimate ?? 0,
+          path: location.pathname,
+          len: history.length,
+        };
+      });
+    /** Waits for the line to rest and its pick to be carried. */
+    const settled = async () => {
+      const t0 = Date.now();
+      let p = await pick();
+      while (p.moving && Date.now() - t0 < 15000) {
+        await page.waitForTimeout(60);
+        p = await pick();
+      }
+      await page.waitForTimeout(250);
+      return pick();
+    };
+    /** A sideways drag of dx px at 16 ms per move, held still before the release (no fling). */
+    const dragX = async (dx, o = {}) => {
+      const moves = o.moves ?? 10;
+      const y0 = o.y ?? (size === 'phone' ? 520 : 470);
+      const x0 =
+        o.x ??
+        (dx < 0
+          ? size === 'phone'
+            ? 330
+            : 1100
+          : size === 'phone'
+            ? 60
+            : 340);
+      if (s.cdp) {
+        await s.cdp.send('Input.dispatchTouchEvent', {
+          type: 'touchStart',
+          touchPoints: [{ x: x0, y: y0 }],
+        });
+        for (let i = 1; i <= moves; i++) {
+          await s.cdp.send('Input.dispatchTouchEvent', {
+            type: 'touchMove',
+            touchPoints: [{ x: x0 + (dx * i) / moves, y: y0 }],
+          });
+          await page.waitForTimeout(16);
+        }
+        if (o.hold !== false) await page.waitForTimeout(200);
+        await s.cdp.send('Input.dispatchTouchEvent', {
+          type: 'touchEnd',
+          touchPoints: [],
+        });
+      } else {
+        await page.mouse.move(x0, y0);
+        await page.mouse.down();
+        for (let i = 1; i <= moves; i++) {
+          await page.mouse.move(x0 + (dx * i) / moves, y0);
+          await page.waitForTimeout(16);
+        }
+        if (o.hold !== false) await page.waitForTimeout(200);
+        await page.mouse.up();
+      }
+    };
+    const mod = (a, n) => ((a % n) + n) % n;
+    let p0 = await pick();
+    const startIndex = p0.index;
+    // two packs on: 200 px (one pack per 100 px)
+    await dragX(-200);
+    let p = await settled();
+    const want2 = mod(startIndex + 2, p.n);
+    report(
+      `pick-two-packs-${size}`,
+      p.index === want2 &&
+        p.track === want2 &&
+        p.ids[want2] === p.id &&
+        Math.abs(p.y - lineupY) < 1,
+      `from ${startIndex} to ${p.index} (want ${want2}, of ${p.n}); track ${p.track}; ${p.id}; scrollY ${p.y} (lineup ${lineupY})`,
+    );
+    await shot(page, size, 'wp5-picked');
+    // up to Closing: the picked pack's Closing, its address, no entry added
+    await gesture(s, -1);
+    await page.waitForTimeout(200);
+    r = await rest(page);
+    await page.waitForTimeout(400);
+    p = await pick();
+    const closingText = await page.evaluate(
+      () =>
+        document.querySelector(
+          '[data-testid="focus-stops"] section[data-on][data-kind="closing"]',
+        )?.textContent ?? '',
+    );
+    report(
+      `closing-shows-the-picked-pack-${size}`,
+      r.block === 'closing' &&
+        !!p.name &&
+        closingText.includes(p.name) &&
+        p.path === `/slots/${encodeURIComponent(p.id)}` &&
+        p.len === len0,
+      `block ${r.block}; name "${p.name}" in Closing: ${closingText.includes(p.name ?? '@')}; address ${p.path}; history ${p.len} (was ${len0})`,
+    );
+    await shot(page, size, 'wp5-closing-after-pick');
+    // one more stop up: still the picked pack
+    await gesture(s, -1);
+    await page.waitForTimeout(200);
+    r = await rest(page);
+    p = await pick();
+    report(
+      `detail-stop-is-the-picked-pack-${size}`,
+      p.id === p.ids[want2] &&
+        r.on &&
+        r.block !== null &&
+        r.block !== 'closing',
+      `block ${r.block}; focused ${p.id}`,
+    );
+    await shot(page, size, 'wp5-detail-after-pick');
+    // back down to the lineup: the address leaves, the row is where it was
+    await gesture(s, 1);
+    await page.waitForTimeout(200);
+    await rest(page);
+    await gesture(s, 1);
+    await page.waitForTimeout(200);
+    r = await rest(page);
+    p = await pick();
+    report(
+      `back-at-the-lineup-${size}`,
+      Math.abs(r.y - lineupY) < 1 && p.track === want2 && p.len === len0,
+      `scrollY ${r.y}; track ${p.track}; history ${p.len}; address ${p.path}`,
+    );
+    // twelve long drags the same way never reach an end
+    const before = await pick();
+    const tracks = [];
+    let gpuMax = before.gpu;
+    for (let k = 0; k < 12; k++) {
+      await dragX(-300, { moves: 12 });
+      const q = await settled();
+      tracks.push(q.track);
+      gpuMax = Math.max(gpuMax, q.gpu);
+    }
+    const after = await pick();
+    const travelled = Math.round(after.pos - before.pos);
+    report(
+      `twelve-drags-no-end-${size}`,
+      travelled === 36 &&
+        tracks.every((t) => t >= 0 && t < after.n && Number.isInteger(t)) &&
+        after.index === mod(before.index + 36, after.n),
+      `travelled ${travelled} packs (want 36); tracks ${tracks.join(',')}; index ${before.index} -> ${after.index}`,
+    );
+    // flings both ways (released moving): always rests on a pack
+    const flings = [];
+    for (const dx of [-260, 260, -180, 180]) {
+      const g = page.evaluate(
+        () =>
+          new Promise((done) => {
+            let max = 0;
+            const t0 = performance.now();
+            const tick = () => {
+              max = Math.max(
+                max,
+                window.__packStage.stats?.()?.gpuBytesEstimate ?? 0,
+              );
+              if (performance.now() - t0 < 2200) requestAnimationFrame(tick);
+              else done(max);
+            };
+            requestAnimationFrame(tick);
+          }),
+      );
+      await dragX(dx, { moves: 8, hold: false });
+      const q = await settled();
+      gpuMax = Math.max(gpuMax, await g);
+      flings.push({ dx, track: q.track, ok: Number.isInteger(q.track) });
+    }
+    report(
+      `flings-rest-on-a-pack-${size}`,
+      flings.every((f) => f.ok),
+      flings.map((f) => `${f.dx}px -> ${f.track}`).join(', '),
+    );
+    const cap = size === 'phone' ? 40e6 : 96e6;
+    report(
+      `gpu-during-the-pick-${size}`,
+      gpuMax <= cap,
+      `peak ${(gpuMax / 1e6).toFixed(1)} MB (cap ${cap / 1e6})`,
+    );
+    // keys at the lineup: one pack each way
+    p0 = await pick();
+    await page.keyboard.press('ArrowRight');
+    let q = await settled();
+    const right = q.index === mod(p0.index + 1, q.n);
+    await page.keyboard.press('ArrowLeft');
+    q = await settled();
+    const left = q.index === p0.index;
+    report(
+      `arrows-pick-at-the-lineup-${size}`,
+      right && left && Math.abs(q.y - lineupY) < 1,
+      `right ${right}, left ${left}, scrollY ${q.y}`,
+    );
+    // (desktop) the sideways wheel steps one pack per gesture
+    if (!s.cdp) {
+      p0 = await pick();
+      // one trackpad gesture: falling deltas 16 ms apart, dispatched in the
+      // page so a slow software-rendered browser cannot stretch the gaps
+      await page.evaluate(
+        () =>
+          new Promise((done) => {
+            const ds = [40, 32, 20, 10, 5];
+            let k = 0;
+            const next = () => {
+              const deltaX = ds[k++];
+              document.body.dispatchEvent(
+                new WheelEvent('wheel', {
+                  deltaX,
+                  deltaY: 0,
+                  bubbles: true,
+                  cancelable: true,
+                }),
+              );
+              if (k < ds.length) setTimeout(next, 16);
+              else done();
+            };
+            next();
+          }),
+      );
+      q = await settled();
+      report(
+        `sideways-wheel-one-pack-${size}`,
+        q.index === mod(p0.index + 1, q.n) && Math.abs(q.y - lineupY) < 1,
+        `${p0.index} -> ${q.index}; scrollY ${q.y}`,
+      );
+    }
+    // a pick then the exit: the free part, the picked pack still focused
+    await dragX(200);
+    const picked = await settled();
+    await gesture(s, 1);
+    await page.waitForTimeout(200);
+    r = await rest(page);
+    p = await pick();
+    report(
+      `pick-then-exit-${size}`,
+      near(r.y, r.exitEnd) && p.id === picked.id && p.len === len0,
+      `scrollY ${r.y} (exit end ${r.exitEnd}); focused ${p.id} (picked ${picked.id}); history ${p.len}`,
+    );
+    // ArrowRight away from the lineup is not taken by the flow
+    const nk = await nativeKey(page, 'ArrowRight');
+    report(
+      `arrows-free-away-from-the-lineup-${size}`,
+      !nk.cancelled,
+      `cancelled: ${nk.cancelled}`,
+    );
+    report(
+      `no-page-errors-wp5-${size}`,
+      page.errors.length === 0,
+      page.errors.join(' | ') || 'none',
+    );
+    await s.ctx.close();
   }
 
   if (part('reload')) {
