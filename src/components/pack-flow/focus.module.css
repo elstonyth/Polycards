@@ -349,6 +349,16 @@
     max-height: calc(100vh - 15rem);
   }
 
+  /* Front fits a two-line name and the buy panel: a smaller name, and the
+     top hit is the next stop */
+  .over .block[data-kind='front'] .name {
+    font-size: 2.5rem;
+  }
+
+  .over .block[data-kind='front'] .lead {
+    display: none;
+  }
+
   .over .block[data-kind='odds'] .board {
     width: 172%;
     transform: scale(0.58);
