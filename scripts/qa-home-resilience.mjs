@@ -1300,7 +1300,9 @@ async function trimPart(size) {
   const u = await trimProbe(page);
   report(
     'trim-restored-' + size,
-    Math.abs(atEnd.y - exitEnd) <= 2 &&
+    // the step that crosses back over the exit end lands up to a step past it
+    atEnd.y <= exitEnd + 2 &&
+      atEnd.y >= exitEnd - vh / 2 &&
       (atEnd.lap === null ? atEnd.drawn > 1 : atEnd.lap.trim === false) &&
       (u.lap === null || u.lap.trim !== true) &&
       u.drawn > 1,

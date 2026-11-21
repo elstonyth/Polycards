@@ -7,9 +7,15 @@
 //            the glide matches the finger's speed by the touch events' own
 //            times, and is far from what the times they were handled at
 //            would give (the sample is invalid unless the two differ).
-//   Claim 2: started close above Last's top, the glide crosses it and the page
-//            wraps once, ending at the row.
+//   Claim 2: a long fast flick at the single pack (the end's rest past the
+//            footer) is one move to the row back: the page wraps once and
+//            rests at the row, never paging on past it.
 //   Claim 3: a finger held still 200 ms before lifting does not glide.
+//   Claim 4: a long fast flick in Just Pulled glides to the footer's rest and
+//            stops there.
+// The free part ends at the footer's rest (a short span on a phone), so the
+// flicks in it start just past the lineup's exit, and the expected glides are
+// cut at that rest.
 // Claims 2 and 3: CDP touch moves awaited one by one arrive every 62 to 94 ms
 // in headless Chrome, so each flick is three moves of 150 px (about 27 to 40
 // px per 60 Hz frame).
@@ -76,11 +82,11 @@ const send = (s, type, pts) =>
  * waiting for the page's reply to it (that reply takes 60 to 100 ms in
  * headless Chrome, which by the events' own times is a finger held still).
  */
-async function flick(s, holdMs = 0, liftNow = false) {
+async function flick(s, holdMs = 0, liftNow = false, step = STEP) {
   await send(s, 'touchStart', [[X, Y0]]);
   for (let i = 1; i < MOVES; i++)
-    await send(s, 'touchMove', [[X, Y0 - STEP * i]]);
-  const last = send(s, 'touchMove', [[X, Y0 - STEP * MOVES]]);
+    await send(s, 'touchMove', [[X, Y0 - step * i]]);
+  const last = send(s, 'touchMove', [[X, Y0 - step * MOVES]]);
   if (liftNow) {
     await Promise.all([last, send(s, 'touchEnd', [])]);
     return;
@@ -125,7 +131,7 @@ async function burstFlick(s) {
  * the newest move at least 4 ms before the last (none: no glide). `late`:
  * how long after its own time the lift was handled.
  */
-function expected(log, col = 0) {
+function expected(log, col = 0, room = Infinity) {
   const m = log.moves;
   const at = log.end[col];
   const late = log.end[1] - log.end[0];
@@ -139,7 +145,8 @@ function expected(log, col = 0) {
     return { glide: 0, gap, span: null, v: null, late, n: recent.length };
   const span = b[col] - a[col];
   const v = ((b[2] - a[2]) * FRAME_MS) / span;
-  const glide = Math.sign(v) * Math.abs(v) ** POWER;
+  // a glide arriving at the footer's rest stops there
+  const glide = Math.min(room, Math.sign(v) * Math.abs(v) ** POWER);
   return { glide, gap, span, v, late, n: recent.length };
 }
 /** The flick check's tolerance around an expected glide. */
@@ -168,14 +175,15 @@ try {
     };
 
     // Claim 1: moves handled in a burst glide by the events' own times
-    const mid = Math.round(t.exitEnd + 200);
+    const footer = t.ends?.[0] ?? Infinity;
+    const mid = Math.round(t.exitEnd + 20);
     await place(mid);
     await arm(s);
     await burstFlick(s);
     await s.settle({ quiet: 400, timeout: 6000 });
     let log = await read(s);
-    let e = expected(log);
-    const h = expected(log, 1);
+    let e = expected(log, 0, footer - log.end[2]);
+    const h = expected(log, 1, footer - log.end[2]);
     let end = await s.page.evaluate(() => scrollY);
     let glide = end - log.end[2];
     await s.capture('burst flick from ' + mid + ': glide ' + Math.round(glide));
@@ -188,7 +196,7 @@ try {
       clockFits &&
       e.gap !== null &&
       e.gap < HOLD_MS &&
-      e.glide > 100 &&
+      e.glide > 40 &&
       Math.abs(e.glide - h.glide) > 2 * tol;
     const times = log.moves
       .map((m) => r1(m[0]) + '/+' + r1(m[1] - m[0]))
@@ -227,21 +235,22 @@ try {
         r1(e.late),
     );
 
-    // Claim 2: close above Last's top, the glide crosses it: one wrap, to the row
-    const near = Math.round(t.lastTop - (MOVES * STEP + 100));
-    await place(near);
+    // Claim 2: a long fast flick at the single pack: one move to the row back,
+    // one wrap, and the page rests at the row (never pages on past it)
+    const pack = t.ends?.[1];
+    await place(pack);
     await arm(s);
     await flick(s, 0, true);
     await s.page.waitForTimeout(400);
-    await s.capture('flick across Last: 400 ms after the release');
-    await s.settle({ quiet: 500, timeout: 6000 });
+    await s.capture('flick at the single pack: 400 ms after the release');
+    await s.settle({ quiet: 800, timeout: 8000 });
     log = await read(s);
     e = expected(log);
     end = await s.page.evaluate(() => scrollY);
     let wraps = 0;
     for (let i = 1; i < log.ys.length; i++)
       if (log.ys[i - 1] - log.ys[i] > 1000) wraps++;
-    await s.capture('flick across Last: rests at ' + Math.round(end));
+    await s.capture('flick at the single pack: rests at ' + Math.round(end));
     info(
       'touch times [phone]',
       log.moves
@@ -252,28 +261,13 @@ try {
         ' handled +' +
         r1(e.late),
     );
-    const valid2 = e.gap < HOLD_MS;
     check(
-      'flick-across-last-wraps-once [phone]',
-      valid2 &&
-        log.end[2] < t.lastTop &&
-        wraps === 1 &&
-        Math.abs(end - t.r0) < 1,
-      (valid2
-        ? ''
-        : 'INVALID SAMPLE (release ' +
-          r1(e.gap) +
-          ' ms after the last move); ') +
-        'from ' +
-        near +
-        ', released at ' +
-        r1(log.end[2]) +
+      'flick-at-the-single-pack-wraps-once-to-the-row [phone]',
+      pack !== undefined && wraps === 1 && Math.abs(end - t.r0) < 1,
+      'from the single pack at ' +
+        r1(pack ?? null) +
         ' (Last top ' +
         r1(t.lastTop) +
-        ', ' +
-        r1(e.gap) +
-        ' ms after the last move, asked glide ' +
-        r1(e.glide) +
         '); ' +
         wraps +
         ' wrap(s); rests at ' +
@@ -286,7 +280,7 @@ try {
     // Claim 3: held still 200 ms, then lifted: no glide
     await place(mid);
     await arm(s);
-    await flick(s, 200);
+    await flick(s, 200, false, 40);
     await s.settle({ quiet: 400, timeout: 6000 });
     log = await read(s);
     e = expected(log);
@@ -295,7 +289,10 @@ try {
     await s.capture('hold 200 ms then lift: glide ' + Math.round(glide));
     check(
       'hold-then-lift-no-glide [phone]',
-      e.gap > HOLD_MS && Math.abs(glide) < 1 && log.end[2] > mid + 100,
+      e.gap > HOLD_MS &&
+        Math.abs(glide) < 1 &&
+        log.end[2] > mid + 60 &&
+        log.end[2] < footer - 1,
       'released ' +
         r1(e.gap) +
         ' ms after the last move at ' +
@@ -305,6 +302,25 @@ try {
         '); then ' +
         r1(glide) +
         ' px',
+    );
+
+    // Claim 4: a long fast flick in Just Pulled stops at the footer's rest
+    await place(mid);
+    await arm(s);
+    await flick(s, 0, true);
+    await s.settle({ quiet: 600, timeout: 6000 });
+    end = await s.page.evaluate(() => scrollY);
+    await s.capture('long flick in Just Pulled: rests at ' + Math.round(end));
+    check(
+      'long-flick-stops-at-the-footer [phone]',
+      Math.abs(end - footer) < 1,
+      'from ' +
+        mid +
+        ': rests at ' +
+        r1(end) +
+        ' (footer rest ' +
+        r1(footer) +
+        ')',
     );
 
     s.checkNoErrors();
