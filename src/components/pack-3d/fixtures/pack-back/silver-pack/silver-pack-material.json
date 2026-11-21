@@ -1,0 +1,20 @@
+{
+  "pack": "silver-pack",
+  "finish": "glossy clear film",
+  "note": "Options for createPackModel({ foil, relief }); the same material lights front and back. Chosen from a 108-variant grid (metalness, roughness, clearcoat, printGlow) rendering the front straight on and comparing it with its flat art (mean |dL*| over the body); printGlow held at 0.42 because more glow only flattens the shading. alphaInterior = the front's interior alpha (255).",
+  "foil": {
+    "metalness": 0.2,
+    "roughness": 0.3,
+    "clearcoat": 0.2,
+    "clearcoatRoughness": 0.2,
+    "sheen": 0.12,
+    "sheenRoughness": 0.6,
+    "envMapIntensity": 1,
+    "printGlow": 0.42,
+    "alphaInterior": 1
+  },
+  "relief": {
+    "crimpSlope": 0.45,
+    "finSlope": 0.3
+  }
+}

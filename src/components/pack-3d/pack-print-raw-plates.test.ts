@@ -39,10 +39,15 @@ const geometry = (pack: string): PackBackGeometry => {
   if (!g) throw new Error(`no geometry for ${pack}`);
   return g;
 };
+// the graded packs have tracked fixtures; the raw packs' JSON stays in the
+// untracked docs/research
+const own = (pack: string) => pack in GRADED_PACK_BACK_GEOMETRY;
 const jsonFile = (pack: string) =>
   fileURLToPath(
     new URL(
-      `../../../docs/research/home-3d/pack-back/${pack}/${pack}-back-geometry.json`,
+      own(pack)
+        ? `./fixtures/pack-back/${pack}/${pack}-back-geometry.json`
+        : `../../../docs/research/home-3d/pack-back/${pack}/${pack}-back-geometry.json`,
       import.meta.url,
     ),
   );
@@ -64,8 +69,8 @@ const RAW: [string, number][] = [
 
 describe('raw and graded packs on their own plates', () => {
   for (const [pack, s] of RAW) {
-    // docs/research is untracked: check the copy only where the JSON exists
-    it.skipIf(!existsSync(jsonFile(pack)))(
+    // a missing fixture fails; the untracked research JSON is checked only where present
+    it.skipIf(!own(pack) && !existsSync(jsonFile(pack)))(
       `${pack}: the inlined geometry matches ${pack}-back-geometry.json`,
       () => {
         const json = JSON.parse(

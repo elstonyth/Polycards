@@ -1,0 +1,111 @@
+{
+  "pack": "silver-pack",
+  "image": {
+    "width": 926,
+    "height": 1666,
+    "file": "silver-pack-back-plate.png"
+  },
+  "note": "Fractions of image width (x) and height (y). The back is the front mirrored left-right: x here = 1 - x on the front.",
+  "alphaThreshold": 128,
+  "alphaInterior": "255 (1.000), copied from the front",
+  "bounds": {
+    "x0": 0,
+    "x1": 0.9978,
+    "y0": 0,
+    "y1": 1
+  },
+  "body": {
+    "x0": 0.0297,
+    "x1": 0.971,
+    "note": "straight side edges between the shoulders"
+  },
+  "crimpTop": {
+    "y0": 0,
+    "y1": 0.0588
+  },
+  "crimpBottom": {
+    "y0": 0.9544,
+    "y1": 1
+  },
+  "finSeal": {
+    "x0": 0.4957,
+    "x1": 0.5842,
+    "mode": "crimp"
+  },
+  "printArea": {
+    "x0": 0.095,
+    "x1": 0.9449,
+    "y0": 0.1218,
+    "y1": 0.8764
+  },
+  "printZones": {
+    "note": "Live-text zones: rectangles (fractions of width x and height y, half-open), the reference's zones moved by this pack's whole-pixel shift (off 15, dy 8). On this plate the zones with plate=live are already blank (restyle-back.cjs gives them no ink); the print module draws there. Text runs sideways, reading bottom to top. plate=no-odds marks the fixed odds heading, which is kept on this plate.",
+    "orientation": "bottom-to-top",
+    "zones": [
+      {
+        "id": "headline",
+        "holds": "price, product line",
+        "plate": "live",
+        "rect": {
+          "x0": 0.65011,
+          "x1": 0.75378,
+          "y0": 0.5084,
+          "y1": 0.86615
+        }
+      },
+      {
+        "id": "odds",
+        "holds": "odds rows (two columns)",
+        "plate": "live",
+        "rect": {
+          "x0": 0.80022,
+          "x1": 0.91577,
+          "y0": 0.5084,
+          "y1": 0.86615
+        }
+      },
+      {
+        "id": "buyback",
+        "holds": "buyback headline + rule paragraph",
+        "plate": "live",
+        "rect": {
+          "x0": 0.67603,
+          "x1": 0.88013,
+          "y0": 0.14286,
+          "y1": 0.47359
+        }
+      },
+      {
+        "id": "oddsHeading",
+        "holds": "the fixed Pull odds (by rarity) heading",
+        "plate": "no-odds",
+        "rect": {
+          "x0": 0.75594,
+          "x1": 0.79806,
+          "y0": 0.5084,
+          "y1": 0.86615
+        }
+      }
+    ]
+  },
+  "restyle": {
+    "tool": "scripts/pack-back/restyle-back.cjs",
+    "reference": "151",
+    "shift": {
+      "off": 15,
+      "dy": 8
+    },
+    "palette": {
+      "_source": "silver-pack-front.webp. metal = median of the brightest 30% of the tier lettering box (150-780 x 1270-1366); pale = median of the brightest 25% of the logo box (310-580 x 600-885); dark = median of the darkest 10% of the body",
+      "panel": "#e8e6e9",
+      "panelInk": "#202123",
+      "band": "#b7b6b8",
+      "bandInk": "#202123",
+      "text": "#e8e6e9",
+      "outline": "#b7b6b8"
+    },
+    "film": {
+      "level": 23.8188
+    }
+  }
+}

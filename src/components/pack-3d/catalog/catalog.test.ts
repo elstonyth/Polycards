@@ -159,13 +159,16 @@ describe('3D pack catalogue', () => {
         expect(s.material.source === 'model-defaults').toBe(RAW.includes(id));
       });
 
-      // docs/research is untracked: compare with the research JSON where present
-      const dir =
-        id === '151'
+      // the graded packs compare with tracked fixtures and fail when one is missing; the raw packs'
+      // JSON stays in the untracked docs/research and is compared only where present
+      const own = !RAW.includes(id);
+      const dir = own
+        ? `src/components/pack-3d/fixtures/pack-back/${id}`
+        : id === '151'
           ? 'docs/research/home-3d/pack-back'
           : `docs/research/home-3d/pack-back/${id}`;
       const packJson = repoFile(`${dir}/${id}-pack-geometry.json`);
-      it.skipIf(id === '151' || !existsSync(packJson))(
+      it.skipIf(id === '151' || (!own && !existsSync(packJson)))(
         'geometry is the research JSON',
         () => {
           const json = JSON.parse(readFileSync(packJson, 'utf8'));
@@ -180,13 +183,16 @@ describe('3D pack catalogue', () => {
         },
       );
       const matJson = repoFile(`${dir}/${id}-material.json`);
-      it.skipIf(!existsSync(matJson))('material is the research JSON', () => {
-        const json = JSON.parse(readFileSync(matJson, 'utf8'));
-        const m = PACK_3D_SETTINGS[id]!.material;
-        if (!('foil' in m)) throw new Error('model defaults');
-        expect(m.foil).toEqual(json.foil);
-        expect(m.relief).toEqual(json.relief);
-      });
+      it.skipIf(!own && !existsSync(matJson))(
+        'material is the research JSON',
+        () => {
+          const json = JSON.parse(readFileSync(matJson, 'utf8'));
+          const m = PACK_3D_SETTINGS[id]!.material;
+          if (!('foil' in m)) throw new Error('model defaults');
+          expect(m.foil).toEqual(json.foil);
+          expect(m.relief).toEqual(json.relief);
+        },
+      );
     });
   }
 

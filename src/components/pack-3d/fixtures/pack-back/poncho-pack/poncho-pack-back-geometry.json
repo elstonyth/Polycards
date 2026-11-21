@@ -1,0 +1,111 @@
+{
+  "pack": "poncho-pack",
+  "image": {
+    "width": 929,
+    "height": 1666,
+    "file": "poncho-pack-back-plate.png"
+  },
+  "note": "Fractions of image width (x) and height (y). The back is the front mirrored left-right: x here = 1 - x on the front.",
+  "alphaThreshold": 128,
+  "alphaInterior": "255 (1.000), copied from the front",
+  "bounds": {
+    "x0": 0,
+    "x1": 1,
+    "y0": 0,
+    "y1": 1
+  },
+  "body": {
+    "x0": 0.0221,
+    "x1": 0.9789,
+    "note": "straight side edges between the shoulders"
+  },
+  "crimpTop": {
+    "y0": 0,
+    "y1": 0.0576
+  },
+  "crimpBottom": {
+    "y0": 0.961,
+    "y1": 1
+  },
+  "finSeal": {
+    "x0": 0.4962,
+    "x1": 0.5845,
+    "mode": "crimp"
+  },
+  "printArea": {
+    "x0": 0.0969,
+    "x1": 0.944,
+    "y0": 0.1242,
+    "y1": 0.8788
+  },
+  "printZones": {
+    "note": "Live-text zones: rectangles (fractions of width x and height y, half-open), the reference's zones moved by this pack's whole-pixel shift (off 17, dy 12). On this plate the zones with plate=live are already blank (restyle-back.cjs gives them no ink); the print module draws there. Text runs sideways, reading bottom to top. plate=no-odds marks the fixed odds heading, which is kept on this plate.",
+    "orientation": "bottom-to-top",
+    "zones": [
+      {
+        "id": "headline",
+        "holds": "price, product line",
+        "plate": "live",
+        "rect": {
+          "x0": 0.65016,
+          "x1": 0.7535,
+          "y0": 0.5108,
+          "y1": 0.86855
+        }
+      },
+      {
+        "id": "odds",
+        "holds": "odds rows (two columns)",
+        "plate": "live",
+        "rect": {
+          "x0": 0.79978,
+          "x1": 0.91496,
+          "y0": 0.5108,
+          "y1": 0.86855
+        }
+      },
+      {
+        "id": "buyback",
+        "holds": "buyback headline + rule paragraph",
+        "plate": "live",
+        "rect": {
+          "x0": 0.676,
+          "x1": 0.87944,
+          "y0": 0.14526,
+          "y1": 0.47599
+        }
+      },
+      {
+        "id": "oddsHeading",
+        "holds": "the fixed Pull odds (by rarity) heading",
+        "plate": "no-odds",
+        "rect": {
+          "x0": 0.75565,
+          "x1": 0.79763,
+          "y0": 0.5108,
+          "y1": 0.86855
+        }
+      }
+    ]
+  },
+  "restyle": {
+    "tool": "scripts/pack-back/restyle-back.cjs",
+    "reference": "151",
+    "shift": {
+      "off": 17,
+      "dy": 12
+    },
+    "palette": {
+      "_source": "poncho-pack-front.webp. metal = median of the brightest 30% of the tier lettering box (150-780 x 1293-1387); pale = median of the brightest 25% of the logo box (285-580 x 555-915); dark = median of the darkest 10% of the body",
+      "panel": "#b2d9ef",
+      "panelInk": "#030509",
+      "band": "#88a8c2",
+      "bandInk": "#030509",
+      "text": "#b2d9ef",
+      "outline": "#88a8c2"
+    },
+    "film": {
+      "level": 3.9698
+    }
+  }
+}
