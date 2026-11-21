@@ -146,6 +146,8 @@ export type FocusEnter = {
   entry?: string;
   /** Page to its first stop (false: the flow is already paging). */
   page?: boolean;
+  /** Place the page on that stop at once, with no move (a document load). */
+  instant?: boolean;
 };
 
 export type FocusRun = {
@@ -174,7 +176,8 @@ export type FocusRun = {
   /** One frame; true when at rest. */
   frame(now: number, f: FocusFrame): boolean;
   /** The page shows a focus entry of ours (Back from the reel, Forward): focus that pack. */
-  resume(): boolean;
+  /** `instant`: the page is placed on the entry's stop with no move. */
+  resume(instant?: boolean): boolean;
   /** Debug: the stops and timing of the last moves. */
   debug(): unknown;
   stop(): void;
@@ -295,7 +298,7 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
     d.ended();
     // browser Forward during the leave brought the pack's entry back: the
     // page follows the address and resumes it (as Forward does at the row)
-    if (addr.strayed()) window.setTimeout(resumeEntry, 0);
+    if (addr.strayed()) window.setTimeout(() => resumeEntry(), 0);
   };
 
   const onPop = () => {
@@ -318,7 +321,7 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
     // Forward to a focus entry of ours: focus that pack again (no new entry)
     resumeEntry();
   };
-  const resumeEntry = (): boolean => {
+  const resumeEntry = (instant = false): boolean => {
     const mark = addr.resumable();
     const m = /^\/slots\/([^/]+)\/?$/.exec(window.location.pathname);
     if (on || mark === null || !m?.[1]) return false;
@@ -327,7 +330,7 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       `[data-stage-panel]:not([hidden]) [data-stage-tile][data-pack-id="${CSS.escape(id)}"]`,
     );
     return tile
-      ? run.enter(Number(tile.dataset.index), { entry: mark })
+      ? run.enter(Number(tile.dataset.index), { entry: mark, instant })
       : false;
   };
   let savedK = 0;
@@ -442,7 +445,8 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
           // storage blocked: Front
         }
       savedK = at;
-      if (page) d.go(at);
+      // a document load: there within a frame, under the loader's cover
+      if (page) d.go(at, o.instant ? { ms: 1 } : undefined);
       trace.push([now(), -1, 1]);
       d.loop();
       return true;
@@ -561,7 +565,7 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       }
       return f.idle && !leaving;
     },
-    resume: () => resumeEntry(),
+    resume: (instant) => resumeEntry(instant),
     debug: () => ({
       on,
       kinds,

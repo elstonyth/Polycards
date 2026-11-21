@@ -327,3 +327,56 @@ describe('origin lock — only requests forwarded by our Cloudflare zone', () =>
     expect(get('/healthz')).toBeUndefined();
   });
 });
+
+describe("a pack's own address under the home preview switch", () => {
+  const get = (
+    path: string,
+    headers: Record<string, string> = {},
+    method = 'GET',
+  ) =>
+    proxy(new NextRequest(`https://polycards.gg${path}`, { headers, method }));
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('switch off: every pack address passes through untouched, as before', () => {
+    vi.stubEnv('HOME_PREVIEW', '');
+    for (const p of [
+      '/slots/151',
+      '/slots/151/',
+      '/slots/151?count=1',
+      '/slots/151?count=',
+      '/slots/151?stage=3d',
+      '/slots',
+      '/slots/151/spin',
+    ]) {
+      expect(get(p), p).toBeUndefined();
+      expect(get(p, { rsc: '1' }), p).toBeUndefined();
+    }
+  });
+
+  it('switch on: a document load of a bare pack address goes to the flow page before anything renders', () => {
+    vi.stubEnv('HOME_PREVIEW', '1');
+    const res = get('/slots/151?stage=3d');
+    expect(res?.status).toBe(307);
+    expect(res?.headers.get('location')).toBe(
+      'https://polycards.gg/home-preview?stage=3d&focus=151',
+    );
+    expect(get('/slots/151/')?.headers.get('location')).toBe(
+      'https://polycards.gg/home-preview?focus=151',
+    );
+    expect(get('/slots/a%20b')?.headers.get('location')).toBe(
+      'https://polycards.gg/home-preview?focus=a+b',
+    );
+    expect(get('/slots/151', {}, 'HEAD')?.status).toBe(307);
+  });
+
+  it("switch on: the pack page's own links, moves inside the site and other paths are untouched", () => {
+    vi.stubEnv('HOME_PREVIEW', '1');
+    expect(get('/slots/151?count=1')).toBeUndefined();
+    expect(get('/slots/151?count=')).toBeUndefined();
+    expect(get('/slots/151', { rsc: '1' })).toBeUndefined();
+    expect(get('/slots/151/spin')).toBeUndefined();
+    expect(get('/slots')).toBeUndefined();
+    expect(get('/slots/%E0%A4%A')).toBeUndefined(); // undecodable
+    expect(get('/slots/151', {}, 'POST')).toBeUndefined();
+  });
+});

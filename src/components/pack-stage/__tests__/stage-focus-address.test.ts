@@ -606,22 +606,16 @@ describe('focus address: a load straight onto a pack address', () => {
     })(b.h.replaceState.bind(b.h));
     return { b, l };
   };
-  const start = (
-    x: ReturnType<typeof landed>,
-    navigation: string | undefined,
-    now = 1000,
-    id = '151',
-  ) =>
+  const start = (x: ReturnType<typeof landed>, now = 1000, id = '151') =>
     startEntry(x.b.h, x.l(), {
       id,
       base: '/home-preview',
-      navigation,
       now,
     });
 
   it("puts the pack's address back and marks the entry in place (no new entry)", () => {
     const x = landed();
-    const mark = start(x, 'navigate');
+    const mark = start(x);
     expect(mark).toBe('151:start:1000');
     expect(x.b.length()).toBe(1);
     expect(x.b.url()).toBe('/slots/151');
@@ -632,7 +626,7 @@ describe('focus address: a load straight onto a pack address', () => {
 
   it('keeps the other query (QA switches) on the address', () => {
     const x = landed('?stage=3d&focus=151');
-    start(x, 'navigate');
+    start(x);
     expect(x.b.url()).toBe('/slots/151');
     expect(x.l().search).toBe('?stage=3d');
   });
@@ -644,14 +638,14 @@ describe('focus address: a load straight onto a pack address', () => {
       '',
       '/home-preview?focus=151',
     );
-    start(x, 'navigate');
+    start(x);
     expect(x.b.h.state).toMatchObject({ __NA: true, tree: 'x' });
   });
 
   it('a reload gets a fresh mark, so it opens on Front (no saved stop)', () => {
     const x = landed();
-    const first = start(x, 'navigate', 1000);
-    const again = start(landed(), 'reload', 2000);
+    const first = start(x, 1000);
+    const again = start(landed(), 2000);
     expect(again).toBe('151:start:2000');
     expect(again).not.toBe(first);
   });
@@ -667,7 +661,7 @@ describe('focus address: a load straight onto a pack address', () => {
       '',
       '/home-preview?focus=151',
     );
-    const mark = start(x, 'reload', 3000)!;
+    const mark = start(x, 3000)!;
     expect(mark).toBe('151:start:3000');
     const r = createFocusAddress(x.b.h, x.b.loc);
     r.enter('151', 'resume', mark);
@@ -676,25 +670,25 @@ describe('focus address: a load straight onto a pack address', () => {
     expect(x.b.length()).toBe(1);
   });
 
-  it('Back or Forward onto an entry of ours keeps its mark (the saved stop)', () => {
+  it('an old mark in the entry is never reused: every load opens on Front', () => {
     const x = landed();
     x.b.h.replaceState(
       { [FOCUS_MARK]: '151:9', __flowPushed: true, __flowBase: '/' },
       '',
       '/home-preview?focus=151',
     );
-    expect(start(x, 'back_forward')).toBe('151:9');
+    expect(start(x, 4000)).toBe('151:start:4000');
     expect(x.b.h.state).not.toHaveProperty('__flowPushed');
     expect(x.b.url()).toBe('/slots/151');
     expect(x.b.h.state).toMatchObject({
-      [FOCUS_MARK]: '151:9',
+      [FOCUS_MARK]: '151:start:4000',
       __flowBase: '/',
     });
   });
 
   it('going up from Front puts the base path in place: Back then leaves the site', () => {
     const x = landed();
-    const mark = start(x, 'navigate')!;
+    const mark = start(x)!;
     const a = createFocusAddress(x.b.h, x.b.loc);
     a.enter('151', 'resume', mark);
     a.show(true);
@@ -707,16 +701,16 @@ describe('focus address: a load straight onto a pack address', () => {
 
   it('writes nothing when the load is not one onto that pack', () => {
     const x = landed('');
-    expect(start(x, 'navigate')).toBeNull();
+    expect(start(x)).toBeNull();
     expect(x.b.h.state).toBeNull();
     const y = landed('?focus=ah');
-    expect(start(y, 'navigate')).toBeNull();
+    expect(start(y)).toBeNull();
     expect(y.b.url()).toBe('/home-preview');
   });
 
   it('encodes the id in the address', () => {
     const x = landed('?focus=a%20b');
-    expect(start(x, 'navigate', 5, 'a b')).toBe('a b:start:5');
+    expect(start(x, 5, 'a b')).toBe('a b:start:5');
     expect(x.b.url()).toBe('/slots/a%20b');
   });
 });

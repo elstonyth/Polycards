@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { isPlausibleCardHandle } from '@/lib/card-handle';
+import { homePreviewOn, packFlowAddress } from '@/lib/preview-switch';
 
 // A form-encoded POST to / skips the home page's route cache: Next treats any
 // `application/x-www-form-urlencoded` POST as a possible server action and
@@ -108,6 +109,27 @@ function bypassedEdge(request: NextRequest): boolean {
   return !sameSecret(request.headers.get(EDGE_HEADER) ?? '', secret);
 }
 
+// The home preview only (off on the live site): a document load of a pack's
+// own address goes to the flow page focused on that pack before anything
+// renders, so nothing of the pack page shows first. Moves inside the site
+// (RSC requests) are left to the pack route's own redirect.
+const PACK_PATH = /^\/slots\/([^/]+)\/?$/;
+function packFlowRedirect(request: NextRequest): NextResponse | null {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return null;
+  if (request.headers.has('rsc')) return null;
+  const segment = PACK_PATH.exec(request.nextUrl.pathname)?.[1];
+  if (!segment) return null;
+  let slug: string;
+  try {
+    slug = decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
+  const to = packFlowAddress(slug, request.nextUrl.searchParams);
+  if (!to) return null;
+  return NextResponse.redirect(new URL(to, request.url), 307);
+}
+
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   if (bypassedEdge(request)) {
@@ -126,6 +148,10 @@ export function proxy(request: NextRequest) {
   }
   if (pathname.startsWith('/api/')) return;
   if (!isKnownRoute(pathname)) return notFound();
+  if (homePreviewOn()) {
+    const toFlow = packFlowRedirect(request);
+    if (toFlow) return toFlow;
+  }
   if (
     pathname === '/' &&
     request.method === 'POST' &&

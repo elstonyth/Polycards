@@ -38,10 +38,9 @@ import StageTrack, { type StageTrackHandle } from './StageTrack';
 import { loadSpinKit } from './stage-spin-load';
 import { takeArrival } from './stage-arrival';
 import { startEntry } from './stage-focus-entry';
+import { packPagePath, packPath } from './stage-focus-marks';
+import { useFlowWait } from './stage-flow-wait';
 import styles from './pack-stage.module.css';
-
-/** The longest the flow is waited for before Just Pulled stops waiting. */
-const FLOW_WAIT_CAP_MS = 15_000;
 
 const nounOf = (packs: readonly StagePack[]): 'pack' | 'capsule' =>
   packs.length > 0 && packs.every((p) => p.ticket) ? 'capsule' : 'pack';
@@ -97,21 +96,18 @@ export default function PackStage({
     wake,
     show: showStage,
   } = stage3d;
-  // Whether the flow is still on its way ('pending', until the spin chunk has
-  // bound) or will not come ('gave-up'): Just Pulled's drawer waits for the
-  // flow's layout while it is pending, and stops waiting once it gave up
-  // (reduced motion and an empty stage never get the flow).
-  const [flowWait, setFlowWait] = useState<'pending' | 'gave-up' | null>(
-    'pending',
-  );
-  // A spin chunk that never settles: the wait ends after FLOW_WAIT_CAP_MS.
-  useEffect(() => {
-    const t = setTimeout(
-      () => setFlowWait((w) => (w === 'pending' ? 'gave-up' : w)),
-      FLOW_WAIT_CAP_MS,
-    );
-    return () => clearTimeout(t);
-  }, []);
+  // Whether the flow is still on its way or will not come: Just Pulled's
+  // drawer waits for the flow's layout while it is pending, and stops waiting
+  // once it gave up (reduced motion and an empty stage never get the flow).
+  const {
+    wait: flowWait,
+    bound: flowBound,
+    failed: flowFailed,
+  } = useFlowWait();
+  const wait = reduced || empty0 ? 'gave-up' : flowWait;
+  // A load onto a pack's address places the pack under the loader's cover,
+  // so its spin chunk does not wait for the loader to go.
+  const holdSpin = start ? false : loaderUp;
   // The focused pack's blocks (rendered by the spin chunk's focused view).
   const [focusUi, setFocusUi] = useState<ReactNode>(null);
   useEffect(() => {
@@ -119,7 +115,7 @@ export default function PackStage({
     const wrap = wrapRef.current;
     const panel = hostRef.current;
     // After the loader has gone (its exit is never slowed by the chunk).
-    if (!flow || !wrap || !panel || reduced || loaderUp) return;
+    if (!flow || !wrap || !panel || reduced || holdSpin) return;
     let ctl: { stop(): void } | null = null;
     let live = true;
     const t = setTimeout(() => {
@@ -139,11 +135,11 @@ export default function PackStage({
           c.bind({ flow, wrap, panel, empty: empty0 });
           ctl = c;
           // the flow's own switch decides from here
-          setFlowWait(null);
+          flowBound();
         },
         // No spin chunk: the page stays step 1 (one screen, never paged).
         () => {
-          if (live) setFlowWait('gave-up');
+          if (live) flowFailed();
         },
       );
     }, 300);
@@ -152,7 +148,17 @@ export default function PackStage({
       clearTimeout(t);
       ctl?.stop();
     };
-  }, [spinValues, stageState, wake, showStage, empty0, reduced, loaderUp]);
+  }, [
+    spinValues,
+    stageState,
+    wake,
+    showStage,
+    empty0,
+    reduced,
+    holdSpin,
+    flowBound,
+    flowFailed,
+  ]);
 
   const [revealed, setRevealed] = useState(false);
 
@@ -167,23 +173,34 @@ export default function PackStage({
     start ? { [start.category]: start.index } : {},
   );
   // A load onto a pack's address: its tab, and the entry marked for the flow
-  // (once, at mount; the flow reads the mark when it binds).
+  // (once, at mount; the flow reads the mark when it binds). Reduced motion
+  // never gets the flow: today's pack page instead (read from the media query
+  // itself, since the hook answers false while hydrating).
   const startRef = useRef(start);
   useEffect(() => {
     const s = startRef.current;
     if (!s) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      window.location.replace(packPagePath(s.id));
+      return;
+    }
     if (s.category !== active) pick(s.category);
-    const nav = performance.getEntriesByType('navigation')[0] as
-      PerformanceNavigationTiming | undefined;
     startEntry(window.history, window.location, {
       id: s.id,
       base: '/home-preview',
-      navigation: nav?.type,
       now: Date.now(),
     });
     // mount only: a later tab pick is the visitor's
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // The flow will not come after all (its chunk failed, or never bound): a
+  // load still on the pack's address takes today's pack page.
+  useEffect(() => {
+    const s = startRef.current;
+    if (!s || wait !== 'gave-up') return;
+    if (window.location.pathname !== packPath(s.id)) return;
+    window.location.replace(packPagePath(s.id));
+  }, [wait]);
   const filterOf = (id: string): StageFilter => filters[id] ?? ALL_FILTER;
   const rows = useMemo(
     () =>
@@ -321,7 +338,7 @@ export default function PackStage({
     <div
       ref={flowRef}
       data-home-flow=""
-      data-flow-wait={(reduced || empty0 ? 'gave-up' : flowWait) ?? undefined}
+      data-flow-wait={wait ?? undefined}
       className={styles.flow}
     >
       <StageLoader onLeave={onLoaderLeave} />

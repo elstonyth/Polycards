@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { flowStart, homePreviewOn } from '../flow-start';
+import { flowStart } from '../flow-start';
 
 const pack = (id: string) => ({ id });
 const categories = [
@@ -36,19 +36,5 @@ describe('flowStart: where a load onto a pack address opens the flow', () => {
 
   it('none for a pack in a tab that cannot be picked', () => {
     expect(flowStart({ categories, tabs, seeds, id: 'op-01' })).toBeNull();
-  });
-});
-
-describe('homePreviewOn: the preview switch', () => {
-  it('on with HOME_PREVIEW=1 or in development, off otherwise', () => {
-    expect(homePreviewOn({ NODE_ENV: 'production', HOME_PREVIEW: '1' })).toBe(
-      true,
-    );
-    expect(homePreviewOn({ NODE_ENV: 'development' })).toBe(true);
-    expect(homePreviewOn({ NODE_ENV: 'production' })).toBe(false);
-    expect(
-      homePreviewOn({ NODE_ENV: 'production', HOME_PREVIEW: 'true' }),
-    ).toBe(false);
-    expect(homePreviewOn({ NODE_ENV: 'test' })).toBe(false);
   });
 });

@@ -18,15 +18,41 @@ import { flowSeedFromHighlights } from '@/components/pack-flow/flow-seed';
 import { FlowSections } from '@/components/pack-flow/FlowSections';
 import { FOCUS_SEEDS_ID } from '@/components/pack-stage/stage-focus-seeds';
 import { flowStart } from '@/components/pack-flow/flow-start';
+import { packPagePath } from '@/components/pack-stage/stage-focus-marks';
+import { homePreviewOn } from '@/lib/preview-switch';
+import { packMetadata } from '@/app/slots/[slug]/pack-metadata';
 import type {
   GateMode,
   StageOverride,
 } from '@/components/pack-stage/stage-gate';
 
-export const metadata: Metadata = {
-  title: 'Home preview',
-  robots: { index: false, follow: false },
-};
+const ROBOTS: Metadata['robots'] = { index: false, follow: false };
+
+/**
+ * The preview's title; a load onto a pack's own address (`?focus=<id>`)
+ * carries that pack's title, as the pack page does.
+ */
+export async function generateMetadata({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}): Promise<Metadata> {
+  const { focus } = await searchParams;
+  if (homePreviewOn() && typeof focus === 'string' && focus) {
+    const { title } = await packMetadata(focus);
+    if (title) return { title, robots: ROBOTS };
+  }
+  return { title: 'Home preview', robots: ROBOTS };
+}
+
+/**
+ * Reduced motion never gets the flow, so a load onto a pack's address takes
+ * today's pack page before the stage paints.
+ */
+const reducedLeave = (id: string) =>
+  `if(window.matchMedia('(prefers-reduced-motion: reduce)').matches)location.replace(${JSON.stringify(
+    packPagePath(id),
+  )})`.replace(/</g, '\\u003c');
 
 const STAGE_MODES: readonly GateMode[] = ['flat', '3d', 'lite'];
 
@@ -45,9 +71,10 @@ const FEED_TTL_MS = 5_000;
  * `?soldout=<id>,<id>` shows those packs sold out (QA); `?jp=<id>,<id>` marks
  * those packs Japanese (the language control's preview). `?loader=always|never`
  * (forces or skips the brand loader) is read by the layout's pre-paint script.
- * `?focus=<id>` is a load onto that pack's own address (the pack route sends
- * it here under the preview switch): the flow opens on that pack, and the
- * address goes back to the pack's; a pack it cannot open gets its pack page.
+ * `?focus=<id>` is a load onto that pack's own address (sent here under the
+ * preview switch): the flow opens on that pack, and the address goes back to
+ * the pack's; a pack it cannot open, or a reduced-motion visitor, gets its
+ * pack page.
  */
 export default async function HomePreviewPage({
   searchParams,
@@ -57,12 +84,7 @@ export default async function HomePreviewPage({
   // Await the query BEFORE the gate: a notFound() reached first lets the build
   // prerender the route as a static 404, and the runtime flag is never read.
   const query = await searchParams;
-  if (
-    process.env.NODE_ENV !== 'development' &&
-    process.env.HOME_PREVIEW !== '1'
-  ) {
-    notFound();
-  }
+  if (!homePreviewOn()) notFound();
   const one = (key: string) =>
     typeof query[key] === 'string' ? (query[key] as string) : '';
   const stage: StageOverride =
@@ -127,6 +149,9 @@ export default async function HomePreviewPage({
   // (stage-loader-script.ts, STAGE_LOADER_PATHS); it reads ?loader= itself.
   return (
     <div className="w-full">
+      {start && (
+        <script dangerouslySetInnerHTML={{ __html: reducedLeave(focus) }} />
+      )}
       <StageNoScript />
       <script
         type="application/json"

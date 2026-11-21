@@ -1,20 +1,10 @@
 /**
- * Where a document load onto a pack's own address opens the home flow, and
- * the preview switch that allows it. Pure and server-safe.
+ * Where a document load onto a pack's own address opens the home flow. Pure
+ * and server-safe.
  */
 
 /** The flow's start on a pack: its tab, and its place in that tab's row. */
 export type FlowStart = { category: string; index: number };
-
-/**
- * The preview switch (the same one that serves /home-preview): on in
- * development or with HOME_PREVIEW=1.
- */
-export function homePreviewOn(
-  env: Readonly<Record<string, string | undefined>> = process.env,
-): boolean {
-  return env.NODE_ENV === 'development' || env.HOME_PREVIEW === '1';
-}
 
 /**
  * The start for pack `id`: the tab holding it (one that can be picked) and

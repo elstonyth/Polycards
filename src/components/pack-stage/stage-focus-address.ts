@@ -23,6 +23,16 @@
  * asked for.
  */
 
+import {
+  BASE,
+  FOCUS_MARK,
+  PUSHED,
+  fields,
+  packPath,
+} from './stage-focus-marks';
+
+export { FOCUS_MARK, packPath };
+
 /** The history calls the address uses (the window's in the browser). */
 export type FocusHistory = {
   readonly state: unknown;
@@ -72,16 +82,6 @@ export type FocusAddress = {
  * is replaced instead [ours].
  */
 export const FOCUS_STEP_MS = 1000;
-
-import {
-  BASE,
-  FOCUS_MARK,
-  PUSHED,
-  fields,
-  packPath,
-} from './stage-focus-marks';
-
-export { FOCUS_MARK, packPath };
 
 const SLOT_PATH = /^\/slots\/([^/]+)\/?$/;
 

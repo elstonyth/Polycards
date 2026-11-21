@@ -159,6 +159,18 @@
   transition: none;
 }
 
+/* Below the desktop layout the row's Open button sits on the chips' rail
+   (above the tab bar, on the right), so at the row they would cover it: over
+   the flow they never show there. The flow's last section carries the
+   Telegram button. */
+@media not all and (min-width: 64rem) {
+  :global(body):has(.flow) :global([data-testid='free-pack-badge']),
+  :global(body):has(.flow) :global([data-telegram-banner]) {
+    display: none;
+    visibility: hidden;
+  }
+}
+
 /* The row's own UI leaves with the tap's move (its first 40%, as the
    neighbours do), and comes back over 0.45 s once the pack has landed
    (data-focus-off, set for that while by the focus chunk). */

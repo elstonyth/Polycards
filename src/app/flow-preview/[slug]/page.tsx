@@ -2,6 +2,7 @@
 // renders inside the homepage stage and the gated /slots/<id> page.
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
+import { homePreviewOn } from '@/lib/preview-switch';
 import { getPackBySlug, getPackHighlights } from '@/lib/data/packs';
 import { loadPackPage } from '@/lib/data/pack-page';
 import {
@@ -34,12 +35,7 @@ export default async function FlowPreviewPage({
   params: Promise<{ slug: string }>;
   searchParams: Promise<{ from?: string }>;
 }) {
-  if (
-    process.env.NODE_ENV !== 'development' &&
-    process.env.HOME_PREVIEW !== '1'
-  ) {
-    notFound();
-  }
+  if (!homePreviewOn()) notFound();
   const { slug } = await params;
   const { from } = await searchParams;
   const base = await getPackBySlug(slug);

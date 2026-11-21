@@ -1021,9 +1021,10 @@ export function startSpin(host: SpinHost): SpinControl {
     const y = flowLoadStart(nav?.type, window.scrollY, rowTop(s));
     if (y !== null) window.scrollTo(0, y);
   };
-  const resume = () => {
+  /** `instant`: the entry's stop is taken with no move (the page's load). */
+  const resume = (instant = false) => {
     if (!atEntry() || !flowOn()) return;
-    void loadFocus().then((f) => f?.resume());
+    void loadFocus().then((f) => f?.resume(instant));
   };
 
   const bind = (next: StageSpinSource | null) => {
@@ -1051,7 +1052,8 @@ export function startSpin(host: SpinHost): SpinControl {
       next.panel.addEventListener('click', onTap, { capture: true });
       // a press loads the focused view ahead of its tap (when idle has not yet)
       next.panel.addEventListener('pointerdown', preload, quiet);
-      setTimeout(resume, 0);
+      // a load onto a pack's address opens on its stop, placed, not moved to
+      setTimeout(() => resume(true), 0);
       if (!live) {
         live = document.createElement('p');
         live.className = 'sr-only';

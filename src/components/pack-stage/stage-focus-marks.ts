@@ -17,3 +17,6 @@ export const fields = (st: unknown): Record<string, unknown> =>
 
 /** The path of pack `id`. */
 export const packPath = (id: string) => `/slots/${encodeURIComponent(id)}`;
+
+/** Today's pack page for pack `id` (its own links carry a count). */
+export const packPagePath = (id: string) => `${packPath(id)}?count=1`;

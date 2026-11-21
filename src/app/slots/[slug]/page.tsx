@@ -1,12 +1,11 @@
 // src/app/slots/[slug]/page.tsx
 import type { Metadata } from 'next';
-import { headers } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
-import { getPackBaseForViewer } from '@/lib/data/packs';
 import { loadPackPage } from '@/lib/data/pack-page';
-import { ProductJsonLd, shareImageMeta } from '@/lib/product-share';
-import { homePreviewOn } from '@/components/pack-flow/flow-start';
+import { ProductJsonLd } from '@/lib/product-share';
+import { homePreviewOn, packFlowAddress } from '@/lib/preview-switch';
 import PackPage from './PackPage';
+import { packMetadata } from './pack-metadata';
 
 // The /slots pack detail — configurator/Top-Hits/odds; the "Open Pack" CTA
 // launches the slot-machine reel (./spin). Backend-driven (catalog + gacha
@@ -14,31 +13,31 @@ import PackPage from './PackPage';
 // its own (base → notFound; detail → empty gacha depth; pulls → empty).
 export const dynamic = 'force-dynamic';
 
+type Query = Record<string, string | string[] | undefined>;
+
+/** The query as URL parameters (a repeated key keeps every value). */
+const paramsOf = (query: Query) => {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(query))
+    for (const one of typeof v === 'string' ? [v] : (v ?? [])) q.append(k, one);
+  return q;
+};
+
 export async function generateMetadata({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams?: Promise<Query>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  // Backend catalog (source of truth) — a backend-created pack gets a real
-  // title too, not just the baked 8. Next dedupes the fetch with the page body.
-  const base = await getPackBaseForViewer(slug);
-  if (!base) return { title: 'Pack' };
-  const { name, categoryName } = base.pack;
-  const path = `/slots/${slug}`;
-  return {
-    title: `${name} — ${categoryName}`,
-    description: `Open the ${name} from ${categoryName}: see the top hits and odds before you rip it.`,
-    // Replaces the layout's openGraph whole, so every field is restated.
-    openGraph: {
-      type: 'website',
-      siteName: 'Polycards',
-      title: name,
-      description: `${name} · ${categoryName}`,
-      url: path,
-      images: [shareImageMeta(path, name)],
-    },
-  };
+  // Preview switch only: the pack's own address is never shown (see below),
+  // so its pack is not read for a title.
+  if (homePreviewOn() && searchParams) {
+    const query = await searchParams;
+    if (packFlowAddress(slug, paramsOf(query)) !== null) return {};
+  }
+  return packMetadata(slug);
 }
 
 export default async function SlotsPackDetailPage({
@@ -46,31 +45,18 @@ export default async function SlotsPackDetailPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  searchParams: Promise<Query>;
 }) {
   const { slug } = await params;
   const query = await searchParams;
   const countRaw = typeof query.count === 'string' ? query.count : undefined;
   // Preview switch only: the pack's own address (no `count`: the pack page's
   // links always carry one) opens the home flow on that pack, which puts this
-  // address back once it has loaded. A document load replaces this document
-  // with the flow page at once (so its loader shows from its first paint); a
-  // move inside the site takes the router's own redirect.
-  if (homePreviewOn() && query.count === undefined) {
-    const q = new URLSearchParams();
-    for (const [k, v] of Object.entries(query))
-      if (typeof v === 'string' && k !== 'focus') q.set(k, v);
-    q.set('focus', slug);
-    const to = `/home-preview?${q.toString()}`;
-    if ((await headers()).get('rsc') === null)
-      return (
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `location.replace(${JSON.stringify(to)})`,
-          }}
-        />
-      );
-    redirect(to);
+  // address back once it has loaded. A document load is sent there by the
+  // proxy before anything renders; a move inside the site takes this redirect.
+  if (homePreviewOn()) {
+    const to = packFlowAddress(slug, paramsOf(query));
+    if (to) redirect(to);
   }
   const parsed = Number(countRaw);
   const count = Number.isInteger(parsed) ? Math.min(3, Math.max(1, parsed)) : 1;
