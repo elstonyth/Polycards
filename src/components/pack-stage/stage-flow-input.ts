@@ -196,6 +196,17 @@ export interface FlowInput {
   table(): FlowTable | null;
   /** The paged stops: the row, then the pack's rests. */
   stops(): readonly number[];
+  /**
+   * Where the last frame ended, on the geometry it was measured with (the
+   * scroll, the exit end, the free part's sections, the viewport), so a
+   * caller can still read the place after the browser has resized the page.
+   */
+  lastPlace(): {
+    y: number;
+    exitEnd: number;
+    sections: readonly FlowSection[];
+    viewport: number;
+  } | null;
   wheel(
     dy: number,
     dx: number,
@@ -427,6 +438,15 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
     },
     table: () => table,
     stops,
+    lastPlace: () =>
+      table && geo && lastY !== null
+        ? {
+            y: lastY,
+            exitEnd: table.exitEnd,
+            sections: geo.sections ?? [],
+            viewport: geo.viewport,
+          }
+        : null,
     wheel(dy, dx, shift, scrollY, now) {
       // sideways at the lineup: one pack per gesture
       if ((shift || Math.abs(dx) > Math.abs(dy)) && lineLive(scrollY)) {

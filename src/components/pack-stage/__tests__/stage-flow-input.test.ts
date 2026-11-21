@@ -1106,3 +1106,28 @@ describe('flow input: a re-measure in Just Pulled never lands past the footer re
     expect(y).toBe(11000);
   });
 });
+
+describe('flow input: the last place, on the geometry it was read with', () => {
+  it('is the last frame and the table and sections measured then, not a later resize', () => {
+    const p = page();
+    const sections = [{ top: 8000, height: 3000 }];
+    p.input.measure({ ...GEO, sections }, 0);
+    p.input.frame(9100, 0);
+    expect(p.input.lastPlace()).toEqual({
+      y: 9100,
+      exitEnd: 8000,
+      sections,
+      viewport: 800,
+    });
+  });
+
+  it('none before a table', () => {
+    const input = createFlowInput({
+      centreKinds: () => null,
+      focused: () => false,
+      kinds: () => [],
+      enter: () => false,
+    });
+    expect(input.lastPlace()).toBeNull();
+  });
+});

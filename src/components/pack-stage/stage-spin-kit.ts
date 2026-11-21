@@ -346,18 +346,9 @@ export function startSpin(host: SpinHost): SpinControl {
       panel,
     });
     // the flow switching off under the visitor (a phone on its side): where
-    // they were, read before the spacers go
-    const sectionsNow = () =>
-      Array.from(
-        src!.flow.querySelectorAll<HTMLElement>('[data-flow-section]'),
-      ).map((el) => {
-        const r = el.getBoundingClientRect();
-        return { top: r.top + window.scrollY, height: r.height };
-      });
-    const leaving =
-      was && !on
-        ? { y: window.scrollY, t: input.table(), on: sectionsNow() }
-        : null;
+    // they were, as the last frame read it (the resize may already have
+    // clamped the scroll)
+    const leaving = was && !on ? input.lastPlace() : null;
     if (on !== was) {
       src.flow.toggleAttribute('data-flow-on', on);
       // Return and Last take their height with the flow
@@ -366,15 +357,23 @@ export function startSpin(host: SpinHost): SpinControl {
       if (!on) clearPast(src);
       restore(on);
       // the plain page opens at the row, or at the same place in the sections
-      if (leaving?.t) {
+      if (leaving) {
         const top = headerHeight();
+        const plain = Array.from(
+          src.flow.querySelectorAll<HTMLElement>(
+            "[data-flow-section],[data-flow-spacer='return'],[data-flow-spacer='last']",
+          ),
+        ).map((el) => {
+          const r = el.getBoundingClientRect();
+          return { top: r.top + window.scrollY - top, height: r.height };
+        });
         const y = offPlace(
           leaving.y,
-          leaving.t.exitEnd,
+          leaving.exitEnd,
           rowTop(src),
-          leaving.on.map((r) => ({ ...r, top: r.top - top })),
-          sectionsNow().map((r) => ({ ...r, top: r.top - top })),
-          window.innerHeight,
+          leaving.sections,
+          plain,
+          leaving.viewport,
         );
         window.scrollTo(0, y);
       }
