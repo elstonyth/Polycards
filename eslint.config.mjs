@@ -42,6 +42,9 @@ const eslintConfig = defineConfig([
     // Playwright shoot scripts and their asset output, same local-only
     // category as the entries above.
     'videos/**',
+    // Research notes and captures (gitignored, local-only): third-party
+    // bundles and one-off tooling kept for reference, never product code.
+    'docs/research/**',
   ]),
   // The scripts/ dir is one-off Playwright capture/measure/QA tooling (see
   // CLAUDE.md "the clone workflow"), not product code. Linting it for unused
