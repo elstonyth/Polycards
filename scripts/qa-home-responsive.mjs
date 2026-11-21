@@ -276,6 +276,29 @@ const readLayout = (s) =>
         );
       if (poke.length >= 4) break;
     }
+    // controls in view that something else covers (the hit at their centre is not them)
+    const covered = [];
+    for (const el of document.querySelectorAll('a[href], button')) {
+      if (!shown(el) || el.closest('[aria-hidden="true"]')) continue;
+      const b = el.getBoundingClientRect();
+      if (
+        b.width < 8 ||
+        b.height < 8 ||
+        b.top < top ||
+        b.bottom > bottom ||
+        b.left < 0 ||
+        b.right > vw
+      )
+        continue;
+      if (getComputedStyle(el).pointerEvents === 'none') continue;
+      const hit = document.elementFromPoint(
+        b.left + b.width / 2,
+        b.top + b.height / 2,
+      );
+      if (hit && !el.contains(hit) && !hit.contains(el))
+        covered.push(name(el) + ' under ' + name(hit));
+      if (covered.length >= 4) break;
+    }
     // touch: small tap targets and small text in view
     const small = [];
     for (const el of document.querySelectorAll(
@@ -349,6 +372,7 @@ const readLayout = (s) =>
       parts,
       cut,
       poke,
+      covered,
       small: small.slice(0, 6),
       tiny,
       docW: document.documentElement.scrollWidth,
@@ -414,6 +438,11 @@ async function checkRest(s, key, touch, r, label) {
     'no-sideways-scroll ' + tag,
     l.docW <= l.vw + 1 && l.bodyW <= l.vw + 1 && l.sx === 0,
     'doc ' + l.docW + ' body ' + l.bodyW + ' view ' + l.vw + ' scrollX ' + l.sx,
+  );
+  qa.check(
+    'controls-not-covered ' + tag,
+    l.covered.length === 0,
+    l.covered.join(' | ') || 'none',
   );
   qa.check(
     'nothing-pokes-out ' + tag,
