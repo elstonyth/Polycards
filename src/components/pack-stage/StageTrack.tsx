@@ -27,7 +27,12 @@ import type { StagePack } from './contract';
 import { useStage3d } from './Stage3dProvider';
 import { SLEEVE_TILE } from './stage-capsule-lean';
 import { spinKit } from './stage-spin-load';
-import { SPIN_LOCK, STAGE_REACH, restState } from './stage-pose';
+import {
+  SPIN_LOCK,
+  STAGE_REACH,
+  rowPaintState,
+  rowPosedByKit,
+} from './stage-pose';
 import { stageStartIndex } from './stage-filter';
 import StageTile, { tileVars } from './StageTile';
 import styles from './pack-stage.module.css';
@@ -174,26 +179,27 @@ export default function StageTrack({
     const row = rowRef.current;
     if (!row) return;
     const t = track.get();
-    const state = {
-      ...restState(t),
-      intro: values.intro.get(),
-      swap: values.swap.get(),
-      pointerX: values.pointerX.get(),
-      pointerY: values.pointerY.get(),
-      spin: values.spin.get(),
-      exit: values.exit.get(),
-      // the focused view's own values: a repaint mid-focus keeps its poses
-      focus: live.focus,
-      turn: live.turn,
-      focusOn: live.focusOn,
-    };
+    // the focused view's and the lap's own values: a repaint mid-focus or in
+    // the lap (the track still easing after Tab walked the row) keeps their poses
+    const state = rowPaintState(
+      t,
+      {
+        intro: values.intro.get(),
+        swap: values.swap.get(),
+        pointerX: values.pointerX.get(),
+        pointerY: values.pointerY.get(),
+        spin: values.spin.get(),
+        exit: values.exit.get(),
+      },
+      live,
+    );
     row.style.setProperty('--track', String(Math.round(t * 10000) / 10000));
     // The spin row (the packshot lineup) and the focused view are posed by the
     // lazily loaded chunk: the same pose the canvas draws, so a tile without
     // a 3D pack stands in place. At rest (or before the chunk) the plain carousel's.
     const host = hostRef.current;
     if (
-      (state.spin > 0 || state.exit > 0 || state.focus > 0) &&
+      rowPosedByKit(state) &&
       host &&
       spinKit()?.paintTiles(row, host, packs, state, cyArtRef.current)
     )

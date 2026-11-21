@@ -12,7 +12,8 @@ import { CAPSULE_LIMITS, SLEEVE_TILE } from '../stage-capsule-lean';
 import { FOCUS_TERM } from '../stage-compose';
 import { focusKeys } from '../stage-focus-keys';
 import { rowTilePacks, tilePose, tileSpinCtx } from '../stage-row-tiles';
-import { poseAt, restState } from '../stage-pose';
+import { composeOpacity } from '../stage-pose-compose';
+import { poseAt, restState, rowPaintState, rowPosedByKit } from '../stage-pose';
 import { LEAN } from '../stage-spin-math';
 import { lineupCopies } from '../stage-spin';
 
@@ -194,5 +195,61 @@ describe('tilePose: a capsule tile keeps the lean limits', () => {
         );
       }
     }
+  });
+});
+
+describe('a row repaint under the lap', () => {
+  // Tab walks the row tile by tile, so its track is still easing to the
+  // centred pack when a jump lands the page in the rise with a pack focused
+  // on its last stop: each eased frame repaints the tiles from the row.
+  const { desktop, l, panel } = SIZES[1]!;
+  const keys = focusKeys('gold-pack', desktop, 'sleeve');
+  const focusCtx: FocusCtx = {
+    index: 2,
+    anchorY: panel.anchorY,
+    keys,
+    panel: { w: panel.w, h: panel.h },
+    fit: 1,
+  };
+  const live: StageState = {
+    ...restState(4),
+    focus: keys.length,
+    focusOn: {
+      id: 'gold-pack',
+      ctx: focusCtx,
+      term: FOCUS_TERM,
+      spot: () => ({ on: 0, rect: { x0: 0, y0: 0, x1: 1, y1: 1 } }),
+      details: null,
+    },
+    lap: { rise: 0.166, ret: 0, free: false, trim: false },
+  };
+  const values = {
+    intro: 1,
+    swap: 0,
+    pointerX: 0,
+    pointerY: 0,
+    spin: 0,
+    exit: 0,
+  };
+
+  it('keeps the lap, so the focused pack is not drawn in its stop pose', () => {
+    const s = rowPaintState(3.996, values, live);
+    expect(s.lap).toEqual(live.lap);
+    expect(rowPosedByKit(s)).toBe(true);
+    const sleeve = { soldOut: false, ticket: false };
+    const ctx = tileSpinCtx(N, sleeve, 0, panel);
+    ctx.focus = focusCtx;
+    ctx.focusTerm = FOCUS_TERM;
+    // the focused pack (2) is not the one the lap raises (round(track) = 4)
+    expect(composeOpacity(s, 2, desktop, N, ctx)).toBe(0);
+    expect(tilePose(s, 4, l, desktop, sleeve, ctx)).toEqual(
+      tilePose({ ...live, track: 3.996 }, 4, l, desktop, sleeve, ctx),
+    );
+  });
+
+  it('poses the row with the kit in the lap alone (no focus, no lineup)', () => {
+    const s = rowPaintState(4, values, { ...restState(0), lap: live.lap });
+    expect(rowPosedByKit(s)).toBe(true);
+    expect(rowPosedByKit(rowPaintState(4, values, restState(0)))).toBe(false);
   });
 });

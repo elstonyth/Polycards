@@ -290,3 +290,39 @@ export function restState(track = 0): StageState {
     exit: 0,
   };
 }
+
+/** The shared values the row reads each frame (the provider's motion values). */
+export type RowValues = {
+  intro: number;
+  swap: number;
+  pointerX: number;
+  pointerY: number;
+  spin: number;
+  exit: number;
+};
+
+/**
+ * The state the row paints its tiles with on a frame of its own (its track
+ * easing, a shared value changing): the track and the shared values, with
+ * the engine's focused view and lap as they stand, so a repaint mid-focus or
+ * in the lap draws what the canvas draws.
+ */
+export function rowPaintState(
+  track: number,
+  values: Readonly<RowValues>,
+  live: Readonly<StageState>,
+): StageState {
+  return {
+    ...restState(track),
+    ...values,
+    focus: live.focus,
+    turn: live.turn,
+    focusOn: live.focusOn,
+    lap: live.lap ?? null,
+  };
+}
+
+/** The spin kit poses the tiles (the lineup, the focused view, the lap); otherwise the plain carousel. */
+export function rowPosedByKit(s: Readonly<StageState>): boolean {
+  return s.spin > 0 || s.exit > 0 || s.focus > 0 || !!s.lap;
+}
