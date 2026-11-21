@@ -17,6 +17,8 @@ import {
 } from 'react';
 import {
   animate,
+  cancelFrame,
+  frame,
   observable,
   type AnimationControls,
   type Observable,
@@ -225,17 +227,22 @@ export default function StageTrack({
   // before the rise's first frame.
   useLayoutEffect(() => {
     if (!active) return;
+    // one paint per frame, however many values changed (frame.render dedupes)
+    const queue = () => frame.render(paint);
     const offs = [
-      track.on('change', paint),
-      values.intro.on('change', paint),
-      values.swap.on('change', paint),
-      values.pointerX.on('change', paint),
-      values.pointerY.on('change', paint),
-      values.spin.on('change', paint),
-      values.exit.on('change', paint),
+      track.on('change', queue),
+      values.intro.on('change', queue),
+      values.swap.on('change', queue),
+      values.pointerX.on('change', queue),
+      values.pointerY.on('change', queue),
+      values.spin.on('change', queue),
+      values.exit.on('change', queue),
     ];
     paint();
-    return () => offs.forEach((off) => off());
+    return () => {
+      offs.forEach((off) => off());
+      cancelFrame(paint);
+    };
   }, [active, track, values, paint]);
 
   const go = useCallback(

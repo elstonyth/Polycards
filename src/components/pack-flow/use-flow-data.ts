@@ -4,7 +4,7 @@ import { useMemo } from 'react';
 import { usePackLive } from '@/app/slots/[slug]/use-pack-live';
 import type { RecentFeed } from '@/lib/data/packs';
 import { pullOddsOf, type PackTiers } from '@/lib/pack-tiers';
-import { backFor, backKey, canTurn, withLive } from './flow-back';
+import { backFor, backKey, withLive } from './flow-back';
 import type { FlowData, FlowPullOdds, FlowSeed } from './types';
 
 const EMPTY_FEED: RecentFeed = { pulls: [], drought: {} };
@@ -48,14 +48,10 @@ export function useFlowData(
     const back = backFor(seed.pack, pullOdds, live);
     return {
       pack,
-      shape: seed.shape,
       tiers,
-      live,
       recentPulls: seed.recentPulls ?? EMPTY_FEED,
-      pullOdds,
       back,
       backKey: backKey(back),
-      turns: canTurn({ shape: seed.shape }, back),
     };
   }, [seed, tiers, live]);
 }

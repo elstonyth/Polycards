@@ -59,7 +59,7 @@ export type FocusStopsProps = {
   leaving?: boolean;
   /** Phone (under 1024 px): the dock holds the buy controls. */
   desktop: boolean;
-  /** Pull rows shown in Recent Pulls (desktop 8, phone 5). */
+  /** Open hands the reel address here instead of navigating (usePackBuy). */
   onGoToReel?: (href: string) => void;
 };
 
@@ -172,8 +172,10 @@ export function FocusStops({
   const progressRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!stage || !subscribe) return;
+    let last = 0;
     return subscribe((f) => {
-      setBlock(blockOf(f, n));
+      setBlock(blockOf(f, n, f < last));
+      last = f;
       if (f >= 1 - 1e-3 && Math.abs(f - Math.round(f)) < 1e-3) setArmed(true);
       const p = n > 1 ? Math.min(1, Math.max(0, (f - 1) / (n - 1))) : 1;
       progressRef.current?.style.setProperty('--p', String(f < 1 ? 0 : p));
@@ -474,5 +476,3 @@ export function FocusStops({
     </div>
   );
 }
-
-export { blockOf, topHitsOf } from './focus-stops-data';

@@ -40,9 +40,14 @@ import {
   focusStops,
   type FocusVariant,
 } from './stage-focus-keys';
-import { createFocusAddress, type FocusEntryKind } from './stage-focus-address';
+import {
+  SLOT_PATH,
+  createFocusAddress,
+  type FocusEntryKind,
+} from './stage-focus-address';
 import { readFocusSeeds } from './stage-focus-seeds';
 import { STAGE_DESKTOP_QUERY } from './stage-gate';
+import { frame } from './stage-motion';
 import { entryPlaced, pendingEntry } from './stage-entry-cover';
 
 export { FOCUS_DURATIONS, FOCUS_WINDOW } from './stage-focus-keys';
@@ -216,8 +221,12 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
   const subs = new Set<(f: number) => void>();
   let lastF = -1;
   const offs: (() => void)[] = [];
-  /** ?debug=1: [time, scrollY, focus] per frame, and move starts. */
-  const trace: number[][] = [];
+  /** ?debug=1 only: [time, scrollY, focus] per frame, and move starts. */
+  const trace: number[][] | null = (
+    window as unknown as { __packStage?: unknown }
+  ).__packStage
+    ? []
+    : null;
   const now = () => performance.now();
 
   /** `mount`: the first render of a focus, as a transition (below). */
@@ -324,7 +333,7 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
   };
   const resumeEntry = (instant = false): boolean => {
     const mark = addr.resumable();
-    const m = /^\/slots\/([^/]+)\/?$/.exec(window.location.pathname);
+    const m = SLOT_PATH.exec(window.location.pathname);
     if (on || mark === null || !m?.[1]) return false;
     const id = decodeURIComponent(m[1]);
     const tile = d.src.panel.querySelector<HTMLElement>(
@@ -348,9 +357,7 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
     return tile && id && s ? { tile, id, s } : null;
   };
   const kindsOf = (s: FlowSeed): FocusStopKind[] =>
-    focusStops(
-      focusVariant({ capsule: s.shape === 'capsule', back: s.back }),
-    ) as FocusStopKind[];
+    focusStops(focusVariant({ capsule: s.shape === 'capsule', back: s.back }));
   /**
    * The declaration for the pack at `index`: its keys, stops, variant and
    * back, and the docked pack's edges for the blocks beside it. `anchorY`:
@@ -436,7 +443,7 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       );
       // the row's motion values repaint the tiles; the focus repaints after
       for (const v of Object.values(d.values))
-        offs.push(v.on('change', () => requestAnimationFrame(d.paint)));
+        offs.push(v.on('change', () => frame.render(d.paint)));
       render(true);
       // Forward or Back to an entry: the stop it rested on
       let at = 1;
@@ -452,7 +459,7 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       // which lets go once the pack rests on that stop
       entryCover = pendingEntry() !== null;
       if (page) d.go(at, o.instant ? { ms: 1 } : undefined);
-      trace.push([now(), -1, 1]);
+      trace?.push([now(), -1, 1]);
       d.loop();
       return true;
     },
@@ -530,7 +537,7 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       // the address: the pack's while in the details, the base path past them
       past = !!f.past;
       if (!leaving) addr.show(!past);
-      if (trace.push([t, window.scrollY, f.focus]) > 4000)
+      if (trace && trace.push([t, window.scrollY, f.focus]) > 4000)
         trace.splice(0, 2000);
       if (f.focus !== lastF) {
         lastF = f.focus;

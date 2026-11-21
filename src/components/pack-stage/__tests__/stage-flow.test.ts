@@ -1,7 +1,10 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { focusStops } from '../stage-focus-keys';
 import {
+  FLOW_DETAIL_SLOTS,
   FLOW_SECTION_PANELS,
   RISE_START_VIEWPORT,
   WRAP_GUARD_MS,
@@ -697,5 +700,21 @@ describe('stage flow: when the lap state changes (the free-span trim)', () => {
     const later = lapAt(at, { rise: 0, ret: 0 }, true);
     expect(later?.trim).toBe(true);
     expect(sameLap(first, later)).toBe(false);
+  });
+});
+
+describe('the detail band is written once', () => {
+  it('the CSS band spacer is FLOW_DETAIL_SLOTS sections of FLOW_SECTION_PANELS panels', () => {
+    const css = readFileSync(
+      join(process.cwd(), 'src/components/pack-flow/home-flow.module.css'),
+      'utf8',
+    );
+    const band =
+      /\[data-flow-spacer='band'\]\s*\{\s*height:\s*calc\(var\(--panel\)\s*\*\s*([\d.]+)\s*\*\s*(\d+)\)/.exec(
+        css,
+      );
+    expect(band).not.toBeNull();
+    expect(Number(band?.[1])).toBe(FLOW_SECTION_PANELS);
+    expect(Number(band?.[2])).toBe(FLOW_DETAIL_SLOTS);
   });
 });

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  liveCount,
   nextStack,
   refillStack,
   settleStack,
@@ -9,12 +8,14 @@ import {
   tabsBehind,
   DRAWER_GEOMETRY,
   DRAWER_TABS,
-  drawerHeight,
   emptyLine,
   feedRarity,
   showsChart,
 } from '../drawer-model';
 
+/** Cards drawn at all: the front card, its tabs, and one leaving. */
+const liveCount = (cards: ReturnType<typeof stackCards>, behind: number) =>
+  cards.filter((c) => c.leave || c.d <= behind).length;
 const feed = (...ids: string[]) => ids.map((id) => ({ id }));
 const twelve = feed('a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l');
 const front = (cards: ReturnType<typeof stackCards>) =>
@@ -219,9 +220,7 @@ describe('the tier tabs and Stats', () => {
 });
 
 describe('the drawer box', () => {
-  it('is one card plus its tabs tall, whatever the feed holds', () => {
-    expect(drawerHeight(DRAWER_GEOMETRY.phone)).toBe(212 + 2 * 38);
-    expect(drawerHeight(DRAWER_GEOMETRY.desktop)).toBe(316 + 3 * 50);
+  it('shows as many tabs as the stack keeps behind the front', () => {
     expect(DRAWER_GEOMETRY.phone.behind).toBe(tabsBehind(false));
     expect(DRAWER_GEOMETRY.desktop.behind).toBe(tabsBehind(true));
   });

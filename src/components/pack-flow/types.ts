@@ -2,14 +2,11 @@
  * Types of the homepage flow's groundwork.
  * Types that already exist are imported; these are the ones that did not.
  *
- * The stage's own contract (`src/components/pack-stage/contract.ts`, WP-D)
- * will carry `StageStop` / `StageScrollSource` / `StagePack.shape`; until it
- * does, the flow declares the same shapes here so it never imports pack-stage.
- * They are structurally identical, so the integration passes one for the other.
+ * The flow declares its own shapes here so it never imports pack-stage.
  */
 import type { ResolvedPack } from '@/lib/packs-data';
 import type { PackPullOdds, RecentFeed } from '@/lib/data/packs';
-import type { PackLive, PackTiers } from '@/lib/pack-tiers';
+import type { PackTiers } from '@/lib/pack-tiers';
 import type { PackBackDetails } from '@/components/pack-3d/pack-print';
 
 /** The staff-entered pull odds, per tier in percent (`getPackHighlights`'s
@@ -18,10 +15,6 @@ export type FlowPullOdds = PackPullOdds;
 
 /** 'sleeve' for a card pack, 'capsule' for a ticket capsule (isTicketPack). */
 export type FlowPackShape = 'sleeve' | 'capsule';
-
-/** The part of a stage pack `canTurn` reads (the contract's
- *  `StagePack.shape` once WP-D adds it). */
-export type FlowShaped = { shape: FlowPackShape };
 
 /**
  * The data one focused pack needs before anything is fetched.
@@ -48,16 +41,11 @@ export type FlowSeed = {
 export type FlowData = {
   /** The pack, with the polled price / buyback / stock applied. */
   pack: ResolvedPack;
-  shape: FlowPackShape;
   tiers: PackTiers | null;
-  live: PackLive | null;
   recentPulls: RecentFeed;
-  pullOdds: FlowPullOdds | null;
   back: PackBackDetails | null;
   /** Changes exactly when the back's printed text changes (reprint trigger). */
   backKey: string;
-  /** canTurn(pack, back): false for a capsule or a pack without pull odds. */
-  turns: boolean;
 };
 
 /** Where the address says the flow is (see flow-address). */

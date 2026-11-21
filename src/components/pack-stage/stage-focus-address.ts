@@ -83,7 +83,8 @@ export type FocusAddress = {
  */
 export const FOCUS_STEP_MS = 1000;
 
-const SLOT_PATH = /^\/slots\/([^/]+)\/?$/;
+/** A pack's own address, `/slots/<id>`: the id is group 1. */
+export const SLOT_PATH = /^\/slots\/([^/]+)\/?$/;
 
 export function createFocusAddress(
   h: FocusHistory,

@@ -41,6 +41,9 @@ export type LivePollOptions<T> = {
    *  does, instead of downloading at once what the caller was just handed.
    *  `pending` stays true until that tick, so the caller renders `initial`. */
   seedFollowsKey?: boolean;
+  /** A failure before anything has landed in this run is tried once more
+   *  after this long, instead of waiting for the interval. Omit: no retry. */
+  retryMs?: number;
   /** Injected by tests; defaults to fetch → json, `null` on a non-2xx. */
   fetchJson?: (url: string) => Promise<unknown>;
 };
@@ -76,6 +79,7 @@ export function useLivePoll<T>(
     accept,
     firstTickMs = 0,
     seedFollowsKey = false,
+    retryMs,
     fetchJson,
   }: LivePollOptions<T>,
 ): LivePoll<T> {
@@ -105,13 +109,20 @@ export function useLivePoll<T>(
   useEffect(() => {
     if (!url) return;
     let active = true;
+    let landed = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+    const failed = () => {
+      if (!active || landed || retryMs === undefined || retry) return;
+      retry = setTimeout(tick, retryMs);
+    };
     const tick = async () => {
       // Hidden/background tabs would poll forever otherwise.
       if (document.visibilityState !== 'visible') return;
       const rev = ++revRef.current;
       try {
         const payload = await (fetchRef.current ?? fetchJsonDefault)(url);
-        if (!active || rev !== revRef.current || payload == null) return;
+        if (!active || rev !== revRef.current) return;
+        if (payload == null) return failed();
         const next = acceptRef.current
           ? await acceptRef.current(
               payload,
@@ -119,13 +130,16 @@ export function useLivePoll<T>(
               shownRef.current !== resetKey,
             )
           : (payload as T);
-        if (!active || rev !== revRef.current || next === null) return;
+        if (!active || rev !== revRef.current) return;
+        if (next === null) return failed();
+        landed = true;
         dataRef.current = next;
         shownRef.current = resetKey;
         setData(next);
         setShownKey(resetKey);
       } catch {
         // keep the last good data on a transient failure
+        if (rev === revRef.current) failed();
       }
     };
     // Swap in live data, then keep polling.
@@ -144,10 +158,11 @@ export function useLivePoll<T>(
     return () => {
       active = false;
       clearTimeout(first);
+      clearTimeout(retry);
       clearInterval(id);
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [url, resetKey, intervalMs]);
+  }, [url, resetKey, intervalMs, retryMs]);
 
   return { data, pending: shownKey !== resetKey, shownKey };
 }

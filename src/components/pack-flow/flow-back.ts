@@ -16,7 +16,7 @@ import { isTicketPack, type Pack, type ResolvedPack } from '@/lib/packs-data';
 import type { PackLive } from '@/lib/pack-tiers';
 import { packBackDetails } from '@/components/pack-3d/pack-back-details';
 import type { PackBackDetails } from '@/components/pack-3d/pack-print';
-import type { FlowPackShape, FlowPullOdds, FlowShaped } from './types';
+import type { FlowPackShape, FlowPullOdds } from './types';
 
 /** 'capsule' for a ticket capsule, 'sleeve' for a card pack. */
 export const shapeOf = (pack: Pick<Pack, 'prizeType'>): FlowPackShape =>
@@ -71,15 +71,3 @@ export const backKey = (back: PackBackDetails | null): string =>
         back.buyback?.headline ?? null,
         back.buyback?.rule ?? null,
       ]);
-
-/**
- * Whether the focused pack turns to its back (the stage's one switch): never
- * for a capsule (checked first), otherwise only with a printable back.
- */
-export function canTurn(
-  pack: FlowShaped,
-  details: PackBackDetails | null,
-): boolean {
-  if (pack.shape === 'capsule') return false;
-  return details !== null && details.odds !== null;
-}

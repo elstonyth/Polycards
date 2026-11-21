@@ -57,4 +57,12 @@ describe('the block shown', () => {
     expect(blockOf(2.2, 6)).toBe(3);
     expect(blockOf(6, 6)).toBe(6);
   });
+
+  it('moving up, switches 20% into the move too', () => {
+    expect(blockOf(2.81, 6, true)).toBe(3);
+    expect(blockOf(2.79, 6, true)).toBe(2);
+    expect(blockOf(0.81, 6, true)).toBe(1);
+    expect(blockOf(0.79, 6, true)).toBe(0);
+    expect(blockOf(2, 6, true)).toBe(2);
+  });
 });

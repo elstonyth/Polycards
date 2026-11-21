@@ -58,6 +58,7 @@ import {
   panelState,
 } from './stage-flow-gate';
 import { placeInstantly } from './stage-entry-cover';
+import { SLOT_PATH } from './stage-focus-address';
 
 /**
  * The measured stage a CSS row is projected into (host px; the art box is
@@ -969,7 +970,7 @@ export function startSpin(host: SpinHost): SpinControl {
   const atEntry = () => {
     const st: unknown = window.history.state;
     return (
-      /^\/slots\/[^/]+\/?$/.test(window.location.pathname) &&
+      SLOT_PATH.test(window.location.pathname) &&
       !!st &&
       typeof st === 'object' &&
       '__flow' in st
@@ -1109,9 +1110,10 @@ export function startSpin(host: SpinHost): SpinControl {
       clearTimeout(idleLoad);
       if (wrapFade !== null) window.clearTimeout(wrapFade);
       fload.stop();
+      // the page first: the focus's end must not measure a page that has left
+      bind(null);
       focus?.stop();
       window.removeEventListener('keydown', onKey);
-      bind(null);
       stopLoop();
       window.removeEventListener('wheel', onWheel);
       window.removeEventListener('pointerdown', onPointerDown);

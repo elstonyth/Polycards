@@ -19,7 +19,8 @@
   height: calc(var(--panel) * 1.25);
 }
 
-/* The detail band: six sections, Front to Closing, for every variant. */
+/* The detail band: six sections, Front to Closing, for every variant
+   (FLOW_DETAIL_SLOTS in stage-flow.ts; stage-flow.test.ts keeps them equal). */
 :global([data-home-flow][data-flow-on]) .spacer[data-flow-spacer='band'] {
   height: calc(var(--panel) * 1.25 * 6);
 }

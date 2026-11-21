@@ -44,15 +44,6 @@ export const DRAWER_GEOMETRY = {
   desktop: { cardH: 316, tabH: 50, behind: 3 },
 } as const;
 
-/** The box's fixed height: a pull arriving never changes it. */
-export function drawerHeight(g: {
-  cardH: number;
-  tabH: number;
-  behind: number;
-}) {
-  return g.cardH + g.behind * g.tabH;
-}
-
 /** Tabs shown behind the front card: 2 on a phone, 3 on desktop. */
 export function tabsBehind(desktop: boolean): number {
   return desktop ? 3 : 2;
@@ -166,9 +157,4 @@ export function stackCards<T extends { id: string }>(
   if (stack.leaving && !stack.items.some((i) => i.id === leaveId))
     cards.push({ item: stack.leaving, d: behind, arrive: false, leave: true });
   return cards;
-}
-
-/** Cards drawn at all: the front card, its tabs, and one leaving. */
-export function liveCount<T>(cards: readonly StackCard<T>[], behind: number) {
-  return cards.filter((c) => c.leave || c.d <= behind).length;
 }

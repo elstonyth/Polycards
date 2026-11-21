@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ticketCard, type ResolvedPack } from '@/lib/packs-data';
 import { BUYBACK_RULE } from '@/components/pack-3d/pack-back-details';
-import { backFor, backKey, canTurn, shapeOf, withLive } from '../flow-back';
+import { backFor, backKey, shapeOf, withLive } from '../flow-back';
 import { flowSeed, flowSeedFromHighlights } from '../flow-seed';
 import type { PackPageData } from '@/lib/data/pack-page';
 
@@ -60,18 +60,7 @@ describe('backFor', () => {
   });
 });
 
-describe('canTurn', () => {
-  it('a capsule never turns, even with odds (checked first)', () => {
-    // A capsule-shaped pack handed a printable back still stays on its front.
-    expect(canTurn({ shape: 'capsule' }, backFor(GOLD, ODDS))).toBe(false);
-  });
-
-  it('a card pack turns only with a printable back', () => {
-    expect(canTurn({ shape: 'sleeve' }, backFor(GOLD, ODDS))).toBe(true);
-    expect(canTurn({ shape: 'sleeve' }, backFor(GOLD, null))).toBe(false);
-    expect(canTurn({ shape: 'sleeve' }, null)).toBe(false);
-  });
-
+describe('shapeOf', () => {
   it('shapes come from the prize type', () => {
     expect(shapeOf(GOLD)).toBe('sleeve');
     expect(shapeOf(CAPSULE)).toBe('capsule');

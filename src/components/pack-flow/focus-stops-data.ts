@@ -6,9 +6,9 @@ import { type PackCard } from '@/lib/packs-data';
 import { ticketTopHits } from '@/lib/packs-format';
 import type { FlowData } from './types';
 
-/** The block shown at focus F: switches 20% into a move, either way. */
-export const blockOf = (f: number, n: number) =>
-  Math.min(n, Math.max(0, Math.floor(f + 0.8)));
+/** The block shown at focus F: switches 20% into a move, either way (`falling`: F is moving up the stops). */
+export const blockOf = (f: number, n: number, falling = false) =>
+  Math.min(n, Math.max(0, falling ? Math.ceil(f - 0.8) : Math.floor(f + 0.8)));
 
 /** Top Hits: the top tiers' cards in one row, most valuable first (the pack page's order). */
 export function topHitsOf(data: Pick<FlowData, 'tiers'>, tickets: boolean) {

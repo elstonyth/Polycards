@@ -29,6 +29,75 @@ afterEach(() => {
 });
 
 describe('useLivePoll', () => {
+  it('retryMs: a first fetch that fails is tried once more after retryMs', async () => {
+    const fetchJson = vi
+      .fn<(url: string) => Promise<unknown>>()
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValue({ n: 1 });
+    const h = renderHook(
+      () =>
+        useLivePoll<{ n: number } | null>('/api/x', null, {
+          intervalMs: 60_000,
+          retryMs: 5000,
+          fetchJson,
+        }),
+      {},
+    );
+    await flush();
+    expect(fetchJson).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    await flush();
+    expect(fetchJson).toHaveBeenCalledTimes(2);
+    expect(h.current.data).toEqual({ n: 1 });
+    h.unmount();
+  });
+
+  it('retryMs: no retry once data has landed, and none without the option', async () => {
+    const landed = vi
+      .fn<(url: string) => Promise<unknown>>()
+      .mockResolvedValueOnce({ n: 1 })
+      .mockRejectedValue(new Error('offline'));
+    const a = renderHook(
+      () =>
+        useLivePoll<{ n: number } | null>('/api/x', null, {
+          intervalMs: 1000,
+          retryMs: 300,
+          fetchJson: landed,
+        }),
+      {},
+    );
+    await flush();
+    await act(async () => {
+      vi.advanceTimersByTime(1000); // the interval tick fails
+    });
+    await flush();
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(landed).toHaveBeenCalledTimes(2);
+    a.unmount();
+
+    const plain = vi.fn(async () => {
+      throw new Error('offline');
+    });
+    const b = renderHook(
+      () =>
+        useLivePoll<{ n: number } | null>('/api/x', null, {
+          intervalMs: 60_000,
+          fetchJson: plain,
+        }),
+      {},
+    );
+    await flush();
+    await act(async () => {
+      vi.advanceTimersByTime(5000);
+    });
+    expect(plain).toHaveBeenCalledTimes(1);
+    b.unmount();
+  });
+
   it('fetches immediately on mount, then once per interval while visible', async () => {
     const fetchJson = vi.fn(async () => ({ n: 1 }));
     const h = renderHook(
