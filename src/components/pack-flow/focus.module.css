@@ -337,6 +337,18 @@
 }
 
 @media (min-width: 1024px) and (max-height: 700px) {
+  /* centred blocks taller than the short panel would run up under "All
+     packs": they start below it instead */
+  .over .block[data-kind='front'],
+  .over .block[data-kind='pulls'] {
+    top: 4.25rem;
+    transform: none;
+  }
+
+  .over .block[data-kind='pulls'] .pulls {
+    max-height: calc(100vh - 15rem);
+  }
+
   .over .block[data-kind='odds'] .board {
     width: 172%;
     transform: scale(0.58);
