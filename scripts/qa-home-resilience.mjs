@@ -98,13 +98,18 @@ const browser =
     ? await webkit.launch()
     : await chromium.launch({
         channel: 'chrome',
-        // RENDERER=software: SwiftShader; default: the GPU (d3d11)
+        // QA_GL=swiftshader (or the older RENDERER=software): SwiftShader;
+        // default: the graphics card (d3d11)
         args: [
           '--mute-audio',
           '--disable-smooth-scrolling',
-          ...(process.env.RENDERER === 'software'
+          ...(process.env.QA_GL === 'swiftshader' ||
+          process.env.RENDERER === 'software'
             ? ['--enable-unsafe-swiftshader', '--use-angle=swiftshader']
             : ['--use-angle=d3d11', '--enable-gpu']),
+          ...(process.env.QA_NETLOG
+            ? ['--log-net-log=' + process.env.QA_NETLOG]
+            : []),
           '--ignore-gpu-blocklist',
         ],
       });
@@ -1376,7 +1381,11 @@ console.log(
   'summary (' +
     ENGINE +
     (ENGINE === 'chromium'
-      ? ', ' + (process.env.RENDERER === 'software' ? 'software' : 'gpu')
+      ? ', ' +
+        (process.env.QA_GL === 'swiftshader' ||
+        process.env.RENDERER === 'software'
+          ? 'software'
+          : 'gpu')
       : '') +
     '): ' +
     results.length +

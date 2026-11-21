@@ -990,8 +990,12 @@ browser = await chromium.launch({
   args: [
     '--mute-audio',
     '--disable-smooth-scrolling',
-    '--enable-unsafe-swiftshader',
-    '--use-angle=swiftshader',
+    ...(process.env.QA_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--use-angle=swiftshader']
+      : ['--use-angle=d3d11', '--enable-gpu']),
+    ...(process.env.QA_NETLOG
+      ? ['--log-net-log=' + process.env.QA_NETLOG]
+      : []),
     '--ignore-gpu-blocklist',
   ],
 });

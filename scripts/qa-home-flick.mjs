@@ -12,7 +12,7 @@
 // is three moves of 150 px (about 27 to 40 px per 60 Hz frame).
 // Run from a worktree root, through the queue (timing: exclusive):
 //   node <tools>/qa-with-lock.mjs --exclusive --runner=<lane> -- node scripts/qa-home-flick.mjs --base=URL
-import * as qa from 'file:///C:/Users/PC/Desktop/Projects/Polycards/.claude/build-kit/qa-kit.mjs';
+import * as qa from './lib/qa-kit.mjs';
 
 const { stage, check, info } = qa;
 qa.deadline(170000);

@@ -117,8 +117,12 @@ const browser = await chromium.launch({
   args: [
     '--mute-audio',
     '--disable-smooth-scrolling',
-    '--enable-unsafe-swiftshader',
-    '--use-angle=swiftshader',
+    ...(process.env.QA_GL === 'swiftshader'
+      ? ['--enable-unsafe-swiftshader', '--use-angle=swiftshader']
+      : ['--use-angle=d3d11', '--enable-gpu']),
+    ...(process.env.QA_NETLOG
+      ? ['--log-net-log=' + process.env.QA_NETLOG]
+      : []),
     '--ignore-gpu-blocklist',
   ],
 });
@@ -2281,8 +2285,49 @@ for (const size of sizes) {
     await hideUi();
     await page.waitForTimeout(100);
     const pngA = await page.screenshot({ clip });
-    await page.evaluate((v) => window.scrollTo(0, v), t2.lastTop + 20);
-    await page.waitForTimeout(40);
+    // The seam itself: the last frame drawn before the scroll crosses Last's
+    // top and the first frame posed after it, read in the page around that one
+    // scroll. Packs idle-bob between any two frames, so the two readings must
+    // be close in time for the pose tolerances to mean "no jump"; comparing
+    // with a reading taken before the screenshot let the bob drift by however
+    // long the screenshot took, which is longer on software rendering.
+    const seam = await page.evaluate(async (target) => {
+      const ps = window.__packStage;
+      const frame = () => new Promise((r) => requestAnimationFrame(r));
+      const read = () =>
+        (ps.runtime?.()?.drawn ?? []).filter((d) => d.opacity > 0);
+      const r3 = (v) => Math.round(v * 1000) / 1000;
+      const poses = (ds) =>
+        ds.map((d) => ({
+          id: d.id,
+          x: r3(d.x),
+          y: r3(d.y),
+          z: r3(d.z),
+          s: r3(d.scale),
+        }));
+      await frame();
+      await frame();
+      const b = read();
+      const t = performance.now();
+      window.scrollTo(0, target);
+      let a = read();
+      while ((a.length === 0 || a[0].at <= t) && performance.now() - t < 2000) {
+        await frame();
+        a = read();
+      }
+      return {
+        before: { drawn: poses(b) },
+        after: { drawn: poses(a) },
+        beforeAt: b[0]?.at ?? null,
+        afterAt: a[0]?.at ?? null,
+        scrolledAt: t,
+      };
+    }, t2.lastTop + 20);
+    /** The two seam frames' pose times apart, ms (null: a frame is missing). */
+    const seamGap =
+      seam.beforeAt !== null && seam.afterAt !== null
+        ? Math.round(seam.afterAt - seam.beforeAt)
+        : null;
     const after = await lapState();
     // the row at R0 once the lock has landed
     await page.waitForTimeout(1500);
@@ -2312,6 +2357,8 @@ for (const size of sizes) {
     const fs = await import('node:fs');
     fs.writeFileSync(`${OUT}/${size}-seam-before.png`, pngA);
     fs.writeFileSync(`${OUT}/${size}-seam-after.png`, pngB);
+    /** The seam frames may be at most this far apart: the idle bob moves about 0.001 per frame. */
+    const SEAM_GAP_MS = 250;
     /** The same packs, each within 2% of its offset and 0.01 in height and scale (idle bob, a 2 px scroll). */
     const samePoses = (a, b) => {
       if (a.drawn.length === 0 || a.drawn.length !== b.drawn.length)
@@ -2334,10 +2381,15 @@ for (const size of sizes) {
         .join(' ');
     report(
       'wp67-seam-no-jump-' + size,
-      before.lap?.ret >= 0.99 && !after.on && samePoses(before, after),
+      before.lap?.ret >= 0.99 &&
+        !after.on &&
+        seamGap !== null &&
+        seamGap <= SEAM_GAP_MS &&
+        seam.afterAt > seam.scrolledAt &&
+        samePoses(seam.before, seam.after),
       // the pixel figures compare the frame at Last with the row 1.5 s later
       // (the idle bob and the foil move in between): kept for the record
-      `canvas Last vs the landed row: mean |d| ${diff?.mean?.toFixed?.(3)}, share > 48: ${diff?.bigShare?.toFixed?.(5)} ${diff?.error ?? ''}; drawn before [${poses(before)}] after [${poses(after)}]; scroll ${Math.round(before.y)} -> ${Math.round(after.y)}`,
+      `last frame before the seam vs the first frame posed after it (${seamGap ?? 'n/a'} ms apart, at most ${SEAM_GAP_MS}): drawn before [${poses(seam.before)}] after [${poses(seam.after)}]; scroll ${Math.round(before.y)} -> ${Math.round(after.y)}; canvas Last vs the landed row: mean |d| ${diff?.mean?.toFixed?.(3)}, share > 48: ${diff?.bigShare?.toFixed?.(5)} ${diff?.error ?? ''}`,
     );
     const landed = await settle();
     report(
@@ -2497,9 +2549,9 @@ for (const size of sizes) {
     await page.waitForTimeout(2500);
     // Every frame, the composed pose of each visible tile (--m-ry/--m-rx on a
     // phone, --d-ry/--d-rx on a desktop, radians), under the current phase.
-    // The page exposes no 3D rotation, so the tile pose (the pose a capsule is
-    // posed from) stands for the 3D capsule: "any" = every tile that is not
-    // faded out, "pic" = those whose picture shows (the flat tiles).
+    // The debug hook exposes no 3D rotation, so these read the tile pose only:
+    // "any" = every tile that is not faded out, "pic" = those whose picture
+    // shows (the flat tiles).
     await page.evaluate(() => {
       const num = (v) => {
         const n = parseFloat(v);
@@ -2761,16 +2813,28 @@ for (const size of sizes) {
             : n + ': no ' + kind + ' sample';
         })
         .join('; ');
-    const leanOk = (names, kind) =>
+    /**
+     * Every phase in names stays within the limits, and every phase in need
+     * has samples of that kind: a phase that saw no tile proves nothing.
+     */
+    const leanOk = (names, kind, need = names) =>
+      need.every((n) => (ph[n]?.[kind]?.n ?? 0) > 0) &&
       names.every((n) => !ph[n]?.[kind]?.n || within(ph[n][kind]));
     const motionPhases = ['rise', 'return'];
     const restPhases = ['row', 'hand-off', 'lineup'];
+    // Flat pictures show only for capsules outside the 3D draw range (phone:
+    // centre +-1, desktop: centre +-2, so all five on a desktop at the row and
+    // the lineup). The flat-tile check needs samples where flat pictures are
+    // expected: the hand-off on both sizes, and the lineup on a phone.
+    const flatRestPhases =
+      size === 'phone' ? ['hand-off', 'lineup'] : ['hand-off'];
     const framesIn = (names) => names.every((n) => (ph[n]?.frames ?? 0) > 0);
+    const poseNote =
+      " [limits |yaw| <= 25, rotX <= 15 away, >= -25 toward; reads the tiles' CSS pose, not the 3D capsule, whose rotation the debug hook does not expose]";
     report(
-      'poly-lean-3d-capsules-rise-and-return-' + size,
+      'poly-tile-pose-within-limits-rise-and-return-' + size,
       framesIn(motionPhases) && leanOk(motionPhases, 'any'),
-      leanLine(motionPhases, 'any') +
-        ' [limits |yaw| <= 25, rotX <= 15 away, >= -25 toward; composed tile pose stands for the 3D capsule]',
+      leanLine(motionPhases, 'any') + poseNote,
     );
     report(
       'poly-lean-flat-tiles-rise-and-return-' + size,
@@ -2778,16 +2842,17 @@ for (const size of sizes) {
       leanLine(motionPhases, 'pic'),
     );
     report(
-      'poly-lean-3d-capsules-row-handoff-lineup-' + size,
-      framesIn(restPhases) &&
-        leanOk(restPhases, 'any') &&
-        restPhases.every((n) => ph[n]?.any.n > 0),
-      leanLine(restPhases, 'any'),
+      'poly-tile-pose-within-limits-row-handoff-lineup-' + size,
+      framesIn(restPhases) && leanOk(restPhases, 'any'),
+      leanLine(restPhases, 'any') + poseNote,
     );
     report(
       'poly-lean-flat-tiles-row-handoff-lineup-' + size,
-      framesIn(restPhases) && leanOk(restPhases, 'pic'),
-      leanLine(restPhases, 'pic'),
+      framesIn(restPhases) && leanOk(restPhases, 'pic', flatRestPhases),
+      leanLine(restPhases, 'pic') +
+        ' [samples needed at: ' +
+        flatRestPhases.join(', ') +
+        ']',
     );
     // (2) the free span holds and draws only the chosen capsule
     report(
