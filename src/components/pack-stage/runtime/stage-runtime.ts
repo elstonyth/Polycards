@@ -1277,10 +1277,15 @@ export function createStageRuntime(
             obj.visible = true;
             obj.updateMatrixWorld(true);
           };
-          // The spin row's repeats (a short set is repeated out to 24 cans): clones.
-          const offsets = spinRow
-            ? lineupCopies(slot.index, track, n, desktop).filter((o) => o !== 0)
-            : [];
+          // The spin row's repeats (a short set is repeated out to 24 cans):
+          // clones. None while a pack of the row has no model (picture only):
+          // its picture has no repeats, so they would leave its slots empty.
+          const offsets =
+            spinRow && slots.length >= n
+              ? lineupCopies(slot.index, track, n, desktop).filter(
+                  (o) => o !== 0,
+                )
+              : [];
           for (const [o, c] of shown.copies)
             if (!offsets.includes(o)) c.visible = false;
           for (const o of offsets) {

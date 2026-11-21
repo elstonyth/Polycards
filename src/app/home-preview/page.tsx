@@ -51,6 +51,36 @@ export async function generateMetadata({
 
 const STAGE_MODES: readonly GateMode[] = ['flat', '3d', 'lite'];
 
+/** A `?more=` copy's id: its source pack's id and a number. */
+const QA_COPY = /^(.+)~qa\d+$/;
+/** The pack a `?more=` copy was made from (any other id: itself). */
+const qaSource = (id: string) => QA_COPY.exec(id)?.[1] ?? id;
+
+/**
+ * The preview's QA catalogue: `hidden` packs left out, then `more` copies
+ * of the first row's packs appended to it under new ids.
+ */
+function qaCatalogue(
+  catalogue: PackCategory[],
+  hidden: ReadonlySet<string>,
+  more: number,
+): PackCategory[] {
+  if (hidden.size === 0 && more === 0) return catalogue;
+  const kept = catalogue.map((c) => ({
+    ...c,
+    packs: c.packs.filter((p) => !hidden.has(p.id)),
+  }));
+  const first = kept.find((c) => c.packs.length > 0);
+  if (!first || more === 0) return kept;
+  const copies = Array.from({ length: more }, (_, k) => {
+    const src = first.packs[k % first.packs.length]!;
+    return { ...src, id: `${src.id}~qa${k + 1}`, name: `${src.name} ${k + 1}` };
+  });
+  return kept.map((c) =>
+    c === first ? { ...c, packs: [...c.packs, ...copies] } : c,
+  );
+}
+
 type Highlights = Awaited<ReturnType<typeof getPackHighlights>>;
 
 /** Every pack's starting data for its focused view, by pack id. */
@@ -108,6 +138,14 @@ export default async function HomePreviewPage({
   // so the stage's language control can be seen before a real Japanese pack
   // exists. Preview only; never on the real homepage.
   const forcedJp = new Set(one('jp').split(',').filter(Boolean));
+  // QA only: a changed catalogue without touching the admin. `?hide=<id>,<id>`
+  // leaves those packs out; `?more=<n>` adds n copies of the first row's
+  // packs under new ids (no 3D set, no tiers: a pack added in the admin with
+  // its picture only); `?no3d=<id>,<id>` draws those packs from their
+  // picture, as a pack with no bundled 3D set.
+  const hidden = new Set(one('hide').split(',').filter(Boolean));
+  const more = Math.min(48, Math.max(0, Math.floor(Number(one('more')) || 0)));
+  const no3d = new Set(one('no3d').split(',').filter(Boolean));
 
   // shortcut: duplicated from src/app/page.tsx (catalogue and top-chase
   // lookups). Remove at integration. The sections below the lineup read only
@@ -116,10 +154,11 @@ export default async function HomePreviewPage({
     getPackCategories(),
     loadFlowData(),
   ]);
+  const reshaped = qaCatalogue(catalogue, hidden, more);
   const categories =
     forcedSoldOut.size === 0 && forcedJp.size === 0
-      ? catalogue
-      : catalogue.map((c) => ({
+      ? reshaped
+      : reshaped.map((c) => ({
           ...c,
           packs: c.packs.map((p) => ({
             ...p,
@@ -129,7 +168,7 @@ export default async function HomePreviewPage({
         }));
   const packs = categories.flatMap((c) => c.packs);
   const highlights = await Promise.all(
-    packs.map((pack) => getPackHighlights(pack.id)),
+    packs.map((pack) => getPackHighlights(qaSource(pack.id))),
   );
   const chaseByPack = new Map<string, PackCard | null>(
     packs.map((pack, i) => [pack.id, highlights[i]?.chase ?? null]),
@@ -138,7 +177,16 @@ export default async function HomePreviewPage({
   // data in the page, no script.
   const highlightOf = new Map(packs.map((pack, i) => [pack.id, highlights[i]]));
   const seeds = seedsOf(categories, highlightOf);
-  const stageCategories = toStageCategories(categories, chaseByPack);
+  const stageCategories = toStageCategories(categories, chaseByPack).map((c) =>
+    no3d.size === 0
+      ? c
+      : {
+          ...c,
+          packs: c.packs.map((p) =>
+            no3d.has(p.id) ? { ...p, art3d: null } : p,
+          ),
+        },
+  );
   const tabs = packTabs(categories);
   const focus = one('focus');
   const start = focus
