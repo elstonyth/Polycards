@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import {
   getPackCategories,
   getPackHighlights,
@@ -17,6 +17,7 @@ import { toStageCategories } from '@/components/pack-stage/stage-packs';
 import { flowSeedFromHighlights } from '@/components/pack-flow/flow-seed';
 import { FlowSections } from '@/components/pack-flow/FlowSections';
 import { FOCUS_SEEDS_ID } from '@/components/pack-stage/stage-focus-seeds';
+import { flowStart } from '@/components/pack-flow/flow-start';
 import type {
   GateMode,
   StageOverride,
@@ -44,6 +45,9 @@ const FEED_TTL_MS = 5_000;
  * `?soldout=<id>,<id>` shows those packs sold out (QA); `?jp=<id>,<id>` marks
  * those packs Japanese (the language control's preview). `?loader=always|never`
  * (forces or skips the brand loader) is read by the layout's pre-paint script.
+ * `?focus=<id>` is a load onto that pack's own address (the pack route sends
+ * it here under the preview switch): the flow opens on that pack, and the
+ * address goes back to the pack's; a pack it cannot open gets its pack page.
  */
 export default async function HomePreviewPage({
   searchParams,
@@ -113,6 +117,12 @@ export default async function HomePreviewPage({
     ),
   );
   const stageCategories = toStageCategories(categories, chaseByPack);
+  const tabs = packTabs(categories);
+  const focus = one('focus');
+  const start = focus
+    ? flowStart({ categories: stageCategories, tabs, seeds, id: focus })
+    : null;
+  if (focus && !start) redirect(`/slots/${encodeURIComponent(focus)}?count=1`);
   // The brand loader's pre-paint gate is in the root layout's <head>
   // (stage-loader-script.ts, STAGE_LOADER_PATHS); it reads ?loader= itself.
   return (
@@ -125,12 +135,16 @@ export default async function HomePreviewPage({
           __html: JSON.stringify(seeds).replace(/</g, '\\u003c'),
         }}
       />
-      <ShelfCategoryProvider categories={packTabs(categories)}>
+      <ShelfCategoryProvider categories={tabs}>
         <Stage3dProvider override={stage} debug={debug}>
           {/* The page below the stage, in the flow's order (full-flow plan 1):
               PackStage lays it out after the pin, and it rises over the
               pinned panel during the spin's exit. */}
-          <PackStage categories={stageCategories} tabs={packTabs(categories)}>
+          <PackStage
+            categories={stageCategories}
+            tabs={tabs}
+            start={start ? { ...start, id: focus } : undefined}
+          >
             <FlowSections
               feed={feed}
               topRippers={topRippers}

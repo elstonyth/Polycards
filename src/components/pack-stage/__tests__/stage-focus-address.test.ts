@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { FOCUS_STEP_MS, createFocusAddress } from '../stage-focus-address';
+import {
+  FOCUS_MARK,
+  FOCUS_STEP_MS,
+  createFocusAddress,
+} from '../stage-focus-address';
+import { startEntry } from '../stage-focus-entry';
 
 type Entry = { url: string; state: unknown };
 
@@ -584,5 +589,134 @@ describe('focus address: a pick in the lineup (work package 5)', () => {
     const a = createFocusAddress(b.h, b.loc);
     a.pack('mega');
     expect(b.url()).toBe('/home-preview');
+  });
+});
+
+describe('focus address: a load straight onto a pack address', () => {
+  /** The flow page as the pack route serves it for a load onto 151. */
+  const landed = (search = '?focus=151') => {
+    const b = browser('/home-preview');
+    const loc = b.loc;
+    let s = search;
+    const l = () => ({ ...loc(), search: s });
+    b.h.replaceState = ((orig) => (st: unknown, u: string, url: string) => {
+      const [p, qs] = url.split('?');
+      s = qs ? `?${qs}` : '';
+      orig(st, u, p!);
+    })(b.h.replaceState.bind(b.h));
+    return { b, l };
+  };
+  const start = (
+    x: ReturnType<typeof landed>,
+    navigation: string | undefined,
+    now = 1000,
+    id = '151',
+  ) =>
+    startEntry(x.b.h, x.l(), {
+      id,
+      base: '/home-preview',
+      navigation,
+      now,
+    });
+
+  it("puts the pack's address back and marks the entry in place (no new entry)", () => {
+    const x = landed();
+    const mark = start(x, 'navigate');
+    expect(mark).toBe('151:start:1000');
+    expect(x.b.length()).toBe(1);
+    expect(x.b.url()).toBe('/slots/151');
+    expect(x.l().search).toBe('');
+    const a = createFocusAddress(x.b.h, x.b.loc);
+    expect(a.resumable()).toBe(mark);
+  });
+
+  it('keeps the other query (QA switches) on the address', () => {
+    const x = landed('?stage=3d&focus=151');
+    start(x, 'navigate');
+    expect(x.b.url()).toBe('/slots/151');
+    expect(x.l().search).toBe('?stage=3d');
+  });
+
+  it('keeps what the router already stored in the entry', () => {
+    const x = landed();
+    x.b.h.replaceState(
+      { __NA: true, tree: 'x' },
+      '',
+      '/home-preview?focus=151',
+    );
+    start(x, 'navigate');
+    expect(x.b.h.state).toMatchObject({ __NA: true, tree: 'x' });
+  });
+
+  it('a reload gets a fresh mark, so it opens on Front (no saved stop)', () => {
+    const x = landed();
+    const first = start(x, 'navigate', 1000);
+    const again = start(landed(), 'reload', 2000);
+    expect(again).toBe('151:start:2000');
+    expect(again).not.toBe(first);
+  });
+
+  it('a reload of a tapped entry is no longer a pushed one: going up from Front replaces the address in place', () => {
+    const x = landed();
+    x.b.h.replaceState(
+      {
+        [FOCUS_MARK]: '151:1',
+        __flowPushed: true,
+        __flowBase: '/home-preview',
+      },
+      '',
+      '/home-preview?focus=151',
+    );
+    const mark = start(x, 'reload', 3000)!;
+    expect(mark).toBe('151:start:3000');
+    const r = createFocusAddress(x.b.h, x.b.loc);
+    r.enter('151', 'resume', mark);
+    r.end();
+    expect(x.b.url()).toBe('/home-preview');
+    expect(x.b.length()).toBe(1);
+  });
+
+  it('Back or Forward onto an entry of ours keeps its mark (the saved stop)', () => {
+    const x = landed();
+    x.b.h.replaceState(
+      { [FOCUS_MARK]: '151:9', __flowPushed: true, __flowBase: '/' },
+      '',
+      '/home-preview?focus=151',
+    );
+    expect(start(x, 'back_forward')).toBe('151:9');
+    expect(x.b.h.state).not.toHaveProperty('__flowPushed');
+    expect(x.b.url()).toBe('/slots/151');
+    expect(x.b.h.state).toMatchObject({
+      [FOCUS_MARK]: '151:9',
+      __flowBase: '/',
+    });
+  });
+
+  it('going up from Front puts the base path in place: Back then leaves the site', () => {
+    const x = landed();
+    const mark = start(x, 'navigate')!;
+    const a = createFocusAddress(x.b.h, x.b.loc);
+    a.enter('151', 'resume', mark);
+    a.show(true);
+    expect(x.b.url()).toBe('/slots/151');
+    a.end();
+    expect(x.b.url()).toBe('/home-preview');
+    expect(x.b.length()).toBe(1);
+    expect(x.b.index()).toBe(0);
+  });
+
+  it('writes nothing when the load is not one onto that pack', () => {
+    const x = landed('');
+    expect(start(x, 'navigate')).toBeNull();
+    expect(x.b.h.state).toBeNull();
+    const y = landed('?focus=ah');
+    expect(start(y, 'navigate')).toBeNull();
+    expect(y.b.url()).toBe('/home-preview');
+  });
+
+  it('encodes the id in the address', () => {
+    const x = landed('?focus=a%20b');
+    expect(start(x, 'navigate', 5, 'a b')).toBe('a b:start:5');
+    expect(x.b.url()).toBe('/slots/a%20b');
   });
 });

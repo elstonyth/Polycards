@@ -37,7 +37,11 @@ import {
 import StageTrack, { type StageTrackHandle } from './StageTrack';
 import { loadSpinKit } from './stage-spin-load';
 import { takeArrival } from './stage-arrival';
+import { startEntry } from './stage-focus-entry';
 import styles from './pack-stage.module.css';
+
+/** The longest the flow is waited for before Just Pulled stops waiting. */
+const FLOW_WAIT_CAP_MS = 15_000;
 
 const nounOf = (packs: readonly StagePack[]): 'pack' | 'capsule' =>
   packs.length > 0 && packs.every((p) => p.ticket) ? 'capsule' : 'pack';
@@ -52,10 +56,17 @@ const nounOf = (packs: readonly StagePack[]): 'pack' | 'capsule' =>
 export default function PackStage({
   categories,
   tabs,
+  start,
   children,
 }: {
   categories: StageCategory[];
   tabs: PackTab[];
+  /**
+   * A load onto a pack's own address: the stage starts on that pack's tab with
+   * the row centred on it, and marks the entry so the flow opens that pack on
+   * it (its Front stop). `index` is the pack's place in the tab's full row.
+   */
+  start?: { id: string; category: string; index: number };
   /**
    * The page below the stage. It is laid out from the pin's end and scrolls
    * up OVER the stuck panel during the exit (as Ciao's FAQ scrolls over its
@@ -86,6 +97,21 @@ export default function PackStage({
     wake,
     show: showStage,
   } = stage3d;
+  // Whether the flow is still on its way ('pending', until the spin chunk has
+  // bound) or will not come ('gave-up'): Just Pulled's drawer waits for the
+  // flow's layout while it is pending, and stops waiting once it gave up
+  // (reduced motion and an empty stage never get the flow).
+  const [flowWait, setFlowWait] = useState<'pending' | 'gave-up' | null>(
+    'pending',
+  );
+  // A spin chunk that never settles: the wait ends after FLOW_WAIT_CAP_MS.
+  useEffect(() => {
+    const t = setTimeout(
+      () => setFlowWait((w) => (w === 'pending' ? 'gave-up' : w)),
+      FLOW_WAIT_CAP_MS,
+    );
+    return () => clearTimeout(t);
+  }, []);
   // The focused pack's blocks (rendered by the spin chunk's focused view).
   const [focusUi, setFocusUi] = useState<ReactNode>(null);
   useEffect(() => {
@@ -112,9 +138,13 @@ export default function PackStage({
           });
           c.bind({ flow, wrap, panel, empty: empty0 });
           ctl = c;
+          // the flow's own switch decides from here
+          setFlowWait(null);
         },
         // No spin chunk: the page stays step 1 (one screen, never paged).
-        () => {},
+        () => {
+          if (live) setFlowWait('gave-up');
+        },
       );
     }, 300);
     return () => {
@@ -133,7 +163,27 @@ export default function PackStage({
   // The row each category shows: its chip and language (both default to every
   // pack: the approved row). Never stored, never in the URL.
   const [filters, setFilters] = useState<Record<string, StageFilter>>({});
-  const [rowStarts, setRowStarts] = useState<Record<string, number>>({});
+  const [rowStarts, setRowStarts] = useState<Record<string, number>>(() =>
+    start ? { [start.category]: start.index } : {},
+  );
+  // A load onto a pack's address: its tab, and the entry marked for the flow
+  // (once, at mount; the flow reads the mark when it binds).
+  const startRef = useRef(start);
+  useEffect(() => {
+    const s = startRef.current;
+    if (!s) return;
+    if (s.category !== active) pick(s.category);
+    const nav = performance.getEntriesByType('navigation')[0] as
+      PerformanceNavigationTiming | undefined;
+    startEntry(window.history, window.location, {
+      id: s.id,
+      base: '/home-preview',
+      navigation: nav?.type,
+      now: Date.now(),
+    });
+    // mount only: a later tab pick is the visitor's
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const filterOf = (id: string): StageFilter => filters[id] ?? ALL_FILTER;
   const rows = useMemo(
     () =>
@@ -268,7 +318,12 @@ export default function PackStage({
   const noun = category ? nounOf(category.packs) : 'pack';
 
   return (
-    <div ref={flowRef} data-home-flow="" className={styles.flow}>
+    <div
+      ref={flowRef}
+      data-home-flow=""
+      data-flow-wait={(reduced || empty0 ? 'gave-up' : flowWait) ?? undefined}
+      className={styles.flow}
+    >
       <StageLoader onLeave={onLoaderLeave} />
       {/* The pin: the panel sticks through the spin and the exit. */}
       <div

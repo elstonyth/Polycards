@@ -73,18 +73,17 @@ export type FocusAddress = {
  */
 export const FOCUS_STEP_MS = 1000;
 
-/** The marks written into the entry's state. */
-export const FOCUS_MARK = '__flow';
-const PUSHED = '__flowPushed';
-const BASE = '__flowBase';
+import {
+  BASE,
+  FOCUS_MARK,
+  PUSHED,
+  fields,
+  packPath,
+} from './stage-focus-marks';
+
+export { FOCUS_MARK, packPath };
 
 const SLOT_PATH = /^\/slots\/([^/]+)\/?$/;
-
-const fields = (st: unknown): Record<string, unknown> =>
-  st && typeof st === 'object' ? (st as Record<string, unknown>) : {};
-
-/** The path of pack `id`. */
-export const packPath = (id: string) => `/slots/${encodeURIComponent(id)}`;
 
 export function createFocusAddress(
   h: FocusHistory,

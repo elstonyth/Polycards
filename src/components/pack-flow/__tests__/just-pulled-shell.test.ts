@@ -67,6 +67,58 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe("watchNear: the stage's word on the flow", () => {
+  const wait = async (v: 'pending' | 'gave-up' | null) => {
+    if (v === null) root.removeAttribute('data-flow-wait');
+    else root.setAttribute('data-flow-wait', v);
+    await settle();
+  };
+
+  it('waits for as long as the stage says the flow is on its way, past the plain wait', async () => {
+    root.setAttribute('data-flow-wait', 'pending');
+    const onNear = vi.fn();
+    stop = watchNear(el, onNear);
+    vi.advanceTimersByTime(30000);
+    near();
+    expect(onNear).not.toHaveBeenCalled();
+    await wait(null);
+    await flow(true);
+    near();
+    expect(onNear).toHaveBeenCalledTimes(1);
+  });
+
+  it('measures the plain page at once when the stage gave up on the flow', async () => {
+    root.setAttribute('data-flow-wait', 'pending');
+    const onNear = vi.fn();
+    stop = watchNear(el, onNear);
+    await wait('gave-up');
+    near();
+    expect(onNear).toHaveBeenCalledTimes(1);
+  });
+
+  it('a gave-up stage from the start: no wait at all', () => {
+    root.setAttribute('data-flow-wait', 'gave-up');
+    const onNear = vi.fn();
+    stop = watchNear(el, onNear);
+    near();
+    expect(onNear).toHaveBeenCalledTimes(1);
+  });
+
+  it('once the stage is no longer pending, an off flow gets the plain wait again', async () => {
+    root.setAttribute('data-flow-wait', 'pending');
+    const onNear = vi.fn();
+    stop = watchNear(el, onNear);
+    vi.advanceTimersByTime(10000);
+    await wait(null);
+    vi.advanceTimersByTime(5999);
+    near();
+    expect(onNear).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    near();
+    expect(onNear).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('watchNear: the drawer loads near the section, never at the row', () => {
   it('ignores the plain layout while the flow is still coming on', () => {
     const onNear = vi.fn();

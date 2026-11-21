@@ -11,8 +11,12 @@ import type { RecentFeed } from '@/lib/data/packs';
 
 type DrawerProps = { initial: RecentFeed; initialTab?: string };
 
-/** How long to wait for the flow to come on before measuring anyway. */
+/** How long an off flow is waited for, once the stage is no longer on its
+ *  way to it, before the plain page is measured anyway. */
 const FLOW_WAIT_MS = 6000;
+
+/** The stage's word on the flow, on the flow root (PackStage). */
+const FLOW_WAIT_ATTR = 'data-flow-wait';
 
 const controls = (el: HTMLElement): HTMLElement[] => [
   ...el.querySelectorAll<HTMLElement>('a[href], button'),
@@ -39,9 +43,12 @@ function loadDrawer(): Promise<ComponentType<DrawerProps>> {
  * nor while the flow is off: its spacers have no height then, which puts
  * this section within reach of the row. That holds before the flow comes on
  * and when it drops out for a while (the focused view's chunk is late) and
- * comes back. Without the flow (reduced motion, no flow root, or the flow off
- * for FLOW_WAIT_MS straight) the plain page is measured as it is. Returns
- * the cleanup.
+ * comes back. The stage says on the flow root whether the flow is still on
+ * its way (`data-flow-wait="pending"`: never measured then, however long it
+ * takes) or will not come (`"gave-up"`: the plain page at once). Without the
+ * flow (reduced motion, no flow root, a stage that gave up, or the flow off
+ * for FLOW_WAIT_MS straight once the stage is no longer pending) the plain
+ * page is measured as it is. Returns the cleanup.
  */
 export function watchNear(el: HTMLElement, onNear: () => void): () => void {
   const root = el.closest('[data-home-flow]');
@@ -50,9 +57,11 @@ export function watchNear(el: HTMLElement, onNear: () => void): () => void {
   /** The flow has been off for FLOW_WAIT_MS straight: it is not coming. */
   let waited = false;
   let wait: ReturnType<typeof setTimeout> | undefined;
+  const word = () => root?.getAttribute(FLOW_WAIT_ATTR) ?? null;
   const plain = () =>
     !root ||
     waited ||
+    word() === 'gave-up' ||
     window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const trusted = () => plain() || !!root?.hasAttribute('data-flow-on');
   const io = new IntersectionObserver(
@@ -75,7 +84,7 @@ export function watchNear(el: HTMLElement, onNear: () => void): () => void {
   const restartWait = () => {
     clearTimeout(wait);
     waited = false;
-    if (trusted()) return;
+    if (trusted() || word() === 'pending') return;
     wait = setTimeout(() => {
       waited = true;
       measure();
@@ -90,7 +99,7 @@ export function watchNear(el: HTMLElement, onNear: () => void): () => void {
   if (root)
     watch?.observe(root, {
       attributes: true,
-      attributeFilter: ['data-flow-on'],
+      attributeFilter: ['data-flow-on', FLOW_WAIT_ATTR],
     });
   const afterLoad = () => {
     loaded = true;

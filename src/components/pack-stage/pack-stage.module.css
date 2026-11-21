@@ -121,10 +121,12 @@
   transition: opacity 0.35s ease-out;
 }
 
-/* The site's floating chips (the free pack, Telegram) over the flow: hidden
-   from Closing through the hand-off, the lineup and its exit (the address is
-   the pack's at the stops, which keeps them off there already), and faded
-   back in once the free part starts. Browsers without :has() show them. */
+/* The site's floating chips (the free pack, Telegram) over the flow: shown
+   at the row only. From the focus on (the stops, the lineup and its exit),
+   through the free part (where they would sit on Just Pulled and on the
+   page's own Telegram button and free pack offer) and the lap, they are
+   hidden; they fade back in with the row's own UI after the wrap, so no
+   overlay shows at the seam. Browsers without :has() show them. */
 :global(body):has(.flow[data-flow-on]) :global([data-testid='free-pack-badge']),
 :global(body):has(.flow[data-flow-on]) :global([data-telegram-banner]) {
   transition-property: background-color, transform, opacity, visibility;
@@ -132,13 +134,24 @@
   transition-timing-function: ease-out;
 }
 
-:global(body):has(.spinWrap[data-focus-on]):not(
-    :has(.flow[data-flow-free])
-  ):not(:has(.flow[data-flow-lap]))
+:global(body):has(.spinWrap[data-focus-on])
   :global([data-testid='free-pack-badge']),
-:global(body):has(.spinWrap[data-focus-on]):not(
-    :has(.flow[data-flow-free])
-  ):not(:has(.flow[data-flow-lap]))
+:global(body):has(.spinWrap[data-focus-on]) :global([data-telegram-banner]),
+:global(body):has(.flow[data-flow-on][data-flow-past])
+  :global([data-testid='free-pack-badge']),
+:global(body):has(.flow[data-flow-on][data-flow-past])
+  :global([data-telegram-banner]),
+:global(body):has(.flow[data-flow-on][data-flow-free])
+  :global([data-testid='free-pack-badge']),
+:global(body):has(.flow[data-flow-on][data-flow-free])
+  :global([data-telegram-banner]),
+:global(body):has(.flow[data-flow-on][data-flow-lap])
+  :global([data-testid='free-pack-badge']),
+:global(body):has(.flow[data-flow-on][data-flow-lap])
+  :global([data-telegram-banner]),
+:global(body):has(.flow[data-flow-on][data-flow-home])
+  :global([data-testid='free-pack-badge']),
+:global(body):has(.flow[data-flow-on][data-flow-home])
   :global([data-telegram-banner]) {
   opacity: 0;
   visibility: hidden;

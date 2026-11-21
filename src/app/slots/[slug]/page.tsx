@@ -1,9 +1,11 @@
 // src/app/slots/[slug]/page.tsx
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
+import { headers } from 'next/headers';
+import { notFound, redirect } from 'next/navigation';
 import { getPackBaseForViewer } from '@/lib/data/packs';
 import { loadPackPage } from '@/lib/data/pack-page';
 import { ProductJsonLd, shareImageMeta } from '@/lib/product-share';
+import { homePreviewOn } from '@/components/pack-flow/flow-start';
 import PackPage from './PackPage';
 
 // The /slots pack detail — configurator/Top-Hits/odds; the "Open Pack" CTA
@@ -44,10 +46,32 @@ export default async function SlotsPackDetailPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ count?: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { slug } = await params;
-  const { count: countRaw } = await searchParams;
+  const query = await searchParams;
+  const countRaw = typeof query.count === 'string' ? query.count : undefined;
+  // Preview switch only: the pack's own address (no `count`: the pack page's
+  // links always carry one) opens the home flow on that pack, which puts this
+  // address back once it has loaded. A document load replaces this document
+  // with the flow page at once (so its loader shows from its first paint); a
+  // move inside the site takes the router's own redirect.
+  if (homePreviewOn() && query.count === undefined) {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries(query))
+      if (typeof v === 'string' && k !== 'focus') q.set(k, v);
+    q.set('focus', slug);
+    const to = `/home-preview?${q.toString()}`;
+    if ((await headers()).get('rsc') === null)
+      return (
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `location.replace(${JSON.stringify(to)})`,
+          }}
+        />
+      );
+    redirect(to);
+  }
   const parsed = Number(countRaw);
   const count = Number.isInteger(parsed) ? Math.min(3, Math.max(1, parsed)) : 1;
   // One loader for this render and for the picker's in-place switch

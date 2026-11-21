@@ -1828,10 +1828,10 @@ for (const size of sizes) {
         'chips-hidden-closing-to-exit-end-' + size,
         log.length > 60 &&
           shownPast.length === 0 &&
-          fades[0] &&
-          fades[1] &&
-          free.free === 'visible' &&
-          free.telegram === 'visible',
+          // the chips stay out over the free part (they would sit on its
+          // content); they come back at the row
+          free.free !== 'visible' &&
+          free.telegram !== 'visible',
         log.length +
           ' frames from Closing to the exit end, ' +
           shownPast.length +
@@ -2918,12 +2918,25 @@ for (const size of sizes) {
     await load(s);
     const s0 = await snap(page);
     const reload = async () => {
+      // a pack address (written by the flow without the QA query): keep the
+      // QA switches on it, so the reloaded page can be read
+      await page.evaluate(() => {
+        const u = new URL(location.href);
+        if (!/^\/slots\//.test(u.pathname) || u.searchParams.has('debug'))
+          return;
+        u.searchParams.set('stage', '3d');
+        u.searchParams.set('debug', '1');
+        u.searchParams.set('loader', 'never');
+        history.replaceState(history.state, '', u.pathname + u.search);
+      });
       await page.reload({ waitUntil: 'load' });
       const loadY = await page.evaluate(() => window.__loadY ?? null);
       const path = new URL(page.url()).pathname;
       if (path === PREVIEW) await ready(page);
       else await page.waitForTimeout(2500);
-      return { loadY, r: await rest(page) };
+      // a reload of a pack address opens the flow on that pack: give it the
+      // loader and the move to Front
+      return { loadY, r: await rest(page, 12000) };
     };
     let x = await reload();
     await shot(page, size, 'reload-row');
@@ -2945,8 +2958,14 @@ for (const size of sizes) {
     await shot(page, size, 'reload-middle');
     report(
       `reload-at-middle-stop-${size}`,
-      x.r.path === `/slots/${SLUG}` && !x.r.stage,
-      `resting at ${r.block} (address ${r.path}); the reload serves ${x.r.path} ${x.r.stage ? 'with the preview stage' : 'as the pack page (not the preview)'}`,
+      // under the preview switch a load of the pack's address opens the flow
+      // on that pack at Front (a fresh entry: no saved stop)
+      x.r.path === `/slots/${SLUG}` &&
+        !!x.r.stage &&
+        x.r.on &&
+        near(x.r.y, x.r.stops[1]) &&
+        x.r.block === x.r.kinds[0],
+      `resting at ${r.block} (address ${r.path}); the reload serves ${x.r.path} ${x.r.stage ? 'with the preview stage' : 'as the pack page (not the preview)'}, focused ${x.r.on} at ${x.r.block} (y ${x.r.y}, Front ${x.r.stops?.[1]})`,
     );
     await load(s);
     await page.keyboard.press('End');
