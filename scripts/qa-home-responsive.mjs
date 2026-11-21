@@ -39,6 +39,10 @@ const SIZES = {
   uw3440: [3440, 1440, 1, false],
   // the owner's full-screen Chrome window
   o2500: [2500, 1288, 1.5, false],
+  // a 4K screen at ratio 1, 1.25 and 1.5 (CSS px)
+  k4: [3840, 2160, 1, false],
+  k4r125: [2458, 1382, 1.25, false],
+  k4r150: [1707, 960, 1.5, false],
 };
 /** The WebKit pass: Playwright's iPhone and iPad descriptors, portrait and landscape. */
 const WEBKIT_DEVICES = [
@@ -551,6 +555,54 @@ async function sideways(s, touch, key) {
   await s.capture('lineup-after-sideways');
 }
 
+/** A phone on its side gets the plain page (FLOW_OFF_QUERY): check that, page through it, then turn it upright. */
+async function plainWalk(browser, key, touch) {
+  const s = await qa.open(browser, key, '/home-preview', {
+    query: qa.stage.query,
+  });
+  await s.waitPage(() => window.__packStage?.ready?.(), null, {
+    timeout: 40000,
+    label: 'stage ready',
+  });
+  await s.page.waitForTimeout(1500);
+  const off = await s.page.evaluate(
+    () => window.__packStage?.flow?.()?.on === false,
+  );
+  qa.check(
+    'flow-off-on-its-side ' + key,
+    off,
+    off ? 'plain page' : 'the flow is on',
+  );
+  let y = -1;
+  for (let i = 0; i < 16; i++) {
+    const ny = await s.page.evaluate(() => Math.round(scrollY));
+    if (ny === y) break;
+    y = ny;
+    await checkRest(s, key, touch, { block: null, y }, 'plain-y' + y);
+    await s.keys('PageDown');
+    await s.page.waitForTimeout(500);
+  }
+  // turned upright at the top: the flow comes back
+  await s.page.evaluate(() => scrollTo(0, 0));
+  const { width, height } = s.page.viewportSize();
+  await s.page.setViewportSize({ width: height, height: width });
+  const back = await s.page
+    .waitForFunction(() => window.__packStage?.flow?.()?.on === true, null, {
+      timeout: 8000,
+    })
+    .then(() => true)
+    .catch(() => false);
+  qa.check(
+    'flow-back-upright ' + key,
+    back,
+    back ? 'flow on at ' + height + 'x' + width : 'still off',
+  );
+  await s.page.waitForTimeout(800);
+  await s.capture('upright');
+  s.checkNoErrors('no-page-errors ' + key);
+  return s;
+}
+
 async function walk(browser, key) {
   const [w, h, dpr, touch, device] = SIZES[key];
   const webkit = browser.__engine === 'webkit';
@@ -561,6 +613,7 @@ async function walk(browser, key) {
         deviceScaleFactor: dpr,
         ...(touch ? { isMobile: !webkit, hasTouch: true } : {}),
       };
+  if (w > h && h <= 500) return plainWalk(browser, key, touch);
   const s = await qa.stage.open(browser, key);
   let r = await restAt(s);
   await checkRest(s, key, touch, r, restLabel(r, r.t));
