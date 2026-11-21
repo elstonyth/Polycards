@@ -2134,6 +2134,8 @@ async function checkPanelChunk(label, profile) {
 /**
  * Just Pulled follows the category only: a type chip fetches nothing new for
  * the feed; Poly refetches it with `category=poly`, Pokémon without one.
+ * The drawer is lazy (nothing at the row polls the feed until it has loaded),
+ * so the check scrolls it into view once and back to the row first.
  */
 async function checkFeedFollows(label, profile) {
   const { ctx, page } = await newPage(profile);
@@ -2144,6 +2146,23 @@ async function checkFeedFollows(label, profile) {
   await page.goto(stageUrl(forced({ loader: 'never' })), { waitUntil: 'load' });
   await dismissChrome(page);
   await sleep(1500);
+  await page.evaluate(() =>
+    document
+      .querySelector('[data-jp-drawer], [data-jp-live]')
+      ?.scrollIntoView(),
+  );
+  await page
+    .waitForFunction(
+      () =>
+        document
+          .querySelector('[data-jp-live]')
+          ?.getAttribute('data-jp-live') === '1',
+      null,
+      { timeout: 10000 },
+    )
+    .catch(() => {});
+  await page.evaluate(() => scrollTo(0, 0));
+  await sleep(2500);
   feed.length = 0;
   await chip(page, /^Classic/).click();
   await sleep(2500);

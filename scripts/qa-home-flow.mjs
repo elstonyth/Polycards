@@ -18,7 +18,7 @@
 //   rest, the text block, the address and history.length at every rest;
 //   scrolling never adds an entry, and leaving the details puts the base
 //   path back;
-// - the text switches 20% into a move down and 80% into it up (D06);
+// - the text switches about 20% into a move, down and up alike (finding 13);
 // - a tap 300 ms into a move: the move still lands on its stop (fault 1);
 // - (phone) swipes at 30, 44, 46 and 60 degrees from vertical end on a rest
 //   (fault 2);
@@ -591,9 +591,9 @@ for (const size of sizes) {
         pu !== null &&
         pd >= 1.1 &&
         pd <= 1.35 &&
-        pu >= 1.05 &&
-        pu <= 1.3,
-      `the block switches at P ${pd?.toFixed(3)} going down (20% in), ${pu?.toFixed(3)} going up (80% in)`,
+        pu >= 1.65 &&
+        pu <= 1.9,
+      `the block switches at P ${pd?.toFixed(3)} going down (20% in), ${pu?.toFixed(3)} going up (20% in)`,
     );
 
     // fault 1: a tap 300 ms into a move
