@@ -590,8 +590,8 @@
 
 /* The failsafe fires 3.5 s after the element is first styled (a little after
    navigation start), so the shell is gone by 4.0 s from navigation even if JS
-   never runs. JS ends first: the cap (3000 ms + 400 ms exit), and a BrandLoader
-   chunk arriving after 2.2 s skips its reveal (StageLoader). */
+   never runs. JS ends first: the cap (3000 ms + 400 ms exit), and a page
+   hydrating after 2.2 s lets the loader go at once (StageLoader). */
 .shell,
 .stage {
   --stage-failsafe: 3.5s;
@@ -612,6 +612,175 @@
     visibility: hidden;
     opacity: 0;
   }
+}
+
+/* The loader's mark, drawn by the stylesheet from the first paint (no script
+   needed): the brand loader's timeline exactly (loader-timeline.ts, held to it
+   by stage-loader-mark.test.ts). Each stroke draws over 700 ms on the stroke
+   curve, 90 ms apart, and drops its dash once whole; each letter rises from
+   below the cut line on the letters' spring, 45 ms apart from 450 ms. Under
+   reduced motion the global backstop lands every one on its end at once. */
+.ldMark > path {
+  animation-name: stage-ld-stroke, stage-ld-whole;
+  animation-duration: 700ms, 0s;
+  animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1), linear;
+  animation-fill-mode: forwards;
+  animation-delay: 0ms, 700ms;
+}
+.ldMark > path:nth-child(2) {
+  animation-delay: 90ms, 790ms;
+}
+.ldMark > path:nth-child(3) {
+  animation-delay: 180ms, 880ms;
+}
+.ldMark > path:nth-child(4) {
+  animation-delay: 270ms, 970ms;
+}
+.ldMark > path:nth-child(5) {
+  animation-delay: 360ms, 1060ms;
+}
+.ldMark > path:nth-child(6) {
+  animation-delay: 450ms, 1150ms;
+}
+
+@keyframes stage-ld-stroke {
+  from {
+    visibility: visible;
+    stroke-dasharray: 0 2;
+  }
+  to {
+    visibility: visible;
+    stroke-dasharray: 1 2;
+  }
+}
+
+@keyframes stage-ld-whole {
+  to {
+    visibility: visible;
+    stroke-dasharray: none;
+  }
+}
+
+/* The spring as keyframe stops with linear steps (every browser we serve
+   plays these): within 0.1 viewBox units of the timeline. */
+.ldLetters > g > path {
+  transform: translateY(58.14px);
+  animation-name: stage-ld-rise;
+  animation-duration: 1150ms;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+  animation-delay: 450ms;
+}
+.ldLetters > g:nth-child(2) > path {
+  animation-delay: 495ms;
+}
+.ldLetters > g:nth-child(3) > path {
+  animation-delay: 540ms;
+}
+.ldLetters > g:nth-child(4) > path {
+  animation-delay: 585ms;
+}
+.ldLetters > g:nth-child(5) > path {
+  animation-delay: 630ms;
+}
+.ldLetters > g:nth-child(6) > path {
+  animation-delay: 675ms;
+}
+.ldLetters > g:nth-child(7) > path {
+  animation-delay: 720ms;
+}
+.ldLetters > g:nth-child(8) > path {
+  animation-delay: 765ms;
+}
+.ldLetters > g:nth-child(9) > path {
+  animation-delay: 810ms;
+}
+
+@keyframes stage-ld-rise {
+  0% {
+    transform: translateY(58.14px);
+  }
+  0.6% {
+    transform: translateY(57.797px);
+  }
+  1.2% {
+    transform: translateY(56.855px);
+  }
+  1.9% {
+    transform: translateY(55.117px);
+  }
+  2.7% {
+    transform: translateY(52.483px);
+  }
+  3.7% {
+    transform: translateY(48.489px);
+  }
+  5.2% {
+    transform: translateY(41.663px);
+  }
+  7.8% {
+    transform: translateY(29.43px);
+  }
+  9.3% {
+    transform: translateY(22.948px);
+  }
+  10.6% {
+    transform: translateY(17.942px);
+  }
+  11.9% {
+    transform: translateY(13.57px);
+  }
+  13.2% {
+    transform: translateY(9.855px);
+  }
+  14.5% {
+    transform: translateY(6.779px);
+  }
+  15.9% {
+    transform: translateY(4.14px);
+  }
+  17.4% {
+    transform: translateY(1.988px);
+  }
+  19% {
+    transform: translateY(0.36px);
+  }
+  20.9% {
+    transform: translateY(-0.866px);
+  }
+  23.2% {
+    transform: translateY(-1.581px);
+  }
+  26.3% {
+    transform: translateY(-1.733px);
+  }
+  39.3% {
+    transform: translateY(-0.244px);
+  }
+  49.5% {
+    transform: translateY(0.052px);
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+
+/* The exit: the cover fades while the logo lifts 10 px and fades a touch
+   sooner (the brand loader's exit curve). */
+.ldCover {
+  transition: opacity 400ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.ldCover[data-leaving] {
+  opacity: 0;
+}
+.ldLogo {
+  transition:
+    opacity 360ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 400ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+.ldCover[data-leaving] .ldLogo {
+  opacity: 0;
+  transform: translateY(-10px);
 }
 
 /* Under the loader the pictures, names and the info block wait unseen, so the

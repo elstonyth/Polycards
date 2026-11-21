@@ -1180,6 +1180,141 @@ async function checkLoader(label, profile) {
   );
 }
 
+/**
+ * Per-50 ms loader sampler, run inside the page from the first script on:
+ * whether the cover is up (the pre-cover, then the shell), whether any stroke
+ * of the mark is drawn, and whether the page under it is shown.
+ */
+function loaderSamplerScript() {
+  const q = (window.__qaLd = { s: [], fp: null });
+  try {
+    new PerformanceObserver((l) => {
+      for (const e of l.getEntries())
+        if (e.name === 'first-paint') q.fp = e.startTime;
+    }).observe({ type: 'paint', buffered: true });
+  } catch {}
+  const tick = () => {
+    const t = performance.now();
+    if (t > 4500) return clearInterval(iv);
+    if (!document.body) return;
+    const attr = document.documentElement.hasAttribute('data-stage-loader');
+    const sh = document.querySelector('[data-stage-loader-shell]');
+    const cover = sh?.querySelector('[role="status"]');
+    let coverOn = attr && !sh; // the pre-cover, until the shell is parsed
+    let ink = false;
+    if (attr && sh && cover) {
+      const a = getComputedStyle(sh);
+      coverOn =
+        a.display !== 'none' &&
+        a.visibility !== 'hidden' &&
+        Number(getComputedStyle(cover).opacity) > 0.05;
+      ink =
+        coverOn &&
+        [...cover.querySelectorAll('svg g[stroke] path')].some(
+          (p) => getComputedStyle(p).visibility === 'visible',
+        );
+    }
+    const pageOn = [...document.querySelectorAll('[data-stage-fade]')].some(
+      (el) => Number(getComputedStyle(el).opacity) > 0.5,
+    );
+    q.s.push({ t: Math.round(t), attr, coverOn, ink, pageOn });
+  };
+  const iv = setInterval(tick, 50);
+}
+
+/**
+ * The loader on the three kinds of full load (a cold first load with the
+ * cache off, a reload, a new tab), sampled every 50 ms: the mark draws within
+ * 600 ms of the first paint, no sample shows the cover gone with neither the
+ * mark nor the page drawn, and the page is shown by 3.1 s. Reduced motion
+ * shows no loader at all. A cold load on a slower line holds the mark to the
+ * same 600 ms (the page itself may take longer there).
+ */
+async function checkLoaderLoads(label, profile) {
+  const read = async (page) => {
+    const q = await page.evaluate(() => window.__qaLd);
+    const seen = q.s.some((x) => x.coverOn);
+    const inkAt = q.s.find((x) => x.ink)?.t ?? null;
+    const shownAt = q.s.find((x) => !x.attr && x.pageOn)?.t ?? null;
+    let up = false;
+    const blank = [];
+    let stall = 0;
+    for (let i = 0; i < q.s.length; i++) {
+      const x = q.s[i];
+      if (x.coverOn) up = true;
+      if (up && !x.coverOn && !x.ink && !x.pageOn) blank.push(x.t);
+      const prev = q.s[i - 1];
+      if (prev && x.ink && prev.ink) stall = Math.max(stall, x.t - prev.t);
+    }
+    return { fp: q.fp, seen, inkAt, shownAt, blank, stall };
+  };
+  const judge = (kind, r, { shownBy = 3100 } = {}) => {
+    const lead = r.inkAt !== null && r.fp !== null ? r.inkAt - r.fp : null;
+    pass(
+      `loader-${kind}-${label}`,
+      r.seen &&
+        lead !== null &&
+        lead <= 600 &&
+        r.blank.length === 0 &&
+        (shownBy === null || (r.shownAt !== null && r.shownAt <= shownBy)),
+      `first paint ${r.fp?.toFixed(0)} ms, first drawn mark ${r.inkAt} ms (${lead} ms after first paint, target <= 600), page shown ${r.shownAt} ms (target ${shownBy === null ? 'none on a slow line' : `<= ${shownBy}`}), blank samples ${r.blank.length ? r.blank.join('/') : 'none'}, longest gap between drawn samples ${r.stall} ms${softwareGpu ? ' (software renderer)' : ''}`,
+    );
+  };
+  const url = stageUrl(forced());
+  const { ctx, page } = await newPage(profile);
+  await ctx.addInitScript(loaderSamplerScript);
+  if (!WEBKIT) {
+    const cdp = await ctx.newCDPSession(page);
+    await cdp.send('Network.enable');
+    await cdp.send('Network.setCacheDisabled', { cacheDisabled: true });
+  }
+  await page.goto(url, { waitUntil: 'commit' });
+  await sleep(4700);
+  judge(WEBKIT ? 'first' : 'cold', await read(page));
+  // the reload and the new tab use the cache the first load filled
+  if (!WEBKIT) {
+    const cdp = await ctx.newCDPSession(page);
+    await cdp.send('Network.setCacheDisabled', { cacheDisabled: false });
+  }
+  await page.reload({ waitUntil: 'commit' });
+  await sleep(4700);
+  judge('reload', await read(page));
+  const tab = await ctx.newPage();
+  await tab.goto(url, { waitUntil: 'commit' });
+  await sleep(4700);
+  judge('newtab', await read(tab));
+  await ctx.close();
+  const rm = await newPage(profile, { reducedMotion: 'reduce' });
+  await rm.ctx.addInitScript(loaderSamplerScript);
+  await rm.page.goto(url, { waitUntil: 'commit' });
+  await sleep(2500);
+  const r = await read(rm.page);
+  await rm.ctx.close();
+  pass(
+    `loader-reduced-none-${label}`,
+    !r.seen && r.inkAt === null,
+    `reduced motion: cover seen ${r.seen}, mark drawn at ${r.inkAt ?? 'never'}`,
+  );
+  // A cold load on a slower line (100 ms round trips, 4 Mbit/s down), where
+  // the page's scripts arrive late: the mark must not wait for them.
+  if (WEBKIT) return;
+  const slow = await newPage(profile);
+  await slow.ctx.addInitScript(loaderSamplerScript);
+  const cdp = await slow.ctx.newCDPSession(slow.page);
+  await cdp.send('Network.enable');
+  await cdp.send('Network.setCacheDisabled', { cacheDisabled: true });
+  await cdp.send('Network.emulateNetworkConditions', {
+    offline: false,
+    latency: 100,
+    downloadThroughput: 500_000,
+    uploadThroughput: 125_000,
+  });
+  await slow.page.goto(url, { waitUntil: 'commit' });
+  await sleep(4700);
+  judge('cold-slow', await read(slow.page), { shownBy: null });
+  await slow.ctx.close();
+}
+
 /** Every Pokemon pack, centred in turn, is drawn live by the canvas. */
 async function checkAllPacks(label, profile) {
   const { ctx, page } = await newPage(profile);
@@ -3733,6 +3868,9 @@ async function main() {
         await run('release', `release-${l}`, () => checkRelease(l));
       }
       await run('loader', `loader-${l}`, () => checkLoader(l, profile));
+      await run('loader', `loader-loads-${l}`, () =>
+        checkLoaderLoads(l, profile),
+      );
       await run('frames', `frame-times-${l}`, () =>
         checkFrameTimes(l, profile),
       );

@@ -1,36 +1,55 @@
 /**
- * The stage's pre-paint loader gate (plan section 6), as the source of a tiny
- * inline `<script>` the root layout emits in `<head>` (before anything paints;
- * inert on every path but STAGE_LOADER_PATHS). It decides whether this
- * document load shows the brand loader: if so it marks the session and sets
- * `html[data-stage-loader]`, which is the only thing that makes the loader
- * shell visible (pack-stage.module.css).
+ * The stage's pre-paint loader gate, as the source of a tiny inline `<script>`
+ * the root layout emits in `<head>` (before anything paints; inert on every
+ * path but STAGE_LOADER_PATHS). It decides whether this document load shows
+ * the brand loader: if so it sets `html[data-stage-loader]`, which is the only
+ * thing that makes the loader shell visible (pack-stage.module.css).
  *
  * The loader shows on every full document load (a first visit, a refresh, a
- * cold open from the home-screen icon; owner, 2026-11-21) when ALL hold: the
- * cheap gate predicts 3D (no reduced motion, no save-data, no crash flag, not
- * `deviceMemory <= 2`), and storage is readable and writable. The session
- * mark (`BRAND_LOADER_SESSION_KEY`) is still written, and no longer read. Any throw skips the loader: a pre-hydration overlay must never risk
- * sticking (the opposite default of `claimFirstVisitThisSession`).
+ * cold open from the home-screen icon) when ALL hold: the cheap gate predicts
+ * 3D (no reduced motion, no save-data, no crash flag, not `deviceMemory <= 2`)
+ * and session storage can be read. It writes nothing. Any throw skips the
+ * loader: a pre-hydration overlay must never risk sticking.
  *
  * Server-safe: builds a string, runs nothing.
  */
-import { BRAND_LOADER_SESSION_KEY } from '@/components/loader/first-visit';
+import {
+  DEFAULT_TIMINGS,
+  REVEAL_MS,
+  type LoaderTimings,
+} from '@/components/loader/loader-timeline';
 import { STAGE_CRASH_KEY } from './crash-guard';
 
-/** Owner decision 6 (plan section 11): the loader's hold cap, in ms from
- *  NAVIGATION start (not from hydration). */
+/** The loader's hold cap, in ms from NAVIGATION start (not from hydration). */
 export const HOME_LOADER_MAX_MS = 3000;
 /** Never cut the loader's exit shorter than this after it mounts. */
 const MIN_HOLD_MS = 800;
 
-/** A loader that would only get going after this (ms from navigation start)
- *  is skipped: the page is handed over at once, with no reveal or float-in. */
+/** A page hydrating after this (ms from navigation start) lets the loader go
+ *  at once: the page is handed over with no exit fade or float-in. */
 export const LOADER_LATE_AT_MS = HOME_LOADER_MAX_MS - MIN_HOLD_MS;
 
-/** BrandLoader's `maxMs` for a loader mounting `nowMs` after navigation start. */
+/** The loader's latest exit, in ms from `nowMs` (ms after navigation start). */
 export function loaderMaxMs(nowMs: number): number {
   return Math.max(MIN_HOLD_MS, HOME_LOADER_MAX_MS - nowMs);
+}
+
+/**
+ * The exit timings, in ms from the moment the page hydrates (`nowMs` after
+ * navigation start), for a mark whose CSS reveal has been drawing for
+ * `revealElapsedMs` (null when that clock cannot be read: the whole reveal is
+ * still to come). The loader leaves once the reveal is over and the stage is
+ * ready, and at the latest at the cap.
+ */
+export function loaderTimings(
+  nowMs: number,
+  revealElapsedMs: number | null,
+): LoaderTimings {
+  return {
+    minMs: Math.max(0, REVEAL_MS - (revealElapsedMs ?? 0)),
+    maxMs: loaderMaxMs(nowMs),
+    exitMs: DEFAULT_TIMINGS.exitMs,
+  };
 }
 
 /** The html attribute (`data-stage-loader`) the script sets. */
@@ -59,21 +78,17 @@ const PRE_COVER_CSS =
 
 /**
  * The script's source. On a path in `paths` only, it decides whether this
- * document load shows the brand loader; if so it marks the session, sets
- * `html[data-stage-loader]` and adds the pre-cover style. The preview's
+ * document load shows the brand loader; if so it sets `html[data-stage-loader]`
+ * and adds the pre-cover style. The preview's
  * `?loader=never|always` is read here, from the URL, never on the server:
  * `always` (QA only) skips the device checks but still needs storage, like
  * every real load.
  */
 export function stageLoaderScript(
   paths: readonly string[] = STAGE_LOADER_PATHS,
-  keys: { session: string; crash: string } = {
-    session: BRAND_LOADER_SESSION_KEY,
-    crash: STAGE_CRASH_KEY,
-  },
+  crashKey: string = STAGE_CRASH_KEY,
 ): string {
-  const session = JSON.stringify(keys.session);
-  const crash = JSON.stringify(keys.crash);
+  const crash = JSON.stringify(crashKey);
   return (
     `(function(){try{` +
     `var l=window.location,p=l.pathname.replace(/\\/+$/,'')||'/';` +
@@ -90,7 +105,6 @@ export function stageLoaderScript(
     `if(c&&c.saveData)return;` +
     `if(typeof n.deviceMemory==='number'&&n.deviceMemory<=2)return;` +
     `}` +
-    `s.setItem(${session},'1');` +
     `var d=document,st=d.createElement('style');` +
     `st.textContent=${JSON.stringify(PRE_COVER_CSS)};` +
     `d.head.appendChild(st);` +

@@ -1,19 +1,17 @@
 'use client';
 
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type ComponentType,
-} from 'react';
-import type { BrandLoaderProps } from '@/components/loader/BrandLoader';
+  leaveAtMs,
+  type LoaderTimings,
+} from '@/components/loader/loader-timeline';
 import { useStage3d } from './Stage3dProvider';
+import { StageLoaderMark, markRevealElapsed } from './stage-loader-mark';
 import {
   HOME_LOADER_MAX_MS,
   LOADER_LATE_AT_MS,
   STAGE_LOADER_ATTR,
-  loaderMaxMs,
+  loaderTimings,
 } from './stage-loader-script';
 import styles from './pack-stage.module.css';
 
@@ -44,28 +42,29 @@ const dropAttr = () =>
  *  the cap, the exit fade and a margin. Never an inert page for good. */
 const GIVE_UP_MS = HOME_LOADER_MAX_MS + 1500;
 
-type Loaded = { Loader: ComponentType<BrandLoaderProps>; maxMs: number };
+type Plan = { at: number; timings: LoaderTimings; readyAt: number | null };
 
 /**
- * The stage's brand loader (plan section 6). The shell is in every server
- * render, shown by CSS only under `html[data-stage-loader]`, and paints what
- * BrandLoader paints at clock 0: the ink cover. On hydration it unmounts at
- * once when that attribute is absent (a reduced-motion or low-data visitor, a
- * crash flag, ?loader=never). It never decides itself: the inline script did.
+ * The stage's brand loader. The shell is in every server render, shown by CSS
+ * only under `html[data-stage-loader]`, and its mark (StageLoaderMark) starts
+ * drawing at the first paint, with no script: hydration takes the same nodes
+ * over, so nothing restarts. On hydration it unmounts at once when that
+ * attribute is absent (a reduced-motion or low-data visitor, a crash flag,
+ * ?loader=never). It never decides itself: the inline script did.
  *
- * BrandLoader itself (and the motion components it animates with) is loaded
- * only on a document load that shows it (every full load since 2026-11-21),
- * after hydration, so a visitor who never sees it never downloads it. It leaves when the 3D stage is ready (or settled flat, then at
- * its minimum), and at the latest HOME_LOADER_MAX_MS after navigation start:
- * `maxMs` is taken when it mounts, since it times from its own mount.
- * `onLeave` fires as its exit fade starts; finishing, failing to load or
- * unmounting drops the html attribute.
+ * It leaves when the reveal is over and the 3D stage is ready (or settled
+ * flat), and at the latest HOME_LOADER_MAX_MS after navigation start; a page
+ * hydrating after LOADER_LATE_AT_MS lets go at once, with no exit. `onLeave`
+ * fires as the exit fade starts; the end of the fade, or unmounting, drops
+ * the html attribute.
  */
 export default function StageLoader({ onLeave }: { onLeave?: () => void }) {
   const up = useStageLoaderUp(true);
   const stage3d = useStage3d();
   const ready = stage3d.ready || stage3d.mode === 'flat';
-  const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const [leaving, setLeaving] = useState(false);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const planRef = useRef<Plan | null>(null);
   const onLeaveRef = useRef(onLeave);
   useEffect(() => {
     onLeaveRef.current = onLeave;
@@ -75,55 +74,54 @@ export default function StageLoader({ onLeave }: { onLeave?: () => void }) {
 
   useEffect(() => {
     if (!up) return;
-    // Hydrated too late for any reveal (a slow device or network; the CSS
-    // failsafe has shown the page by now): just let go, no loader download.
+    // Hydrated too late for an exit (a slow device or network; the CSS
+    // failsafe is about to show the page): just let go.
     if (performance.now() > LOADER_LATE_AT_MS) {
       dropAttr();
       return;
     }
-    let live = true;
-    import('@/components/loader/BrandLoader').then(
-      (m) => {
-        if (!live) return;
-        const now = performance.now();
-        // Too late for a reveal inside the cap: hand straight over to the page.
-        if (now > LOADER_LATE_AT_MS) {
-          onLeaveRef.current?.();
-          dropAttr();
-          return;
-        }
-        setLoaded({ Loader: m.BrandLoader, maxMs: loaderMaxMs(now) });
-      },
-      () => dropAttr(),
-    );
     const giveUp = window.setTimeout(
       dropAttr,
       Math.max(0, GIVE_UP_MS - performance.now()),
     );
-    return () => {
-      live = false;
-      window.clearTimeout(giveUp);
-    };
+    return () => window.clearTimeout(giveUp);
   }, [up]);
+
+  // The exit timer, planned once at hydration so `ready` flipping never
+  // restarts it: the reveal goes on from where the CSS clock is.
+  useEffect(() => {
+    if (!up || leaving) return;
+    const now = performance.now();
+    if (!planRef.current) {
+      if (now > LOADER_LATE_AT_MS) return;
+      planRef.current = {
+        at: now,
+        timings: loaderTimings(now, markRevealElapsed(shellRef.current)),
+        readyAt: null,
+      };
+    }
+    const plan = planRef.current;
+    const elapsed = now - plan.at;
+    if (ready && plan.readyAt === null) plan.readyAt = elapsed;
+    const wait = Math.max(0, leaveAtMs(plan.readyAt, plan.timings) - elapsed);
+    const id = window.setTimeout(() => setLeaving(true), wait);
+    return () => window.clearTimeout(id);
+  }, [up, ready, leaving]);
+
+  useEffect(() => {
+    if (!leaving) return;
+    onLeaveRef.current?.();
+    const id = window.setTimeout(
+      dropAttr,
+      planRef.current?.timings.exitMs ?? 0,
+    );
+    return () => window.clearTimeout(id);
+  }, [leaving]);
 
   if (!up) return null;
   return (
-    <div className={styles.shell} data-stage-loader-shell="">
-      {loaded ? (
-        <loaded.Loader
-          ready={ready}
-          maxMs={loaded.maxMs}
-          onLeave={onLeave}
-          onDone={dropAttr}
-        />
-      ) : (
-        // BrandLoader's own first frame: the ink cover, nothing drawn yet.
-        <div
-          role="status"
-          aria-label="Loading Polycards"
-          className="fixed inset-0 z-[1000] bg-neutral-950"
-        />
-      )}
+    <div ref={shellRef} className={styles.shell} data-stage-loader-shell="">
+      <StageLoaderMark leaving={leaving} />
     </div>
   );
 }

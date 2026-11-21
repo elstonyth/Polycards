@@ -77,8 +77,9 @@ function run(script: string, env: Env = {}) {
 const script = stageLoaderScript();
 
 describe('stage loader pre-paint script', () => {
-  it('uses the brand loader session key and the 3D crash key', () => {
-    expect(script).toContain(JSON.stringify(BRAND_LOADER_SESSION_KEY));
+  it('reads the 3D crash key and never touches the old session key', () => {
+    expect(script).not.toContain(JSON.stringify(BRAND_LOADER_SESSION_KEY));
+    expect(script).not.toContain('setItem');
     expect(script).toContain(JSON.stringify(STAGE_CRASH_KEY));
     expect(STAGE_LOADER_ATTR).toBe('data-stage-loader');
     expect(script).not.toMatch(/<\/script/i);
@@ -107,10 +108,10 @@ describe('stage loader pre-paint script', () => {
     }
   });
 
-  it('shows the loader on a first visit, marks the session and adds the pre-cover', () => {
+  it('shows the loader on a first visit and adds the pre-cover, writing nothing', () => {
     const r = run(script);
     expect(r.shown).toBe(true);
-    expect(r.store?.[BRAND_LOADER_SESSION_KEY]).toBe('1');
+    expect(r.store).toEqual({});
     expect(r.styles).toHaveLength(1);
     expect(r.styles[0]).toContain(
       'html[data-stage-loader]:not(:has([data-stage-loader-shell]))::before',
@@ -123,7 +124,7 @@ describe('stage loader pre-paint script', () => {
     expect(r.styles).toHaveLength(1);
   });
 
-  it('skips when 3D is not predicted, without spending the session', () => {
+  it('skips when 3D is not predicted', () => {
     for (const env of [
       { reducedMotion: true },
       { reducedData: true },
@@ -135,16 +136,13 @@ describe('stage loader pre-paint script', () => {
     ] satisfies Env[]) {
       const r = run(script, env);
       expect(r.shown, JSON.stringify(env)).toBe(false);
-      expect(r.store?.[BRAND_LOADER_SESSION_KEY], JSON.stringify(env)).toBe(
-        undefined,
-      );
     }
     expect(run(script, { deviceMemory: 4 }).shown).toBe(true);
   });
 
-  it('skips when storage throws, on read or on write (never a stuck overlay)', () => {
+  it('skips when storage cannot be read (never a stuck overlay); a full store is no reason to skip', () => {
     expect(run(script, { store: 'throws' }).shown).toBe(false);
-    expect(run(script, { store: 'setThrows' }).shown).toBe(false);
+    expect(run(script, { store: 'setThrows' }).shown).toBe(true);
   });
 
   it('honours the preview overrides from the URL', () => {
