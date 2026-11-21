@@ -59,11 +59,22 @@ const send = (s, type, pts) =>
     touchPoints: pts.map(([x, y], i) => ({ x, y, id: i })),
   });
 
-/** Three 150 px moves up; then one frame (or holdMs still) and the release. */
-async function flick(s, holdMs = 0) {
+/**
+ * Three 150 px moves up; then one frame (or holdMs still) and the release.
+ * `liftNow`: the release goes out right behind the last move, without
+ * waiting for the page's reply to it (that reply takes 60 to 100 ms in
+ * headless Chrome, which by the events' own times is a finger held still).
+ */
+async function flick(s, holdMs = 0, liftNow = false) {
   await send(s, 'touchStart', [[X, Y0]]);
-  for (let i = 1; i <= MOVES; i++)
+  for (let i = 1; i < MOVES; i++)
     await send(s, 'touchMove', [[X, Y0 - STEP * i]]);
+  const last = send(s, 'touchMove', [[X, Y0 - STEP * MOVES]]);
+  if (liftNow) {
+    await Promise.all([last, send(s, 'touchEnd', [])]);
+    return;
+  }
+  await last;
   if (holdMs) await s.page.waitForTimeout(holdMs);
   else await s.frames(1);
   await send(s, 'touchEnd', []);
@@ -160,7 +171,7 @@ try {
     const near = Math.round(t.lastTop - (MOVES * STEP + 100));
     await place(near);
     await arm(s);
-    await flick(s);
+    await flick(s, 0, true);
     await s.page.waitForTimeout(400);
     await s.capture('flick across Last: 400 ms after the release');
     await s.settle({ quiet: 500, timeout: 6000 });
