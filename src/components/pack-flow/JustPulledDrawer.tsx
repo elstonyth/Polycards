@@ -26,6 +26,26 @@ import { JustPulledView } from './JustPulledView';
 const LEAVE_MS = 520;
 const DESKTOP = '(min-width: 1024px)';
 
+/** A pack is focused and the visitor has not gone past its details: the
+ *  focused pack polls its own pulls, so the drawer's poll waits (the stage's
+ *  words: data-focus-on on its wrap, data-flow-past on the flow root). */
+export function focusHolds(): boolean {
+  return (
+    !!document.querySelector('[data-focus-on]') &&
+    !document.querySelector('[data-flow-past]')
+  );
+}
+
+export function subscribeFocusHold(onChange: () => void) {
+  const watch = new MutationObserver(onChange);
+  watch.observe(document.documentElement, {
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['data-focus-on', 'data-flow-past'],
+  });
+  return () => watch.disconnect();
+}
+
 function subscribeDesktop(onChange: () => void) {
   const m = window.matchMedia(DESKTOP);
   m.addEventListener('change', onChange);
@@ -71,12 +91,18 @@ export function JustPulledDrawer({
   // The plain list under reduced motion: no limit behind the front, so
   // nothing leaves.
   const behind = usePrefersReducedMotion() ? Infinity : tabsBehind(desktop);
+  const held = useSyncExternalStore(
+    subscribeFocusHold,
+    focusHolds,
+    () => false,
+  );
   const { pulls, drought, pending, shownScope, shownCategory } =
     useLiveRecentPulls(
       initial,
       undefined,
       feedRarity(tab),
       mounted && active === POLY_CATEGORY ? POLY_CATEGORY : undefined,
+      { paused: held },
     );
   const [stack, setStack] = useState(() => startStack(shownScope, pulls));
   // A new feed moves the stack in the same render (state adjusted while

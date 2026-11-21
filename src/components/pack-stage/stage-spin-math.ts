@@ -41,8 +41,7 @@ export function dampedFollow(
 }
 
 /**
- * Float-in visibility (the "All packs" arrival; wired with
- * focus): each pack fades in over the first third of its rise, like the CSS
+ * Float-in visibility (as the loader leaves): each pack fades in over the first third of its rise, like the CSS
  * `stage-in` fade, so an arrival at `intro` 0 draws nothing.
  */
 export function introOpacity(intro: number, d: number): number {

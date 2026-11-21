@@ -108,7 +108,7 @@ export function slotOpacity(d: number, desktop: boolean): number {
 /**
  * A pack's whole opacity: its reach fade (the spin row's, while it runs),
  * times the category switch's fade (sinking packs fade out, rising ones in, on
- * the SPRING curve of `swap`). (The arrival's float-in fade, `introOpacity`,
+ * the SPRING curve of `swap`). (The float-in fade, `introOpacity`,
  * and the focus fade are added by `stage-compose.ts`, wired with focus.) And
  * the focus neighbour fade. The canvas draws with this; the CSS tiles
  * (`tileVars`) use the same formula.

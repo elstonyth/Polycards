@@ -36,7 +36,12 @@ import styles from './focus.module.css';
 
 /** The focused pack's stops, in order. */
 export type FocusStopKind =
-  'front' | 'tophits' | 'odds' | 'buyback' | 'pulls' | 'closing';
+  | 'front'
+  | 'tophits'
+  | 'odds'
+  | 'buyback'
+  | 'pulls'
+  | 'closing';
 
 export type FocusStopsProps = {
   seed: FlowSeed;
@@ -338,6 +343,7 @@ export function FocusStops({
                   initial={data.recentPulls}
                   onOpenCard={overlay.open}
                   limit={desktop ? 8 : 4}
+                  unseeded={seed.recentPulls === null}
                   bare
                 />
               ) : (

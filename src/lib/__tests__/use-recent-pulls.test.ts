@@ -215,6 +215,47 @@ describe('useLiveRecentPulls', () => {
     h.unmount();
   });
 
+  it('unseeded: pending until the first answer, which lands even when empty', async () => {
+    respond({ pulls: [], drought: {} });
+    const h = renderHook(
+      () =>
+        useLiveRecentPulls(
+          { pulls: [], drought: {} },
+          'bronze-pack',
+          null,
+          undefined,
+          {
+            unseeded: true,
+          },
+        ),
+      {},
+    );
+    expect(h.current.pending).toBe(true);
+    await flush();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(h.current.pending).toBe(false);
+    h.unmount();
+  });
+
+  it('paused polls nothing, and a resume fetches at once', async () => {
+    const h = renderHook(
+      (p: { paused: boolean }) =>
+        useLiveRecentPulls(seed, undefined, null, undefined, {
+          paused: p.paused,
+        }),
+      { paused: true },
+    );
+    await poll();
+    await poll();
+    expect(fetchMock).not.toHaveBeenCalled();
+    respond({ pulls: [pull('new')], drought: {} });
+    h.rerender({ paused: false });
+    await flush();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(h.current.pulls.map((p) => p.id)).toEqual(['new']);
+    h.unmount();
+  });
+
   it('keeps the current set on a failed poll', async () => {
     const h = renderHook(() => useLiveRecentPulls(seed, undefined, null), {});
     await flush();

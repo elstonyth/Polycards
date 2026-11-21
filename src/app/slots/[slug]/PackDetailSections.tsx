@@ -177,6 +177,7 @@ export function PackRecentPulls({
   onOpenCard,
   bare,
   limit,
+  unseeded,
 }: {
   pack: Pick<Pack, 'id' | 'draft' | 'prizeType'>;
   initial: RecentFeed;
@@ -184,6 +185,8 @@ export function PackRecentPulls({
   bare?: boolean;
   /** Only the newest this many pulls (the homepage flow). */
   limit?: number;
+  /** `initial` is a placeholder until the first answer (the homepage flow). */
+  unseeded?: boolean;
 }) {
   if (pack.draft) return null;
   return (
@@ -215,6 +218,7 @@ export function PackRecentPulls({
         onSelect={onOpenCard}
         noun={isTicketPack(pack) ? 'capsule' : 'pack'}
         limit={limit}
+        unseeded={unseeded}
       />
     </Section>
   );

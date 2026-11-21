@@ -36,7 +36,6 @@ import {
 } from './stage-filter';
 import StageTrack, { type StageTrackHandle } from './StageTrack';
 import { loadSpinKit } from './stage-spin-load';
-import { takeArrival } from './stage-arrival';
 import { startEntry } from './stage-focus-entry';
 import { packPagePath, packPath } from './stage-focus-marks';
 import { useFlowWait } from './stage-flow-wait';
@@ -284,10 +283,6 @@ export default function PackStage({
       if (wasUpRef.current || performance.now() > LOADER_LATE_AT_MS) return;
       wasUpRef.current = true;
       holdIntro();
-    } else if (!wasUpRef.current && takeArrival()) {
-      // "All packs" from a pack page: the float-in (instant under reduced motion)
-      wasUpRef.current = true;
-      onLoaderLeave();
     } else if (wasUpRef.current && !leftRef.current) {
       // The loader went without its exit (failed to load, gave up): the packs
       // must still come in, never stay parked at the float-in's start.

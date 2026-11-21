@@ -3036,25 +3036,34 @@ for (const size of sizes) {
     await load(s);
     const s0 = await snap(page);
     const reload = async () => {
-      // a pack address (written by the flow without the QA query): keep the
-      // QA switches on it, so the reloaded page can be read
-      await page.evaluate(() => {
-        const u = new URL(location.href);
-        if (!/^\/slots\//.test(u.pathname) || u.searchParams.has('debug'))
-          return;
-        u.searchParams.set('stage', '3d');
-        u.searchParams.set('debug', '1');
-        u.searchParams.set('loader', 'never');
-        history.replaceState(history.state, '', u.pathname + u.search);
-      });
-      await page.reload({ waitUntil: 'load' });
+      const at = new URL(page.url());
+      // a pack address (written by the flow without the QA query): its
+      // redirect drops the QA switches, so read the redirect from the
+      // response alone, then open the flow on that pack with the debug handle
+      let served = null;
+      if (/^\/slots\//.test(at.pathname)) {
+        const res = await page.reload({ waitUntil: 'load' });
+        const u = res ? new URL(res.url()) : null;
+        served = u && {
+          path: u.pathname,
+          focus: u.searchParams.get('focus'),
+          qa: ['debug', 'stage', 'loader', 'soldout', 'jp'].filter((k) =>
+            u.searchParams.has(k),
+          ),
+        };
+        const id = decodeURIComponent(at.pathname.slice('/slots/'.length));
+        await page.goto(
+          `${BASE}${PREVIEW}?focus=${encodeURIComponent(id)}&stage=3d&debug=1&loader=never`,
+          { waitUntil: 'load' },
+        );
+      } else await page.reload({ waitUntil: 'load' });
       const loadY = await page.evaluate(() => window.__loadY ?? null);
       const path = new URL(page.url()).pathname;
       if (path === PREVIEW) await ready(page);
       else await page.waitForTimeout(2500);
       // a reload of a pack address opens the flow on that pack: give it the
       // loader and the move to Front
-      return { loadY, r: await rest(page, 12000) };
+      return { loadY, served, r: await rest(page, 12000) };
     };
     let x = await reload();
     await shot(page, size, 'reload-row');
@@ -3078,12 +3087,15 @@ for (const size of sizes) {
       `reload-at-middle-stop-${size}`,
       // under the preview switch a load of the pack's address opens the flow
       // on that pack at Front (a fresh entry: no saved stop)
-      x.r.path === `/slots/${SLUG}` &&
+      x.served?.path === PREVIEW &&
+        x.served.focus === SLUG &&
+        x.served.qa.length === 0 &&
+        x.r.path === `/slots/${SLUG}` &&
         !!x.r.stage &&
         x.r.on &&
         near(x.r.y, x.r.stops[1]) &&
         x.r.block === x.r.kinds[0],
-      `resting at ${r.block} (address ${r.path}); the reload serves ${x.r.path} ${x.r.stage ? 'with the preview stage' : 'as the pack page (not the preview)'}, focused ${x.r.on} at ${x.r.block} (y ${x.r.y}, Front ${x.r.stops?.[1]})`,
+      `resting at ${r.block} (address ${r.path}); its reload redirects to ${x.served?.path}?focus=${x.served?.focus} (QA switches kept: ${x.served?.qa.join(',') || 'none'}); the flow opened there serves ${x.r.path} ${x.r.stage ? 'with the preview stage' : 'as the pack page (not the preview)'}, focused ${x.r.on} at ${x.r.block} (y ${x.r.y}, Front ${x.r.stops?.[1]})`,
     );
     await load(s);
     await page.keyboard.press('End');

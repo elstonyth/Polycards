@@ -41,6 +41,9 @@ export type LivePollOptions<T> = {
    *  does, instead of downloading at once what the caller was just handed.
    *  `pending` stays true until that tick, so the caller renders `initial`. */
   seedFollowsKey?: boolean;
+  /** `initial` is a placeholder, not data for any scope: `pending` stays true
+   *  until the first answer lands, and the first tick fetches at once. */
+  unseeded?: boolean;
   /** A failure before anything has landed in this run is tried once more
    *  after this long, instead of waiting for the interval. Omit: no retry. */
   retryMs?: number;
@@ -79,16 +82,19 @@ export function useLivePoll<T>(
     accept,
     firstTickMs = 0,
     seedFollowsKey = false,
+    unseeded = false,
     retryMs,
     fetchJson,
   }: LivePollOptions<T>,
 ): LivePoll<T> {
   const [data, setData] = useState(initial);
-  const [shownKey, setShownKey] = useState(resetKey);
+  // Unseeded: a key other than resetKey, so nothing on screen belongs to it.
+  const startKey = unseeded ? `${resetKey}#unseeded` : resetKey;
+  const [shownKey, setShownKey] = useState(startKey);
   // Refs are what the async tick reads; the state above is what renders. A
   // second tick in the same effect run (mount + a visibility refetch) must see
   // the first one's write, which the state mirror in its closure cannot show.
-  const shownRef = useRef(resetKey);
+  const shownRef = useRef(startKey);
   const dataRef = useRef(initial);
   // Monotonic request id: only the newest may write, or an older response
   // would roll the data back.

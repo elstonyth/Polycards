@@ -47,7 +47,3 @@ export type FlowData = {
   /** Changes exactly when the back's printed text changes (reprint trigger). */
   backKey: string;
 };
-
-/** Where the address says the flow is (see flow-address). */
-export type FlowLocation =
-  { kind: 'stage' } | { kind: 'focus'; id: string } | { kind: 'other' };

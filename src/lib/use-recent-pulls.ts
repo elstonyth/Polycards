@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import type { RecentFeed } from '@/lib/data/packs';
 import type { Rarity } from '@/lib/packs-data';
 import { loadSchemas } from '@/lib/lazy-schemas';
@@ -39,12 +40,18 @@ async function acceptFeed(
  *  on screen meanwhile, so a tab switch never flashes an empty list).
  *  `category` reads that category's capsule spins instead of the global feed
  *  (the home Poly tab), and switches the same way.
- *  Keeps the last good set on transient failures so the feed never blanks. */
+ *  Keeps the last good set on transient failures so the feed never blanks.
+ *  `paused` stops the poll (it fetches at once when it resumes); `unseeded`
+ *  says `initial` is a placeholder, so `pending` holds until the first answer. */
 export function useLiveRecentPulls(
   initial: RecentFeed,
   packSlug?: string,
   rarity?: Rarity | null,
   category?: string,
+  {
+    paused = false,
+    unseeded = false,
+  }: { paused?: boolean; unseeded?: boolean } = {},
 ): RecentFeed & {
   pending: boolean;
   /** The (pack, tier, category) scope the rows on screen belong to — changes
@@ -59,11 +66,14 @@ export function useLiveRecentPulls(
   if (rarity) q.set('rarity', rarity);
   if (category) q.set('category', category);
   const qs = q.toString();
+  // Once paused, a resume fetches at once: the rows on screen may be stale.
+  const [held, setHeld] = useState(false);
+  if (paused && !held) setHeld(true);
   // The seed came from the server for the mount-time pack, unfiltered — so the
   // scope it belongs to is the mount-time scope, which is what useLivePoll
   // records as `shownKey`.
   const { data, pending, shownKey } = useLivePoll<RecentFeed>(
-    `/api/recent-pulls${qs ? `?${qs}` : ''}`,
+    paused ? null : `/api/recent-pulls${qs ? `?${qs}` : ''}`,
     initial,
     {
       intervalMs: POLL_MS,
@@ -73,7 +83,8 @@ export function useLiveRecentPulls(
       // Row times are absolute, so a seed that waits one interval still reads
       // true, and this is the storefront's highest-volume request. An empty seed
       // may be a failed server read, so that one fetches at once.
-      firstTickMs: initial.pulls.length > 0 ? POLL_MS : 0,
+      firstTickMs: initial.pulls.length > 0 && !held ? POLL_MS : 0,
+      unseeded,
       accept: acceptFeed,
     },
   );

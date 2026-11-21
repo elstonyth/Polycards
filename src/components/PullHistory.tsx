@@ -409,6 +409,7 @@ export function PullHistory({
   variant = 'cards',
   heading,
   limit,
+  unseeded = false,
 }: {
   /** `cards`: the panel as the home feed wears it. `board`: the pack page's
    *  soft layout (counters and filter in a side column, the pulls as one
@@ -432,6 +433,9 @@ export function PullHistory({
    * flow's stop: no heading, counters or tier filter).
    */
   limit?: number;
+  /** `initial` is a placeholder (the homepage flow): until the first answer
+   *  lands the empty list says nothing rather than "No pulls yet". */
+  unseeded?: boolean;
 }) {
   const [tab, setTab] = useState<Tab>('All');
   const { pulls, drought, pending, shownScope, shownCategory } =
@@ -440,10 +444,19 @@ export function PullHistory({
       packSlug,
       tab === 'All' || tab === 'Stats' ? null : tab,
       category,
+      { unseeded },
     );
   // A category feed is capsules. Follows the rows that landed, not the prop: the
   // counters on screen are the old scope's until the new one arrives.
   const shownNoun = shownCategory ? 'capsule' : noun;
+  const emptyLine =
+    unseeded && pending ? (
+      <span className="sr-only">Loading recent pulls</span>
+    ) : tab === 'All' ? (
+      `No pulls yet — be the first to open a ${shownNoun}.`
+    ) : (
+      `No ${tab} pulls yet — the next rip could be the one.`
+    );
   const shown = limit ? pulls.slice(0, limit) : pulls;
   const droughts = RARITY_ORDER.flatMap((r) => {
     const n = drought[r];
@@ -556,9 +569,7 @@ export function PullHistory({
                 <Bezel>
                   {pulls.length === 0 ? (
                     <p className="px-4 py-12 text-center text-sm text-neutral-400">
-                      {tab === 'All'
-                        ? `No pulls yet — be the first to open a ${shownNoun}.`
-                        : `No ${tab} pulls yet — the next rip could be the one.`}
+                      {emptyLine}
                     </p>
                   ) : (
                     // Keyed on the scope whose rows are on screen, NOT the
@@ -683,9 +694,7 @@ export function PullHistory({
         >
           {pulls.length === 0 ? (
             <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-10 text-center text-[13px] text-white/60">
-              {tab === 'All'
-                ? `No pulls yet — be the first to open a ${shownNoun}.`
-                : `No ${tab} pulls yet — the next rip could be the one.`}
+              {emptyLine}
             </div>
           ) : (
             // Keyed on the scope whose rows are on screen, NOT the tab: the

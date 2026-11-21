@@ -11,6 +11,7 @@ import { POLY_CATEGORY } from '@/lib/packs-data';
 
 const shelf = vi.hoisted(() => ({ active: '' }));
 const feedCalls = vi.hoisted(() => [] as (string | undefined)[]);
+const pausedCalls = vi.hoisted(() => [] as (boolean | undefined)[]);
 
 vi.mock('@/components/home/ShelfCategory', () => ({
   useShelfCategory: () => ({ active: shelf.active }),
@@ -21,8 +22,10 @@ vi.mock('@/lib/use-recent-pulls', () => ({
     _a: unknown,
     _b: unknown,
     category: string | undefined,
+    opts?: { paused?: boolean },
   ) => {
     feedCalls.push(category);
+    pausedCalls.push(opts?.paused);
     return {
       pulls: initial.pulls,
       drought: initial.drought,
@@ -46,6 +49,7 @@ let host: HTMLDivElement;
 
 beforeEach(() => {
   feedCalls.length = 0;
+  pausedCalls.length = 0;
   frames = [];
   vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
     frames.push(cb);
@@ -101,5 +105,31 @@ describe('JustPulledDrawer follows the shelf tab', () => {
     nextFrame();
     expect(feedCalls.length).toBeGreaterThan(1);
     expect(feedCalls.every((c) => c === undefined)).toBe(true);
+  });
+});
+
+describe('JustPulledDrawer pauses while a pack is focused', () => {
+  it('pauses on a focused pack before its details, resumes past them or on leave', async () => {
+    shelf.active = '';
+    const wrap = document.createElement('div');
+    const flow = document.createElement('div');
+    flow.append(wrap);
+    document.body.append(flow);
+    mount();
+    expect(pausedCalls.at(-1)).toBe(false);
+    const settle = () => act(async () => {});
+    wrap.setAttribute('data-focus-on', '');
+    await settle();
+    expect(pausedCalls.at(-1)).toBe(true);
+    flow.setAttribute('data-flow-past', '');
+    await settle();
+    expect(pausedCalls.at(-1)).toBe(false);
+    flow.removeAttribute('data-flow-past');
+    await settle();
+    expect(pausedCalls.at(-1)).toBe(true);
+    wrap.removeAttribute('data-focus-on');
+    await settle();
+    expect(pausedCalls.at(-1)).toBe(false);
+    flow.remove();
   });
 });

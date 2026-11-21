@@ -392,6 +392,33 @@ describe('Recent Pulls as a board', () => {
     expect(text()).toContain('No pulls yet — be the first to open a pack.');
   });
 
+  test('an unseeded list says nothing until the first answer lands', () => {
+    const render = (pending: boolean) => {
+      feed.current = {
+        pulls: [],
+        drought: {},
+        pending,
+        shownScope: 'all',
+        shownCategory: undefined,
+      };
+      act(() =>
+        root.render(
+          createElement(PullHistory, {
+            variant: 'board',
+            initial: { pulls: [], drought: {} },
+            packSlug: 'diamond-pack',
+            limit: 4,
+            unseeded: true,
+          }),
+        ),
+      );
+    };
+    render(true);
+    expect(text()).not.toContain('No pulls yet');
+    render(false);
+    expect(text()).toContain('No pulls yet — be the first to open a pack.');
+  });
+
   test('a ticket win prints its amount once and opens nothing', () => {
     history(vi.fn(), [pull('t', { tickets: 1000, priceMyr: null })]);
     const row = host.querySelector('ol > li')!;
