@@ -109,6 +109,58 @@ export function turnPhases(
   return toBack ? { turn: lead, roll: follow } : { turn: follow, roll: lead };
 }
 
+/**
+ * Desktop: the free lane of the panel for a back lying across it, in panel
+ * width fractions, from the stop text's column (focus.module.css `.over
+ * .block`: left 10.2% + width 33.4%) to the stop icons (`.icons`: left
+ * 1334/1440), with a gap in px on each side.
+ */
+export const DESKTOP_BACK_LANE = { left: 0.436, right: 1334 / 1440, gap: 24 };
+
+/**
+ * A desktop back key (lying down, rz 90: its long side runs across) moved,
+ * and shrunk only when it is longer than the lane, so it stays between the
+ * text and the icons at any panel aspect.
+ */
+export function fitBackKey(
+  key: Readonly<{ cx: number; long: number }>,
+  w: number,
+  h: number,
+): { cx: number; long: number } {
+  const left = DESKTOP_BACK_LANE.left * w + DESKTOP_BACK_LANE.gap;
+  const right = DESKTOP_BACK_LANE.right * w - DESKTOP_BACK_LANE.gap;
+  if (!(w > 0 && h > 0 && right > left)) return { cx: key.cx, long: key.long };
+  const len = Math.min(key.long * h, right - left);
+  const cx = Math.min(right - len / 2, Math.max(left + len / 2, key.cx * w));
+  return { cx: cx / w, long: len / h };
+}
+
+/**
+ * Phone: the px under the pack kept for the Front text and the buy dock (and
+ * Closing's title and buttons). The reference phone's pose (390 wide) ends
+ * there; narrower phones wrap their text into more lines, so they keep more.
+ */
+export function phoneTextReserve(w: number): number {
+  return 250 + Math.min(30, Math.max(0, 390 - w) * 0.6);
+}
+
+/**
+ * A phone Front or Closing key (upright: its long side runs down) shrunk from
+ * its foot, top kept, so it ends above the text under it on short phones.
+ */
+export function fitPhoneTextKey(
+  key: Readonly<{ cy: number; long: number }>,
+  w: number,
+  h: number,
+): { cy: number; long: number } {
+  const top = (key.cy - key.long / 2) * h;
+  const foot = h - phoneTextReserve(w);
+  const len = key.long * h;
+  if (!(h > 0) || top + len <= foot || foot <= top)
+    return { cy: key.cy, long: key.long };
+  return { cy: (top + (foot - top) / 2) / h, long: (foot - top) / h };
+}
+
 /** A key as a pose block for the focused pack (`d` slots off the track). */
 function keyBlock(
   key: Readonly<FocusKey>,
@@ -116,8 +168,15 @@ function keyBlock(
   l: Readonly<StageLayout>,
   ctx: Readonly<FocusCtx>,
   soldOut: boolean,
+  desktop: boolean,
 ): FocusPoseBlock {
   const { w, h } = ctx.panel;
+  const { cx, long, cy } =
+    desktop && key.face === 'back'
+      ? { ...key, ...fitBackKey(key, w, h) }
+      : !desktop && (key.kind === 'front' || key.kind === 'closing')
+        ? { ...key, ...fitPhoneTextKey(key, w, h) }
+        : key;
   // A back stop before the back is on the GPU: the same place, front facing,
   // turning over when it arrives (BACK_TURN_MS, `backW`).
   const backW = ctx.backW ?? 1;
@@ -129,10 +188,10 @@ function keyBlock(
     rotX: key.rx * DEG,
     rotY: ry * DEG,
     rotZ: key.rz * DEG,
-    scale: (key.long * h) / (l.artH * (ctx.fit ?? 1)),
+    scale: (long * h) / (l.artH * (ctx.fit ?? 1)),
     dim: soldOut ? FOCUS_SOLD_OUT_DIM : 1,
-    fx: w > 0 ? (key.cx * w - l.cx) / w : 0,
-    fy: h > 0 ? (key.cy * h - l.cy) / h : 0,
+    fx: w > 0 ? (cx * w - l.cx) / w : 0,
+    fy: h > 0 ? (cy * h - l.cy) / h : 0,
   };
 }
 
@@ -149,7 +208,7 @@ export function focusPose(
   i: number,
   track: number,
   l: Readonly<StageLayout>,
-  _desktop: boolean,
+  desktop: boolean,
   soldOut: boolean,
   ctx: Readonly<FocusCtx>,
 ): FocusPoseBlock {
@@ -160,10 +219,10 @@ export function focusPose(
     const n = ctx.keys.length;
     const { k0, t, x } = segment(f, n);
     const kb = ctx.keys[Math.max(0, k0 - 1)]!;
-    const b = keyBlock(kb, d, l, ctx, soldOut);
+    const b = keyBlock(kb, d, l, ctx, soldOut, desktop);
     const a: FocusPoseBlock = k0 === 0 ? { ...rest, fx: 0, fy: 0 } : b;
     const kt = ctx.keys[Math.min(n - 1, k0)]!;
-    const to = k0 === 0 ? b : keyBlock(kt, d, l, ctx, soldOut);
+    const to = k0 === 0 ? b : keyBlock(kt, d, l, ctx, soldOut, desktop);
     // turning over: the turn and the lie-down are staged; otherwise every
     // part of the pose follows the same ease
     let ty = t;

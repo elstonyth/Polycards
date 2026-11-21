@@ -4,6 +4,10 @@ import type { FocusCtx, StageLayout } from '../contract';
 import POSES from '../focus-poses.json';
 import {
   blockAt,
+  DESKTOP_BACK_LANE,
+  fitBackKey,
+  fitPhoneTextKey,
+  phoneTextReserve,
   focusOpacity,
   focusPose,
   power1InOut,
@@ -63,7 +67,17 @@ describe('focus keys (focus-poses.json)', () => {
             false,
             ctx,
           );
-          const want = table[key.kind]!;
+          const raw = table[key.kind]!;
+          // a desktop back lies between the text column and the icons (fitBackKey)
+          const want =
+            desktop && key.face === 'back'
+              ? { ...raw, ...fitBackKey(raw, PANELS[size].w, PANELS[size].h) }
+              : !desktop && (key.kind === 'front' || key.kind === 'closing')
+                ? {
+                    ...raw,
+                    ...fitPhoneTextKey(raw, PANELS[size].w, PANELS[size].h),
+                  }
+                : raw;
           // the centre the pose places, in panel fractions
           expect(l.cx / PANELS[size].w + p.fx).toBeCloseTo(want.cx, 6);
           expect(l.cy / PANELS[size].h + p.fy).toBeCloseTo(want.cy, 6);
@@ -386,8 +400,9 @@ describe('owner correction (2026-11-20): upright fronts, the back on its side', 
         // the turn leads the roll through the first part of the move
         if (x < 0.35) expect(p.rotZ).toBeCloseTo(0, 9);
         if (x > 0.65) expect(turnAt(p.rotY / DEG)).toBeCloseTo(1, 9);
-        // the size only grows, smoothly (no pop): at most 8% a 2% step
-        expect(p.scale).toBeGreaterThanOrEqual(prev.scale - 1e-9);
+        // the size changes smoothly (no pop): at most 8% a 2% step; it may
+        // ease down a little where the desktop back is fitted to its lane
+        expect(p.scale).toBeGreaterThanOrEqual(prev.scale * 0.995);
         expect(p.scale / prev.scale).toBeLessThan(1.08);
         prev = p;
       }
@@ -426,5 +441,109 @@ describe('timing helpers', () => {
     expect(blockAt(1.21, 6)).toBe(2);
     // going back up the switch is at the same place
     expect(blockAt(1.19, 6)).toBe(1);
+  });
+});
+
+describe('desktop back stops: the pack lies between the text and the icons', () => {
+  const panels = [
+    { w: 1440, h: 831 },
+    { w: 1024, h: 700 },
+    { w: 1280, h: 531 },
+    { w: 1920, h: 1011 },
+    { w: 2560, h: 1371 },
+    { w: 3440, h: 1371 },
+  ];
+  it('every pack, at Pull Odds and Buyback, at every desktop panel', () => {
+    for (const slug of SLUGS)
+      for (const panel of panels) {
+        const l: StageLayout = { ...LAYOUT.desktop, cx: panel.w / 2 };
+        const ctx: FocusCtx = { ...ctxFor(slug, true), panel };
+        const left = DESKTOP_BACK_LANE.left * panel.w + DESKTOP_BACK_LANE.gap;
+        const right = DESKTOP_BACK_LANE.right * panel.w - DESKTOP_BACK_LANE.gap;
+        ctx.keys.forEach((key, k) => {
+          if (key.face !== 'back') return;
+          const p = focusPose(
+            restBlock(restState(2), 2, l, true, false),
+            k + 1,
+            0,
+            2,
+            2,
+            l,
+            true,
+            false,
+            ctx,
+          );
+          // lying down (rz 90), the long side runs across the panel
+          const half = (p.scale * l.artH) / 2;
+          const cx = (l.cx / panel.w + p.fx) * panel.w;
+          expect(cx - half).toBeGreaterThanOrEqual(left - 1e-6);
+          expect(cx + half).toBeLessThanOrEqual(right + 1e-6);
+        });
+      }
+  });
+
+  it('keeps a pose that already fits, and shrinks one that is too long', () => {
+    const w = 1440;
+    const h = 831;
+    const fits = { cx: 0.7, long: 0.5 };
+    expect(fitBackKey(fits, w, h)).toEqual(fits);
+    const big = fitBackKey({ cx: 0.5, long: 2 }, w, h);
+    const lane =
+      (DESKTOP_BACK_LANE.right - DESKTOP_BACK_LANE.left) * w -
+      2 * DESKTOP_BACK_LANE.gap;
+    expect(big.long * h).toBeCloseTo(lane, 6);
+  });
+
+  it('leaves the phone poses as the table has them', () => {
+    const ctx = ctxFor('151', false);
+    const table = (POSES.packs as Record<string, Record<string, unknown>>)[
+      '151'
+    ]!.phone as Record<string, { cx: number }>;
+    ctx.keys.forEach((key) => expect(key.cx).toBe(table[key.kind]!.cx));
+  });
+});
+
+describe('phone Front and Closing: the pack ends above the text under it', () => {
+  const panels = [
+    { w: 320, h: 435 },
+    { w: 360, h: 667 },
+    { w: 390, h: 710 },
+    { w: 430, h: 799 },
+  ];
+  it('every pack, at every phone panel', () => {
+    for (const slug of SLUGS)
+      for (const panel of panels) {
+        const l: StageLayout = { ...LAYOUT.phone, cx: panel.w / 2 };
+        const ctx: FocusCtx = { ...ctxFor(slug, false), panel };
+        ctx.keys.forEach((key, k) => {
+          if (key.kind !== 'front' && key.kind !== 'closing') return;
+          const p = focusPose(
+            restBlock(restState(2), 2, l, false, false),
+            k + 1,
+            0,
+            2,
+            2,
+            l,
+            false,
+            false,
+            ctx,
+          );
+          const len = p.scale * l.artH; // upright: the long side runs down
+          const cy = (l.cy / panel.h + p.fy) * panel.h;
+          expect(cy + len / 2).toBeLessThanOrEqual(
+            panel.h - phoneTextReserve(panel.w) + 1e-6,
+          );
+          // the top stays where the table puts it
+          expect(cy - len / 2).toBeCloseTo(
+            (key.cy - key.long / 2) * panel.h,
+            6,
+          );
+        });
+      }
+  });
+
+  it('keeps the reference phone (390 x 710) exactly as the table has it', () => {
+    const key = { cx: 0.45, cy: 0.35, long: 0.58 };
+    expect(fitPhoneTextKey(key, 390, 710)).toEqual({ cy: 0.35, long: 0.58 });
   });
 });
