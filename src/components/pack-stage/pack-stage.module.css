@@ -901,7 +901,9 @@
 
 /* ---- Reduced motion ------------------------------------------------------- */
 
-@media (prefers-reduced-motion: reduce) {
+/* and a view too short for the flow (a phone on its side: FLOW_OFF_QUERY) */
+@media (prefers-reduced-motion: reduce),
+  (orientation: landscape) and (max-height: 500px) {
   /* No pin, no scrub: the page reads as step 1. */
   .spinWrap,
   .flow[data-flow-on] .spinWrap {
