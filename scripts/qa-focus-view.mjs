@@ -312,8 +312,8 @@ for (const size of ['phone', 'desktop']) {
     .catch(() => false));
   report(
     `card-overlay-${size}`,
-    onBody && Math.abs(f1.focus - 2) < 1e-3 && closed,
-    `on the body ${onBody}, focus after a wheel over it ${f1.focus}, closed ${closed}`,
+    onBody && !!db && Math.abs(f1.focus - 2) < 1e-3 && closed,
+    `on the body ${onBody}, dialog box ${db ? 'found' : 'not found (no wheel sent)'}, focus after a wheel over it ${f1.focus}, closed ${closed}`,
   );
 
   // Back then Forward: the stop the entry rested on (Pull Odds or the next)

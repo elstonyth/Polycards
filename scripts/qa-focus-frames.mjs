@@ -135,7 +135,8 @@ function sampler() {
         if (o < 0.01) continue;
         const h = s.querySelector('h2');
         const line = h?.firstElementChild;
-        let head = o;
+        // every block's heading is an h2 around a span; missing either reads as hidden
+        let head = 0;
         if (h && line) {
           const hb = h.getBoundingClientRect();
           const lb = line.getBoundingClientRect();
@@ -170,11 +171,14 @@ function sampler() {
       const rcs = root ? getComputedStyle(root) : null;
       w.__frames.push({
         // the panel's own opacity (the fade past Closing), 0 once hidden
+        // null when the root is not found (the light pass reads no DOM: 1)
         panelOp: rcs
           ? rcs.visibility === 'hidden'
             ? 0
             : Number(rcs.opacity)
-          : 1,
+          : w.__light
+            ? 1
+            : null,
         y: scrollY,
         // the page's first section below the stage, against the viewport
         openTop: w.__light
@@ -251,7 +255,7 @@ async function left(page) {
   await page.waitForTimeout(400);
 }
 
-function judge(name, all, curve = null) {
+function judge(name, all, curve = null, blocksExpected = false) {
   const bad = {
     neighbour: [],
     textOverPack: [],
@@ -358,6 +362,8 @@ function judge(name, all, curve = null) {
       );
   }
   const n = frames.length;
+  // a walk through the stops shows blocks; none sampled means the block selector found nothing (the light pass reads none)
+  const noBlocks = !HEADED && !frames.some((fr) => fr.blocks.length > 0);
   const show = (a) =>
     `${a.length}/${n} frames${a.length ? `; first: ${a[0]}` : ''}`;
   report(
@@ -372,8 +378,10 @@ function judge(name, all, curve = null) {
   );
   report(
     `${name}-heading-with-its-block`,
-    bad.heading.length === 0,
-    show(bad.heading),
+    bad.heading.length === 0 && (!noBlocks || !blocksExpected),
+    (blocksExpected && noBlocks
+      ? 'no element matches [data-testid="focus-stops"] > section[data-kind]; '
+      : '') + show(bad.heading),
   );
   report(
     `${name}-no-front-block-leaving-later`,
@@ -660,7 +668,7 @@ for (const size of ['phone', 'desktop']) {
       await settle(page, k);
     }
   });
-  judge(`${size}-stops`, walk);
+  judge(`${size}-stops`, walk, null, true);
   // past Closing: one gesture pages to the lineup rest while
   // the pack hands over to the tilted lineup: the panel never fades, the
   // page's content never comes into view over the hand-off, the others fade
@@ -687,7 +695,7 @@ for (const size of ['phone', 'desktop']) {
     const moving = past.filter((fr) => fr.on);
     const end = moving.at(-1);
     const flow = await page.evaluate(() => window.__packStage.flow?.());
-    const faded = moving.filter((fr) => fr.panelOp < 1);
+    const faded = moving.filter((fr) => !(fr.panelOp >= 1));
     report(
       `${size}-past-closing-into-the-lineup`,
       faded.length === 0 &&
@@ -695,7 +703,7 @@ for (const size of ['phone', 'desktop']) {
         !!flow?.stops &&
         Math.abs(end.y - flow.stops.at(-1)) < 1 &&
         end.blocks.length === 0,
-      `${moving.length} frames, panel below full opacity in ${faded.length}; last: scroll ${end?.y} vs lineup ${flow?.stops?.at(-1)}, stop blocks shown ${JSON.stringify(end?.blocks ?? null)}`,
+      `${moving.length} frames, panel below full opacity or [data-stage-root] not found in ${faded.length}; last: scroll ${end?.y} vs lineup ${flow?.stops?.at(-1)}, stop blocks shown ${JSON.stringify(end?.blocks ?? null)}`,
     );
     const over = moving.filter(
       (fr) => fr.panelOp > 0.01 && fr.openTop !== null && fr.openTop < fr.vh,

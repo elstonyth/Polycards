@@ -30,6 +30,7 @@ import {
   statSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { missing } from './lib/qa-present.mjs';
 import { fileURLToPath } from 'node:url';
 import { gzipSync } from 'node:zlib';
 
@@ -985,14 +986,19 @@ async function checkContextLoss(label, profile) {
     sessionStorage.getItem('polycards:pack-stage-3d'),
   );
   const allBack = tiles.every((t) => t.live === '0' && t.opacity === '1');
+  const noTiles = await missing(
+    page,
+    '[data-stage-panel]:not([hidden]) [data-stage-tile]',
+  );
   pass(
     `context-loss-${label}`,
-    lost &&
+    !noTiles &&
+      lost &&
       info.mode === 'flat' &&
       allBack &&
       canvases === 0 &&
       flag === 'crashed',
-    `lost ${lost}; mode ${info.mode}; every tile data-live=0 with its picture opaque: ${allBack}; canvases left ${canvases}; crash flag ${flag}`,
+    `${noTiles ? noTiles + '; ' : ''}lost ${lost}; mode ${info.mode}; every tile data-live=0 with its picture opaque: ${allBack}; canvases left ${canvases}; crash flag ${flag}`,
   );
   page.chunkRequests.length = 0;
   await page.reload({ waitUntil: 'load' });
@@ -1587,16 +1593,22 @@ function handSummary(frames) {
   const ids = (list, k) => [...new Set(list.flatMap((f) => f[k]))].join(',');
   // No evidence, no pass: the change must have been seen fully sunk and rising.
   const seen = sunkAt >= 0 && rise.length >= 3;
+  // and a tile must have been sampled, or nothing could be flagged
+  const tiled = frames.some((f) => f.ids.length > 0);
   return {
     ok:
-      seen && doubled.length === 0 && holes.length === 0 && flash.length === 0,
+      seen &&
+      tiled &&
+      doubled.length === 0 &&
+      holes.length === 0 &&
+      flash.length === 0,
     frames: frames.length,
     doubled: doubled.length,
     holes: holes.length,
     flash: flash.length,
     flatRise: flatRise.length,
     riseMs,
-    detail: `${frames.length} frames (fully sunk seen: ${sunkAt >= 0}; rise frames ${rise.length}); doubled ${doubled.length}${doubled.length ? ` (${ids(doubled, 'doubled')})` : ''}; holes ${holes.length}${holes.length ? ` (${ids(holes, 'holes')})` : ''}; visible while sunk ${flash.length}; rise frames with a flat 3D tile ${flatRise.length}${flatRise.length ? ` (${ids(flatRise, 'flat')}, last ${riseMs} ms into the rise)` : ''}`,
+    detail: `${tiled ? '' : 'no visible [data-stage-tile] sampled; '}${frames.length} frames (fully sunk seen: ${sunkAt >= 0}; rise frames ${rise.length}); doubled ${doubled.length}${doubled.length ? ` (${ids(doubled, 'doubled')})` : ''}; holes ${holes.length}${holes.length ? ` (${ids(holes, 'holes')})` : ''}; visible while sunk ${flash.length}; rise frames with a flat 3D tile ${flatRise.length}${flatRise.length ? ` (${ids(flatRise, 'flat')}, last ${riseMs} ms into the rise)` : ''}`,
   };
 }
 
@@ -1856,13 +1868,19 @@ async function checkChips(label, profile) {
   const escClosed = !(await expanded(page));
   const escFocus = await triggerFocused(page);
   const closed = await layoutBoxes(page);
+  // a box that is not found reads null and would compare equal to itself
+  // (Open is absent on a sold-out pack, where a pill takes its place)
+  const unfound = Object.keys(before).filter(
+    (k) => k !== 'open' && before[k] === null,
+  );
   const still =
+    unfound.length === 0 &&
     JSON.stringify(before) === JSON.stringify(opened) &&
     JSON.stringify(before) === JSON.stringify(closed);
   pass(
     `panel-open-escape-${label}`,
     isOpen && focusIn && escClosed && escFocus && still,
-    `opened (aria-expanded ${isOpen}, focus on the current choice ${focusIn}); Escape closed it ${escClosed}, focus back on the trigger ${escFocus}; row, art, price, Open and trigger boxes unchanged through open and close: ${still}${still ? '' : ` before ${JSON.stringify(before)} open ${JSON.stringify(opened)} closed ${JSON.stringify(closed)}`}`,
+    `opened (aria-expanded ${isOpen}, focus on the current choice ${focusIn}); Escape closed it ${escClosed}, focus back on the trigger ${escFocus}; row, art, price, Open and trigger boxes unchanged through open and close: ${still}${unfound.length ? `; not found: ${unfound.join(', ')}` : ''}${still ? '' : ` before ${JSON.stringify(before)} open ${JSON.stringify(opened)} closed ${JSON.stringify(closed)}`}`,
   );
 
   // A tap outside (on the centred pack) only closes: no centring, no navigation.
@@ -2104,6 +2122,7 @@ async function checkPanelChunk(label, profile) {
       `panel-chunk-slow-${label}`,
       waiting.expanded === 'false' &&
         waiting.tabOpacity === '1' &&
+        waiting.pillCorner !== null &&
         waiting.pillCorner !== '0px' &&
         opened === 'true',
       `panel chunk held 2 s, tab tapped at once: while waiting aria-expanded ${waiting.expanded}, tab opacity ${waiting.tabOpacity}, pill corner ${waiting.pillCorner} (round); once it arrived the panel opened (aria-expanded ${opened})`,
@@ -2295,6 +2314,7 @@ async function checkOrders(label, profile) {
     const bad = (k) => frames.filter((f) => f[k].length > 0).length;
     const ok =
       end.mode === '3d' &&
+      end.ids.length > 0 &&
       bad('doubled') === 0 &&
       bad('holes') === 0 &&
       bad('flash') === 0 &&
@@ -2398,7 +2418,10 @@ async function checkChipMemory(label, profile) {
   const back = Math.abs(end.gpuBytesEstimate - base.gpuBytesEstimate) <= 0.5e6;
   pass(
     `chips-memory-x20-${label}`,
-    max <= cap && back && endRow.ids[endRow.at] === startId,
+    max <= cap &&
+      back &&
+      endRow.ids.length > 0 &&
+      endRow.ids[endRow.at] === startId,
     `first load ${(bootStats.gpuBytesEstimate / 1e6).toFixed(1)} MB (${bootStats.textures} textures, ${bootStats.geometries} geometries); rest after a walk out and back ${(base.gpuBytesEstimate / 1e6).toFixed(1)} MB (${base.textures} textures, ${base.geometries} geometries); max during 20 changes + a double tap ${(max / 1e6).toFixed(1)} MB (${maxTex} textures, cap ${cap / 1e6}); back on All centred on ${endRow.ids[endRow.at]}: ${(end.gpuBytesEstimate / 1e6).toFixed(1)} MB (${end.textures} textures, ${end.geometries} geometries)`,
   );
   await ctx.close();
@@ -2708,8 +2731,8 @@ async function checkReturnVisit(label, profile) {
   const holes = sampled.filter((f) => f.holes.length > 0).length;
   pass(
     `return-visit-${label}`,
-    doubled === 0 && holes === 0 && sampled.length > 0,
-    `${sampled.length} frames sampled from the first paint: picture and model together ${doubled}, hidden picture with no model ${holes}; ${frames.length} screencast frames (sheet-return-visit${profile.kind === 'phone' ? '-phone' : ''}.png); page age at the end ${liveAt} ms`,
+    doubled === 0 && holes === 0 && sampled.some((f) => f.ids.length > 0),
+    `${sampled.some((f) => f.ids.length > 0) ? '' : 'no visible [data-stage-tile] sampled; '}${sampled.length} frames sampled from the first paint: picture and model together ${doubled}, hidden picture with no model ${holes}; ${frames.length} screencast frames (sheet-return-visit${profile.kind === 'phone' ? '-phone' : ''}.png); page age at the end ${liveAt} ms`,
   );
   await ctx.close();
 }

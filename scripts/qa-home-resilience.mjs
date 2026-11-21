@@ -890,6 +890,7 @@ async function reducedPart(size) {
     'reduced-plain-document-' + size,
     !r.flowOn &&
       r.feet === 1 &&
+      r.spacers.length > 0 &&
       tall.length === 0 &&
       gap !== null &&
       r.after.length === 0,

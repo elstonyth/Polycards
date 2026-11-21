@@ -9,6 +9,7 @@
 // focus view comes on at /slots/<id>; the check then goes back to the row.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { chromium } from 'playwright';
+import { missing } from './lib/qa-present.mjs';
 
 const args = process.argv.slice(2);
 const BASE =
@@ -255,7 +256,8 @@ const tiles = (page) =>
         return {
           index: t.index,
           id: t.tile.dataset.packId,
-          soldOut: t.tile.querySelector('[data-stage-hit]')?.tagName !== 'A',
+          // a sold-out tile's hit is a div, an open one's a link; no hit is not sold out
+          soldOut: t.tile.querySelector('[data-stage-hit]')?.tagName === 'DIV',
           point,
           hit,
           own,
@@ -480,6 +482,10 @@ async function tapChecks(s, tag) {
   ]) {
     r = await rest(page);
     at = at0(r);
+    const noHit = await missing(
+      page,
+      `[data-stage-panel]:not([hidden]) [data-stage-tile][data-index="${at}"] [data-stage-hit]`,
+    );
     await page.evaluate((i) => {
       document
         .querySelector(
@@ -493,8 +499,8 @@ async function tapChecks(s, tag) {
     report(
       size,
       `${tag}: ${k} steps`,
-      at0(r) - at === d && !r.on,
-      `track ${at} -> ${fx(r.track)}; focus ${r.on}`,
+      !noHit && at0(r) - at === d && !r.on,
+      `${noHit ? noHit + '; ' : ''}track ${at} -> ${fx(r.track)}; focus ${r.on}`,
     );
   }
   // a press on empty ground between packs still swipes the row
