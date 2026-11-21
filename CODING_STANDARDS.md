@@ -16,7 +16,7 @@ Example: `scripts/qa-home-flow.mjs` reads `LAP_TRIM_MARGIN` from `src/components
 
 ## Unused code is deleted
 
-Code that nothing calls, or that only its own tests call, is removed along with those tests. Git history keeps it.
+Code that nothing calls, or that only its own tests call, is removed along with those tests; `npm run knip` and `npm run knip:prod` list it. Git history keeps it.
 
 Example: `src/components/pack-flow/flow-address.ts` and its test went together once no page used them.
 
