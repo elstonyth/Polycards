@@ -674,6 +674,8 @@ export const readEvents = (page) =>
 
 // ---------- frames ----------
 const frames = [];
+/** Forgets the frames captured so far, so the next sheet() starts empty (one sheet per size). */
+export const clearFrames = () => void frames.splice(0);
 /** A CSS-pixel screenshot kept for the contact sheet (and written to OUT as <size>-<nn>-<label>.png). */
 export async function capture(s, label, { file = true } = {}) {
   const buf = await s.page.screenshot({ scale: 'css' });
