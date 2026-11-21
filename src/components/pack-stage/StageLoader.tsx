@@ -8,6 +8,7 @@ import {
 import { useStage3d } from './Stage3dProvider';
 import { StageLoaderMark, markRevealElapsed } from './stage-loader-mark';
 import {
+  ENTRY_LEAVE_LIFT_MS,
   ENTRY_LOADER_MAX_MS,
   FLOW_ENTRY_ATTR,
   FLOW_LEAVE_ATTR,
@@ -65,7 +66,11 @@ type Plan = { at: number; timings: LoaderTimings; readyAt: number | null };
  * A load onto a pack's own address (`html[data-flow-entry]`) is different:
  * the cover stays, whenever the page hydrates, until the flow has placed the
  * pack on its stop (it removes that attribute), so the visitor never sees the
- * row; at ENTRY_LOADER_MAX_MS it takes today's pack page instead.
+ * row; at ENTRY_LOADER_MAX_MS it takes today's pack page instead. That limit
+ * runs only while the tab shows: a hidden tab paints no frames, so the pack
+ * cannot be placed there, and the tab coming forward gets the full limit
+ * again. A leave whose pack page never comes lifts the cover
+ * ENTRY_LEAVE_LIFT_MS later.
  */
 export default function StageLoader({ onLeave }: { onLeave?: () => void }) {
   const up = useStageLoaderUp(true);
@@ -87,6 +92,11 @@ export default function StageLoader({ onLeave }: { onLeave?: () => void }) {
     !(entryLoad && entry) &&
     !leavingPage;
   const [leaving, setLeaving] = useState(false);
+  // read by the entry limit's timer: an exit under way owns the cover's end
+  const leavingRef = useRef(false);
+  useEffect(() => {
+    leavingRef.current = leaving;
+  }, [leaving]);
   const shellRef = useRef<HTMLDivElement>(null);
   const planRef = useRef<Plan | null>(null);
   const onLeaveRef = useRef(onLeave);
@@ -99,18 +109,44 @@ export default function StageLoader({ onLeave }: { onLeave?: () => void }) {
   useEffect(() => {
     if (!up) return;
     if (entryLoad) {
+      let limit: number | undefined;
+      let lift: number | undefined;
+      let fired = false;
       // not placed in time: today's pack page, with the cover still up
-      const limit = window.setTimeout(
-        () => {
-          const id = pendingEntry();
-          if (id === null) return dropAttr();
-          document.documentElement.setAttribute(FLOW_LEAVE_ATTR, '');
-          setLeavingPage(true);
-          goToPackPage(id);
-        },
-        Math.max(0, ENTRY_LOADER_MAX_MS - performance.now()),
-      );
-      return () => window.clearTimeout(limit);
+      const onLimit = () => {
+        fired = true;
+        const id = pendingEntry();
+        if (id === null) {
+          // placed: a running exit fade drops the cover at its end
+          if (!leavingRef.current) dropAttr();
+          return;
+        }
+        document.documentElement.setAttribute(FLOW_LEAVE_ATTR, '');
+        setLeavingPage(true);
+        goToPackPage(id);
+        // that page never came: lift the cover rather than hold it for good
+        lift = window.setTimeout(() => {
+          document.documentElement.removeAttribute(FLOW_LEAVE_ATTR);
+          dropAttr();
+        }, ENTRY_LEAVE_LIFT_MS);
+      };
+      const arm = (ms: number) => {
+        window.clearTimeout(limit);
+        limit = window.setTimeout(onLimit, Math.max(0, ms));
+      };
+      // a hidden tab runs no limit; coming forward gives the full one again
+      const onVisibility = () => {
+        if (fired) return;
+        if (document.hidden) window.clearTimeout(limit);
+        else arm(ENTRY_LOADER_MAX_MS);
+      };
+      if (!document.hidden) arm(ENTRY_LOADER_MAX_MS - performance.now());
+      document.addEventListener('visibilitychange', onVisibility);
+      return () => {
+        window.clearTimeout(limit);
+        window.clearTimeout(lift);
+        document.removeEventListener('visibilitychange', onVisibility);
+      };
     }
     // Hydrated too late for an exit (a slow device or network; the CSS
     // failsafe is about to show the page): just let go.

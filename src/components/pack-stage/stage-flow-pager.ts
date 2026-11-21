@@ -73,6 +73,8 @@ export const GLIDE_LERP = 0.075;
 export const RELEASE_HOLD_MS = 100;
 /** Moves closer together than this came in a burst (handled behind a long task), not from the finger. */
 const BURST_MS = 4;
+/** The release speed's limit, px per 60 Hz frame (6000 px/s): a glide of about 2500 px at most. */
+export const RELEASE_SPEED_MAX = 100;
 /** An up glide this close to the paged edge hands over to the move to RL. */
 export const GLIDE_HANDOFF_PX = 4;
 /** Positions this close count as the same. */
@@ -122,29 +124,33 @@ export function glideDistance(v: number): number {
  * RELEASE_HOLD_MS before the lift at `at` (the finger rested); else first
  * to last over the moves within RELEASE_HOLD_MS of the last one, so one
  * stray move (sideways only, a pixel back) cannot stop or turn a flick; with
- * moves sparser than that, over the last two. Moves that span under
- * BURST_MS were handled in a burst behind a long task (the handling clock),
- * not made that fast: measured from the newest move before the burst
- * instead; none: no speed.
+ * moves sparser than that, over the last two. A run of moves each under
+ * BURST_MS after the one before, ending at the last, was handled in a burst
+ * behind a long task (the handling clock), not made that fast: when the
+ * measure would start inside it, it starts at the newest move before the
+ * run instead; none: no speed. Capped at RELEASE_SPEED_MAX either way.
  */
 function releaseSpeed(samples: readonly TouchSample[], at: number): number {
-  const last = samples[samples.length - 1];
+  const n = samples.length;
+  const last = samples[n - 1];
   if (!last || at - last.eventTime > RELEASE_HOLD_MS) return 0;
-  const recent = samples.filter(
+  const recentFrom = samples.findIndex(
     (s) => last.eventTime - s.eventTime <= RELEASE_HOLD_MS,
   );
-  let first = recent.length >= 2 ? recent[0] : samples[samples.length - 2];
-  if (first && last.eventTime - first.eventTime < BURST_MS) {
-    first = undefined;
-    for (let j = samples.length - 2; j >= 0 && !first; j--)
-      if (last.eventTime - samples[j]!.eventTime >= BURST_MS)
-        first = samples[j];
-  }
+  let from = n - recentFrom >= 2 ? recentFrom : n - 2;
+  let runFrom = n - 1;
+  while (
+    runFrom > 0 &&
+    samples[runFrom]!.eventTime - samples[runFrom - 1]!.eventTime < BURST_MS
+  )
+    runFrom--;
+  if (from >= runFrom) from = runFrom - 1;
+  const first = from >= 0 ? samples[from] : undefined;
   if (!first) return 0;
-  return (
+  const v =
     ((last.follow - first.follow) * FRAME_MS) /
-    (last.eventTime - first.eventTime)
-  );
+    (last.eventTime - first.eventTime);
+  return Math.max(-RELEASE_SPEED_MAX, Math.min(RELEASE_SPEED_MAX, v));
 }
 
 export type FlowTouchMove = {

@@ -11,6 +11,7 @@ import {
   createFlowPager,
   flowPagerTable,
   glideDistance,
+  RELEASE_SPEED_MAX,
   type FlowPager,
 } from '../stage-flow-pager';
 import { focusStops } from '../stage-focus-keys';
@@ -23,15 +24,12 @@ import {
   createPager,
 } from '../stage-pager';
 
-// panel 800: S = 1000; rests 1000..6000, RL 7000, edge 7500, exit end 9000
-// (a measured Exit spacer pins the exit end; the page's own layout, with no
-// Exit height, is proven in stage-flow.test.ts)
+// panel 800: S = 1000; rests 1000..6000, RL 7000, edge 7500, exit end 8000
 const GEO: FlowGeometry = {
   top: 0,
   panel: 800,
   stops: 6,
   viewport: 800,
-  exit: { top: 8000, height: 1000 },
   telegram: { top: 11000, bottom: 12000 },
   ret: { top: 12000, height: 1000 },
   last: { top: 13000, height: 801 },
@@ -133,7 +131,7 @@ describe('flow pager: numbers', () => {
   it('the stop list is [R0, rests, RL] with the exit end past it', () => {
     const t = tableFor();
     expect(t.stops).toEqual([0, 1000, 2000, 3000, 4000, 5000, 6000, 7000]);
-    expect(t.exitEnd).toBe(9000);
+    expect(t.exitEnd).toBe(8000);
     expect(t.lastTop).toBe(13000);
     expect(t.edge).toBe(7500);
     expect(t.lineup).toBe(true);
@@ -263,8 +261,8 @@ describe('flow pager: wheel', () => {
   it('from the lineup, down glides through the exit to the free part', () => {
     const p = make();
     p.wheel(100, 0, false, 7000, 0);
-    expect(run(p, 7000, 0, 1600)).toBe(9000);
-    expect(p.zone(9000)).toBe('free');
+    expect(run(p, 7000, 0, 1600)).toBe(8000);
+    expect(p.zone(8000)).toBe('free');
   });
 
   it('an up notch at RL + 0.4 S goes to RL, not to Closing', () => {
@@ -544,6 +542,22 @@ describe('flow pager: free touch and glide', () => {
     expect(run(q, y, 176, 1000)).toBe(9100);
   });
 
+  it('a release faster than the cap glides as far as the capped speed, no further', () => {
+    const p = make();
+    let y = 9000;
+    p.touchStart(200, 700, y, 0, 0);
+    // 150 px every 8 ms: about 312 px per 60 Hz frame
+    for (let i = 1; i <= 3; i++) {
+      y = p.touchMove(200, 700 - 150 * i, y, i * 8, i * 8).scrollTo ?? y;
+      p.frame(y, i * 8);
+    }
+    expect(y).toBe(9450);
+    p.touchEnd(y, 26, 26);
+    const glide = run(p, y, 32, 8000) - y;
+    expect(glide).toBeGreaterThan(glideDistance(RELEASE_SPEED_MAX) - 10);
+    expect(glide).toBeLessThan(glideDistance(RELEASE_SPEED_MAX) + 10);
+  });
+
   it('the glide is the same length at 120, 60 and 30 Hz frames (1920 px/s glides about 362 px)', () => {
     const at = (dt: number) => {
       const r = flick(make(), 9000, 1920, dt, 96);
@@ -589,9 +603,7 @@ describe('flow pager: free touch and glide', () => {
       6,
     );
     // something above the flow grew by 120 px: the glide moves with it
-    expect(
-      glideOn({ top: 120, exit: { top: 8120, height: 1000 } }),
-    ).toBeCloseTo(plain.end + 120, 6);
+    expect(glideOn({ top: 120 })).toBeCloseTo(plain.end + 120, 6);
     // the paged part changed (a new panel height): the glide stops
     const p = make();
     let y = 9000;
@@ -693,7 +705,7 @@ describe('flow pager: free touch and glide', () => {
       scrollTo: null,
     });
     p.touchEnd(y, 1050, 1050);
-    expect(run(p, y, 1016, 1600)).toBe(9000);
+    expect(run(p, y, 1016, 1600)).toBe(8000);
   });
 });
 
@@ -747,7 +759,7 @@ describe('flow pager: a re-measure', () => {
     a.wheel(100, 0, false, 7000, 0);
     let y = run(a, 7000, 0, 288);
     a.setTable(tableFor({}, focusStops('capsule')));
-    expect(run(a, y, 304, 1600)).toBe(9000);
+    expect(run(a, y, 304, 1600)).toBe(8000);
     // sleeve: Buyback (4) up to Pull Odds (3), three before Closing; a
     // capsule's stop three before Closing is its second (2250)
     const b = make();
@@ -1289,9 +1301,9 @@ describe('flow pager: the wrap', () => {
   });
 });
 
-describe('flow pager: the page with no Exit height (Just Pulled follows the lineup)', () => {
+describe('flow pager: Just Pulled follows the lineup', () => {
   it('from the lineup, down glides one section to the free part', () => {
-    const p = make({ exit: null });
+    const p = make();
     p.wheel(100, 0, false, 7000, 0);
     expect(run(p, 7000, 0, 1600)).toBe(8000);
     expect(p.zone(8000)).toBe('free');

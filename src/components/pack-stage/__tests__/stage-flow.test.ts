@@ -74,33 +74,6 @@ describe('stage flow: the section table', () => {
     expect(flowStops(t)).toBe(flowStops(t));
   });
 
-  it('a measured Exit spacer sets the exit; the computed one is only the fallback', () => {
-    const m = table({ exit: { top: 8100, height: 1100 } });
-    expect(m.exitStart).toBe(7000);
-    expect(m.exitEnd).toBe(9200);
-    expect(flowAt(8100, m)).toEqual({ zone: 'free', span: 'exit', t: 0.5 });
-    expect(m.rise!.start).toBe(10720);
-    // the free part starts at the measured end
-    expect(flowAt(9200, m)).toEqual({ zone: 'free', span: 'exit', t: 1 });
-    expect(flowAt(9201, m).zone === 'free' && flowAt(9201, m)).toMatchObject({
-      span: 'free',
-    });
-    // the spacer as the CSS lays it (R0 + 8 S, no height) leaves the fallback
-    const css = table({ top: 120, exit: { top: 8120, height: 0 } });
-    const fallback = table({ top: 120 });
-    expect([css.exitStart, css.exitEnd]).toEqual([
-      fallback.exitStart,
-      fallback.exitEnd,
-    ]);
-    // a spacer with no height yet (the flag is off): the fallback
-    const z = table({ exit: { top: 8100, height: 0 } });
-    expect([z.exitStart, z.exitEnd]).toEqual([7000, 8000]);
-    // never above the lineup rest
-    const up = table({ exit: { top: 6000, height: 500 } });
-    expect(up.exitStart).toBe(7000);
-    expect(up.exitEnd).toBe(7000);
-  });
-
   it('starts from the flow top', () => {
     const t = table({ top: 120 });
     expect(t.r0).toBe(120);
@@ -510,10 +483,9 @@ describe('stage flow: the lap at a flow position', () => {
 });
 
 describe('stage flow: Just Pulled follows the lineup directly', () => {
-  // the page as laid out now: the Exit spacer has no height, so Just Pulled
-  // starts where the Lineup spacer ends (R0 + 8 S)
+  // the page as laid out now: Just Pulled starts where the Lineup spacer
+  // ends (R0 + 8 S)
   const page: Partial<FlowGeometry> = {
-    exit: { top: 8000, height: 0 },
     telegram: { top: 10000, bottom: 11000 },
     ret: { top: 11000, height: 1000 },
     last: { top: 12000, height: 801 },

@@ -60,7 +60,7 @@ describe('the preview page', () => {
     expect(page.includes('FinalCta')).toBe(false);
   });
 
-  it('serves the opening line from the server, not the client stage file', () => {
+  it('keeps the free-pack opening line out of the client stage file', () => {
     expect(stage.includes('HeroFreePack')).toBe(false);
     expect(stage.includes('Ships to Malaysia')).toBe(false);
   });

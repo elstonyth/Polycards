@@ -47,15 +47,6 @@ export type FlowGeometry = {
   stops: number;
   /** The viewport height (px) the rise start is a share of. */
   viewport: number;
-  /**
-   * An Exit spacer after Row S, the band 6 S and Lineup S, whose bottom
-   * would be where the free part starts (the exit itself runs from RL to
-   * there). The page has none, so the end is computed as RL + S, the Lineup
-   * spacer's end, where Just Pulled starts; a measured one with height
-   * still wins.
-   * Same origin as `top` (document scroll pixels, as the caller derives R0).
-   */
-  exit?: { top: number; height: number } | null;
   /** The Telegram section; absent until it is measured. */
   telegram?: { top: number; bottom: number } | null;
   /** The Return spacer; absent or zero height until it is built. */
@@ -115,12 +106,9 @@ export function flowTable(g: FlowGeometry): FlowTable | null {
   // whole pixels, as the focus kit rounds its stops
   const rests = flowSlots(g.stops).map((s) => Math.round(r0 + s * S));
   const rl = Math.round(r0 + FLOW_LINEUP_SLOT * S);
-  // the layout is the source of truth; the CSS heights are the fallback
-  const measured = !!g.exit && g.exit.height > 0;
+  // the exit runs over the Lineup spacer: RL to RL + S, where Just Pulled starts
   const exitStart = rl;
-  const exitEnd = measured
-    ? Math.max(exitStart, g.exit!.top + g.exit!.height)
-    : Math.round(rl + S);
+  const exitEnd = Math.round(rl + S);
   const vp = Math.max(0, g.viewport);
   let after = exitEnd;
   let rise: FlowRange | null = null;

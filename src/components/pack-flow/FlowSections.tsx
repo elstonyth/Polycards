@@ -9,9 +9,6 @@ import { FlowTelegram } from './FlowTelegram';
  * spacers, then Just Pulled straight after the lineup (it rises in as the
  * packs lift away), Telegram with the trust points and the footer, then the
  * Return and Last spacers. Server-rendered: no client code of its own.
- *
- * `freePackPromo` and `showOffer` are still passed by the page and are not
- * read here.
  */
 export function FlowSections({
   feed,
@@ -19,10 +16,6 @@ export function FlowSections({
 }: {
   feed: RecentFeed;
   topRippers: LeaderboardEntry[];
-  /** A free welcome pack is on offer to a new visitor (getFreePackPromo). */
-  freePackPromo: boolean;
-  /** The stage has packs. */
-  showOffer: boolean;
 }) {
   return (
     <>

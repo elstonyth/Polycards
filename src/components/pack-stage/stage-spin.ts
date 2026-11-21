@@ -531,7 +531,7 @@ function lineupRowBlock(
     capsule,
   });
   const t = Math.tan(((cam.fov / 2) * Math.PI) / 180);
-  // The lineup maps its fov to the VIEWPORT height, so sizes match in px: so sizes match in px
+  // The lineup maps its fov to the VIEWPORT height, so sizes match in px
   const projH = panel.viewH ?? panel.h;
   const pxX = v.sx * (projH / 2);
   const pxY = -v.sy * (projH / 2);

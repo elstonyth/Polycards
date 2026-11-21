@@ -32,6 +32,13 @@ export const HOME_LOADER_MAX_MS = 3000;
 export const ENTRY_LOADER_MAX_MS = 15_000;
 
 /**
+ * After going for today's pack page under the cover, the cover lifts this
+ * long (ms) later if that page never comes (a navigation that stalls or is
+ * stopped), so the visitor is never left on a covered page for good.
+ */
+export const ENTRY_LEAVE_LIFT_MS = 5_000;
+
+/**
  * The html attribute the script sets on such a load, holding the pack's id;
  * the flow removes it once the pack rests on its stop.
  */

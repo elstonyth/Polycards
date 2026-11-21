@@ -291,6 +291,33 @@ function muteInit() {
   };
 }
 
+/**
+ * WebKit has no --mute-audio: every Web Audio connection to the speakers goes
+ * through a gain of 0 instead, so a WebKit run is as silent as Chromium's.
+ */
+function webAudioMuteInit() {
+  if (typeof AudioNode === 'undefined') return;
+  const connect = AudioNode.prototype.connect;
+  const silent = new WeakMap();
+  AudioNode.prototype.connect = function (dest, ...rest) {
+    if (
+      typeof AudioDestinationNode !== 'undefined' &&
+      dest instanceof AudioDestinationNode
+    ) {
+      let gain = silent.get(dest.context);
+      if (!gain) {
+        gain = dest.context.createGain();
+        gain.gain.value = 0;
+        connect.call(gain, dest);
+        silent.set(dest.context, gain);
+      }
+      connect.call(this, gain, ...rest);
+      return dest;
+    }
+    return connect.call(this, dest, ...rest);
+  };
+}
+
 /** The base URL plus a path and an optional query (string "?a=1" or object). */
 export function url(path = '/', query) {
   const u = new URL(path, BASE + '/');
@@ -327,6 +354,7 @@ export async function open(browser, size, path = '/', opts = {}) {
     ...(opts.context ?? {}),
   });
   await ctx.addInitScript(muteInit);
+  if (browser.__engine === 'webkit') await ctx.addInitScript(webAudioMuteInit);
   for (const f of opts.init ?? []) await ctx.addInitScript(f);
   const page = await ctx.newPage();
   const s = { ctx, page, size, errors: [], failed: [], cdp: null, browser };

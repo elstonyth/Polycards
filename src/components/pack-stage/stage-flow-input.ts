@@ -14,10 +14,9 @@
  *   gesture at Closing pages to RL while the focused pack hands over to the
  *   tilted lineup (`handoff`, the local progress, a function of the
  *   scroll); a down gesture at RL pages through the lineup's exit
- *   (`exit`, from RL over the Lineup and Exit spacers, so it starts on the
- *   move's first frame) to the end of the Exit spacer, where the free part
- *   starts; a
- *   pack that cannot be focused keeps the row alone;
+ *   (`exit`, from RL over the Lineup spacer, so it starts on the move's
+ *   first frame) to the end of that spacer, where Just Pulled and the free
+ *   part start; a pack that cannot be focused keeps the row alone;
  * - a re-measure keeps the flow position P (a rotation never leaves the page
  *   off its section).
  * In the free part a vertical touch is the flow's (the page follows the
@@ -79,8 +78,6 @@ export type FlowInputGeometry = {
   /** The stage panel's height. */
   panel: number;
   viewport: number;
-  /** The Exit spacer (its bottom is the opening line's top); null: computed. */
-  exit?: { top: number; height: number } | null;
   /** The Telegram section (the rise is keyed to it); null: not measured. */
   telegram?: { top: number; bottom: number } | null;
   /** The Return spacer; null or zero height: none. */
@@ -88,8 +85,8 @@ export type FlowInputGeometry = {
   /** The Last spacer (its top is the wrap line); null or zero height: no wrap. */
   last?: { top: number; height: number } | null;
   /**
-   * The free part's sections in page order (the opening line, Just Pulled,
-   * Telegram, Return, Last): a re-measure keeps the one under the middle.
+   * The free part's sections in page order (Just Pulled, Telegram, Return,
+   * Last): a re-measure keeps the one under the middle.
    */
   sections?: readonly FlowSection[] | null;
 };
@@ -104,7 +101,7 @@ export type FlowInputFrame = FlowPagerFrame & {
    * progress, 0 at Closing and above, 1 at RL and below (the pose eases it).
    */
   handoff: number;
-  /** The lineup's exit from RL to the Exit spacer's end: 0 at RL and above, 1 at its end and below. */
+  /** The lineup's exit from RL to the Lineup spacer's end: 0 at RL and above, 1 at its end and below. */
   exit: number;
   /**
    * The page has left the details downwards: the free part, or past the

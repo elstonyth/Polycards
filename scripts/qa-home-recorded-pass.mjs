@@ -27,13 +27,15 @@ const where = (s) =>
     const t = fl?.table ?? null;
     const y = scrollY;
     const r0 = t?.r0 ?? fl?.stops?.[0] ?? 0;
+    // the table first (the focus stays on past the stops), then the stop,
+    // then the row
     let phase = 'row';
-    if (f?.on) phase = 'stop-' + f.focus;
-    else if (t && t.rise && y >= t.lastTop - 1) phase = 'wrap';
+    if (t && t.lastTop != null && y >= t.lastTop - 1) phase = 'wrap';
     else if (t && t.ret && y >= t.ret.start) phase = 'return';
     else if (t && t.rise && y >= t.rise.start) phase = 'rise';
     else if (t && y > t.exitEnd) phase = 'free';
-    else if (t && y > r0 + 2 && !f?.on) phase = 'lineup';
+    else if (t && y >= t.rl - 2) phase = 'lineup';
+    else if (f?.on) phase = 'stop-' + Math.round(f.focus);
     const jp = document.querySelector('[data-jp-drawer]');
     const jb = jp?.getBoundingClientRect();
     return {
@@ -261,7 +263,8 @@ try {
       );
       await contactSheet(browser, size, 'forward', fwd);
 
-      // backward: down to the lineup first (not recorded), then up to the row
+      // backward: down to the lineup first (by position, not recorded), then
+      // up to the row
       await s.tap(
         ...(await (async () => {
           const c = await stage.centreTile(s);

@@ -8,14 +8,11 @@ import {
 } from '../stage-flow-input';
 import { focusStops } from '../stage-focus-keys';
 
-// panel 800: S = 1000; rests 1000..6000, RL 7000, edge 7500, exit 7000 to 9000
-// (a measured Exit spacer pins the exit end; the page's own layout, with no
-// Exit height, is proven in stage-flow.test.ts)
+// panel 800: S = 1000; rests 1000..6000, RL 7000, edge 7500, exit 7000 to 8000
 const GEO = {
   top: 0,
   panel: 800,
   viewport: 800,
-  exit: { top: 8000, height: 1000 },
 };
 const SLEEVE = focusStops('sleeve');
 
@@ -99,11 +96,11 @@ describe('flow input: a scroll the flow did not start (scrollbar, Tab, find, an 
   it("a jump from the row into the lineup's exit focuses the centred pack on its first frame, so the exit shows", () => {
     const p = page();
     p.input.frame(0, 0);
-    const f = p.input.frame(8000, 16);
+    const f = p.input.frame(7600, 16);
     expect(p.calls).toEqual(['enter']);
     expect(f.scrollTo).toBeNull();
     expect(f.handoff).toBe(1);
-    expect(f.exit).toBeCloseTo(0.5, 6);
+    expect(f.exit).toBeCloseTo(0.6, 6);
     expect(f.past).toBe(true);
   });
 
@@ -125,14 +122,14 @@ describe('flow input: a scroll the flow did not start (scrollbar, Tab, find, an 
     // the lineup's exit, paged by a down notch
     expect(p.input.wheel(100, 0, false, y, 3600)).toBe(true);
     y = run(p.input, y, 3616, 5500);
-    expect(y).toBe(9000);
+    expect(y).toBe(8000);
     expect(p.calls).toEqual(['enter']);
   });
 
   it('a pack that cannot be focused is tried, and the page stays where the jump left it', () => {
     const p = page(null);
     p.input.frame(0, 0);
-    expect(run(p.input, 8000, 16, 1500)).toBe(8000);
+    expect(run(p.input, 7600, 16, 1500)).toBe(7600);
   });
 });
 
@@ -256,17 +253,17 @@ describe('flow input: Closing to the free part', () => {
     let y = run(p.input, p.y, 2016, 3600);
     expect(y).toBe(7000);
     p.input.wheel(100, 0, false, y, 3800);
-    // the exit starts on the move's first frame, over both sections
+    // the exit starts on the move's first frame
     const first = p.input.frame(y, 3816);
     expect(first.handoff).toBe(1);
     expect(first.scrollTo).toBeGreaterThan(7000);
     expect(first.exit).toBeGreaterThan(0);
-    expect(first.exit).toBeCloseTo(((first.scrollTo ?? y) - 7000) / 2000, 6);
+    expect(first.exit).toBeCloseTo(((first.scrollTo ?? y) - 7000) / 1000, 6);
     y = run(p.input, first.scrollTo ?? y, 3832, 4400);
     const mid = p.input.frame(y, 4416);
-    expect(mid.exit).toBeCloseTo(((mid.scrollTo ?? y) - 7000) / 2000, 6);
+    expect(mid.exit).toBeCloseTo(((mid.scrollTo ?? y) - 7000) / 1000, 6);
     y = run(p.input, mid.scrollTo ?? y, 4432, 5400);
-    expect(y).toBe(9000);
+    expect(y).toBe(8000);
     const free = p.input.frame(y, 5416);
     expect(free.zone).toBe('free');
     expect([free.handoff, free.exit]).toEqual([1, 1]);
@@ -357,13 +354,11 @@ describe('flow input: a re-measure keeps P', () => {
     ...GEO,
     panel,
     viewport: panel,
-    exit: { top: 8000 * k, height: 1000 * k },
     telegram: { top: 11000 * k, bottom: 12000 * k },
     ret: { top: 12000 * k, height: 1000 * k },
     last: { top: 13000 * k, height: 801 },
     sections: [
-      { top: 9000 * k, height: 400 * k },
-      { top: 9400 * k, height: 1600 * k },
+      { top: 8000 * k, height: 3000 * k },
       { top: 11000 * k, height: 1000 * k },
       { top: 12000 * k, height: 1000 * k },
       { top: 13000 * k, height: 801 },
@@ -388,10 +383,10 @@ describe('flow input: a re-measure keeps P', () => {
   it('keeps the section under the middle in the free part, even when clamped, and writes it', () => {
     const p = page();
     p.input.measure(geoAt(800, 1), 0);
-    p.input.frame(9800, 0); // Just Pulled under the middle, at (10200 - 9400) / 1600
+    p.input.frame(9800, 0); // Just Pulled under the middle, at (10200 - 8000) / 3000
     const y = p.input.measure(geoAt(400, 0.5), 4100);
     expect(y).not.toBeNull();
-    expect(y! + 200).toBeCloseTo(4700 + 800 * 0.5, 6);
+    expect(y! + 200).toBeCloseTo(4000 + (1500 * 2200) / 3000, 6);
   });
 
   it('a content-only change (Just Pulled grows, same viewport and panel) leaves the free part where it is', () => {
@@ -400,17 +395,15 @@ describe('flow input: a re-measure keeps P', () => {
     p.input.frame(9800, 0);
     const grown = geoAt(800, 1);
     grown.sections = grown.sections.map((s, i) =>
-      i === 1
-        ? { ...s, height: s.height + 300 }
-        : i > 1
-          ? { ...s, top: s.top + 300 }
-          : s,
+      i === 0 ? { ...s, height: s.height + 300 } : { ...s, top: s.top + 300 },
     );
     expect(p.input.measure(grown, 9800)).toBeNull();
   });
 
   it('P makes the round trip across a re-measure in every zone', () => {
-    for (const y0 of [0, 3000, 6000, 7000, 8000, 9800, 10900, 11500, 12500]) {
+    for (const y0 of [
+      0, 3000, 6000, 7000, 7600, 8000, 9800, 10900, 11500, 12500,
+    ]) {
       const p = page();
       p.input.measure(geoAt(800, 1), 0);
       p.input.frame(y0, 0);
@@ -526,7 +519,7 @@ describe('flow input: keys', () => {
     const y = run(p.input, p.y, 2016, 3600);
     expect(y).toBe(7000);
     expect(p.input.key('next', y, 3700)).toBe('moved');
-    expect(run(p.input, y, 3716, 5300)).toBe(9000);
+    expect(run(p.input, y, 3716, 5300)).toBe(8000);
   });
 
   it('prev at the lineup pages back up to Closing', () => {
@@ -667,14 +660,14 @@ describe('flow input: a touch during a move across the paged edge', () => {
     p.input.touchStart(200, 600, y, 4710, 4710);
     expect(p.input.touchMove(200, 500, y, 4726, 4726)).toBe(true);
     p.input.touchEnd(y, 4742, 4742);
-    expect(run(p.input, y, 4758, 5800)).toBe(9000);
+    expect(run(p.input, y, 4758, 5800)).toBe(8000);
   });
 
   it('a finger that lands past the edge on the way back up is ignored: the move lands on the lineup', () => {
     const p = lineup();
     p.input.wheel(100, 0, false, 7000, 3800);
     let y = run(p.input, 7000, 3816, 5400);
-    expect(y).toBe(9000);
+    expect(y).toBe(8000);
     // the browser's own scroll up to just below the edge, then an up notch
     // that crosses it pages back to the lineup
     y = run(p.input, 7560, 5416, 5700);
@@ -842,7 +835,7 @@ describe('flow input: the endless pick at the lineup', () => {
     const p = lineup();
     const a = (44 * Math.PI) / 180;
     p.swipe(-150, (-150 * Math.cos(a)) / Math.sin(a), 7000, 4000);
-    expect(p.go(7000, 4300, 6500)).toBe(9000);
+    expect(p.go(7000, 4300, 6500)).toBe(8000);
     expect(p.track()).toBe(2);
     expect(p.picks).toEqual([]);
   });

@@ -35,8 +35,7 @@ import type {
 import { ALL_SHELF } from './stage-filter';
 
 /**
- * Owner decision 2: which order the
- * carousel walks a category in. 'price' = cheapest first, ties in catalogue
+ * Which order the carousel walks a category in. 'price' = cheapest first, ties in catalogue
  * order; 'slots' = the /slots catalogue's order (`shelvePacks`: pack type
  * shelves, cheapest first on each); 'ladder' = the old home ladder's order
  * (rounded price, high to low). The starting pack is STAGE_START_INDEX

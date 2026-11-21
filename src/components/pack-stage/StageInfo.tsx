@@ -9,7 +9,7 @@ import { packHref } from '@/lib/packs-data';
 import { cn } from '@/lib/utils';
 import type { StagePack } from './contract';
 
-/** Owner decision 5: the quantity stepper shows on desktop
+/** The quantity stepper shows on desktop
  *  only; phones open one pack and pick the count on the pack page. */
 export const STAGE_STEPPER_DESKTOP_ONLY = true;
 

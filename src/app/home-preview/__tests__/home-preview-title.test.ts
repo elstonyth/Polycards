@@ -28,7 +28,6 @@ vi.mock('@/lib/data/packs', () => ({
 }));
 
 vi.mock('@/lib/data/leaderboard', () => ({ getLeaderboard: async () => [] }));
-vi.mock('@/lib/data/free-pack', () => ({ getFreePackPromo: async () => null }));
 
 const { generateMetadata } = await import('../page');
 const title = async (search: Record<string, string>) =>

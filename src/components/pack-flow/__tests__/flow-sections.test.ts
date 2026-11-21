@@ -25,8 +25,6 @@ const html = renderToStaticMarkup(
   createElement(FlowSections, {
     feed,
     topRippers: [],
-    freePackPromo: true,
-    showOffer: true,
   }),
 );
 const at = (needle: string) => {

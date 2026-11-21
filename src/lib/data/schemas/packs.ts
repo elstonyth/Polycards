@@ -10,7 +10,7 @@ export const PackRowSchema = z.looseObject({
   category: z.string(),
   price: finite,
   prize_type: prizeType,
-  /** Pool composition, backend-derived (GRADED = every card graded,
+  /** §2.4.8 pool composition, backend-derived (GRADED = every card graded,
    *  RAW = none, MIX = both, null = empty pool). Absent on an older backend;
    *  a malformed value degrades to null rather than dropping the pack row. */
   group: z.enum(['GRADED', 'RAW', 'MIX']).nullable().catch(null).optional(),

@@ -17,6 +17,7 @@ vi.mock('../stage-entry-cover', async (orig) => ({
 
 const { default: StageLoader } = await import('../StageLoader');
 const {
+  ENTRY_LEAVE_LIFT_MS,
   ENTRY_LOADER_MAX_MS,
   FLOW_ENTRY_ATTR,
   FLOW_LEAVE_ATTR,
@@ -45,6 +46,17 @@ const advance = async (ms: number) => {
     });
 };
 const coverUp = () => html.hasAttribute(STAGE_LOADER_ATTR);
+/** Hides or shows the tab, as the browser does (the event included). */
+const setHidden = async (hidden: boolean, event = true) => {
+  Object.defineProperty(document, 'hidden', {
+    configurable: true,
+    get: () => hidden,
+  });
+  if (event)
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+};
 
 beforeEach(() => {
   vi.useFakeTimers({
@@ -60,6 +72,7 @@ afterEach(() => {
   html.removeAttribute(STAGE_LOADER_ATTR);
   html.removeAttribute(FLOW_ENTRY_ATTR);
   html.removeAttribute(FLOW_LEAVE_ATTR);
+  delete (document as { hidden?: boolean }).hidden;
   vi.useRealTimers();
 });
 
@@ -109,6 +122,29 @@ describe("the stage loader on a load onto a pack's address", () => {
     expect(html.hasAttribute(FLOW_LEAVE_ATTR)).toBe(true);
   });
 
+  it('the limit keeps the exit fade of a pack placed just before it', async () => {
+    mount();
+    await advance(ENTRY_LOADER_MAX_MS - 200);
+    await act(async () => html.removeAttribute(FLOW_ENTRY_ATTR));
+    // past the limit, inside the 400 ms fade
+    await advance(250);
+    expect(coverUp()).toBe(true);
+    await advance(500);
+    expect(coverUp()).toBe(false);
+    expect(goToPackPage).not.toHaveBeenCalled();
+  });
+
+  it("lifts the cover a while after going for today's pack page when that page never comes", async () => {
+    mount();
+    await advance(ENTRY_LOADER_MAX_MS + 100);
+    expect(goToPackPage).toHaveBeenCalledWith('151');
+    await advance(3000);
+    expect(coverUp()).toBe(true);
+    await advance(ENTRY_LEAVE_LIFT_MS);
+    expect(coverUp()).toBe(false);
+    expect(html.hasAttribute(FLOW_LEAVE_ATTR)).toBe(false);
+  });
+
   it('a page that hydrates late still keeps the cover until the pack is placed', async () => {
     vi.advanceTimersByTime(HOME_LOADER_MAX_MS + 1000);
     mount();
@@ -117,6 +153,48 @@ describe("the stage loader on a load onto a pack's address", () => {
     await act(async () => html.removeAttribute(FLOW_ENTRY_ATTR));
     await advance(2000);
     expect(coverUp()).toBe(false);
+  });
+});
+
+describe("a load onto a pack's address in a background tab", () => {
+  beforeEach(() => html.setAttribute(FLOW_ENTRY_ATTR, '151'));
+
+  it('runs no limit while hidden, and places the pack once brought forward', async () => {
+    await setHidden(true, false);
+    mount();
+    await advance(ENTRY_LOADER_MAX_MS + 5000);
+    expect(goToPackPage).not.toHaveBeenCalled();
+    expect(coverUp()).toBe(true);
+    await setHidden(false);
+    // the full budget again from here
+    await advance(ENTRY_LOADER_MAX_MS - 500);
+    expect(goToPackPage).not.toHaveBeenCalled();
+    await act(async () => html.removeAttribute(FLOW_ENTRY_ATTR));
+    await advance(2000);
+    expect(coverUp()).toBe(false);
+    expect(goToPackPage).not.toHaveBeenCalled();
+  });
+
+  it("brought forward and still not placed: today's pack page a full limit later", async () => {
+    await setHidden(true, false);
+    mount();
+    await advance(30_000);
+    await setHidden(false);
+    await advance(ENTRY_LOADER_MAX_MS + 100);
+    expect(goToPackPage).toHaveBeenCalledWith('151');
+  });
+
+  it('a tab hidden while it waits pauses the limit', async () => {
+    mount();
+    await advance(5000);
+    await setHidden(true);
+    await advance(30_000);
+    expect(goToPackPage).not.toHaveBeenCalled();
+    await setHidden(false);
+    await advance(ENTRY_LOADER_MAX_MS - 500);
+    expect(goToPackPage).not.toHaveBeenCalled();
+    await advance(600);
+    expect(goToPackPage).toHaveBeenCalledWith('151');
   });
 });
 

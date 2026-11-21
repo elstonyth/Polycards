@@ -176,11 +176,11 @@ function sampler() {
             : Number(rcs.opacity)
           : 1,
         y: scrollY,
-        // the page's first section below the stage, against the viewport
+        // the page's first section below the stage (Just Pulled), against the viewport
         openTop: w.__light
           ? null
           : (document
-              .querySelector('[data-flow-section="opening"]')
+              .querySelector('[data-flow-section="just-pulled"]')
               ?.getBoundingClientRect().top ?? null),
         vh: innerHeight,
         // the frame time the stage posed this frame with

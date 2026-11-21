@@ -13,7 +13,7 @@ import {
   panelState,
 } from '../stage-flow-gate';
 
-// panel 800: S = 1000; rests 1000..6000, RL 7000, edge 7500, exit 7000 to 9000
+// panel 800: S = 1000; rests 1000..6000, RL 7000, edge 7500, exit 7000 to 8000
 const GEO = { top: 0, panel: 800, viewport: 800 };
 const SLEEVE = focusStops('sleeve');
 
@@ -140,6 +140,27 @@ describe('touch gate: the handling clock (event times that do not fit)', () => {
     const glide = run(p.input, y, 176, 6000) - y;
     expect(glide).toBeGreaterThan(125);
     expect(glide).toBeLessThan(140);
+  });
+
+  it('a burst spread over more than 4 ms (moves under 4 ms apart) is still one burst: a bounded glide', () => {
+    const p = atFront();
+    const gate = createTouchGate(p.input, () => false);
+    let y = 9500;
+    gate.start(1, true, 200, 700, y, 0);
+    gate.move(1, 200, 668, y, 16);
+    y = p.input.follow() ?? y;
+    // a 150 ms freeze, then five 32 px moves handled 1.5 ms apart (6 ms in all)
+    [166, 167.5, 169, 170.5, 172].forEach((at, i) => {
+      gate.move(1, 200, 668 - 32 * (i + 1), y, at);
+      y = p.input.follow() ?? y;
+    });
+    expect(y).toBe(9692);
+    gate.end(y, 172.5);
+    // 160 px over the 156 ms from the move before the burst: 17.1 px per
+    // 60 Hz frame, about 125 px of glide (the burst alone asks about 21,000)
+    const glide = run(p.input, y, 176, 6000) - y;
+    expect(glide).toBeGreaterThan(115);
+    expect(glide).toBeLessThan(135);
   });
 });
 

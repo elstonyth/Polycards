@@ -6,9 +6,8 @@ import {
   getRecentPulls,
 } from '@/lib/data/packs';
 import { getLeaderboard } from '@/lib/data/leaderboard';
-import { getFreePackPromo } from '@/lib/data/free-pack';
 import { cached } from '@/lib/ttl-cache';
-import { packTabs, type PackCard } from '@/lib/packs-data';
+import { packTabs, type PackCard, type PackCategory } from '@/lib/packs-data';
 import { ShelfCategoryProvider } from '@/components/home/ShelfCategory';
 import PackStage from '@/components/pack-stage/PackStage';
 import { Stage3dProvider } from '@/components/pack-stage/Stage3dProvider';
@@ -40,16 +39,11 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { focus } = await searchParams;
   if (homePreviewOn() && typeof focus === 'string' && focus) {
-    // Only a pack the flow can start on (read from the catalogue the page
-    // reads anyway); every other focus costs no pack read and is sent on.
-    const categories = (await getPackCategories()).filter(
-      (c) => c.packs.length > 0,
-    );
-    const ids = Object.fromEntries(
-      categories.flatMap((c) => c.packs.map((p) => [p.id, true])),
-    );
-    const tabs = packTabs(categories);
-    if (flowStart({ categories, tabs, seeds: ids, id: focus })) {
+    // Only a pack the flow can start on, by the page's own check on the
+    // catalogue the page reads anyway (no highlights: they never decide the
+    // start); every other focus costs no pack read and is sent on.
+    const categories = await getPackCategories();
+    if (startOn(categories, new Map(), new Map(), focus)) {
       const { title } = await packMetadata(focus);
       if (title && title !== UNKNOWN_PACK_TITLE)
         return { title, robots: ROBOTS };
@@ -59,6 +53,44 @@ export async function generateMetadata({
 }
 
 const STAGE_MODES: readonly GateMode[] = ['flat', '3d', 'lite'];
+
+type Highlights = Awaited<ReturnType<typeof getPackHighlights>>;
+
+/** Every pack's starting data for its focused view, by pack id. */
+function seedsOf(
+  categories: PackCategory[],
+  highlightOf: ReadonlyMap<string, Highlights | undefined>,
+) {
+  return Object.fromEntries(
+    categories.flatMap((c) =>
+      c.packs.map((pack) => [
+        pack.id,
+        flowSeedFromHighlights(
+          { ...pack, categoryId: c.id, categoryName: c.heading, icon: c.icon },
+          highlightOf.get(pack.id) ?? null,
+        ),
+      ]),
+    ),
+  );
+}
+
+/**
+ * Where the flow starts for a load onto pack `focus`, or null (the pack page
+ * shows). The one check both the page and its title use.
+ */
+function startOn(
+  categories: PackCategory[],
+  chaseByPack: ReadonlyMap<string, PackCard | null>,
+  highlightOf: ReadonlyMap<string, Highlights | undefined>,
+  focus: string,
+) {
+  return flowStart({
+    categories: toStageCategories(categories, chaseByPack),
+    tabs: packTabs(categories),
+    seeds: seedsOf(categories, highlightOf),
+    id: focus,
+  });
+}
 
 // shortcut: the same memo windows and keys as src/app/page.tsx, whose reads
 // this page duplicates. Remove the duplicate when the stage moves onto `/`.
@@ -103,12 +135,11 @@ export default async function HomePreviewPage({
   const forcedJp = new Set(one('jp').split(',').filter(Boolean));
 
   // shortcut: duplicated from src/app/page.tsx (catalogue, feed, board,
-  // free-pack offer, top-chase lookups). Remove at integration.
-  const [catalogue, feed, topRippers, freePackPromo] = await Promise.all([
+  // top-chase lookups). Remove at integration.
+  const [catalogue, feed, topRippers] = await Promise.all([
     getPackCategories(),
     cached('home:recent-pulls', FEED_TTL_MS, () => getRecentPulls()),
     getLeaderboard('weekly'),
-    cached('home:free-pack-promo', FEED_TTL_MS, getFreePackPromo),
   ]);
   const categories =
     forcedSoldOut.size === 0 && forcedJp.size === 0
@@ -131,22 +162,12 @@ export default async function HomePreviewPage({
   // The focused pack view's starting data, read by its lazily loaded chunk:
   // data in the page, no script.
   const highlightOf = new Map(packs.map((pack, i) => [pack.id, highlights[i]]));
-  const seeds = Object.fromEntries(
-    categories.flatMap((c) =>
-      c.packs.map((pack) => [
-        pack.id,
-        flowSeedFromHighlights(
-          { ...pack, categoryId: c.id, categoryName: c.heading, icon: c.icon },
-          highlightOf.get(pack.id) ?? null,
-        ),
-      ]),
-    ),
-  );
+  const seeds = seedsOf(categories, highlightOf);
   const stageCategories = toStageCategories(categories, chaseByPack);
   const tabs = packTabs(categories);
   const focus = one('focus');
   const start = focus
-    ? flowStart({ categories: stageCategories, tabs, seeds, id: focus })
+    ? startOn(categories, chaseByPack, highlightOf, focus)
     : null;
   if (focus && !start) redirect(`/slots/${encodeURIComponent(focus)}?count=1`);
   // The brand loader's pre-paint gate is in the root layout's <head>
@@ -178,12 +199,7 @@ export default async function HomePreviewPage({
             tabs={tabs}
             start={start ? { ...start, id: focus } : undefined}
           >
-            <FlowSections
-              feed={feed}
-              topRippers={topRippers}
-              freePackPromo={freePackPromo}
-              showOffer={stageCategories.length > 0}
-            />
+            <FlowSections feed={feed} topRippers={topRippers} />
           </PackStage>
         </Stage3dProvider>
       </ShelfCategoryProvider>

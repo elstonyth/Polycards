@@ -3,7 +3,7 @@
  * in. The composition itself lives in `stage-pose.ts`; the focus maths (`stage-focus.ts`) is injected here, so the
  * first load (which imports only `stage-pose.ts`) never carries it.
  *
- * Two deliberate departures, :
+ * Two departures from the plain composition:
  * - the pointer lean fades out with the gather weight (it would otherwise
  *   push the row's pitch past the +5 degree clamp);
  * - on the focused pack the extra yaw is clamped to +-5 degrees, so a back

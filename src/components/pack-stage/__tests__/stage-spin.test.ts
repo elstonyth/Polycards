@@ -516,7 +516,7 @@ describe('tip: the packshot look', () => {
     expect(b.dim).toBeCloseTo(LINEUP_ROW.restLight * LINEUP_ROW.exitLight, 9);
   });
 
-  it('packs stand as tall as the reference cans: about 340 px on desktop, 300 on phones', () => {
+  it('packs stand about 340 px on desktop, 300 on phones', () => {
     // centre pack at rest, viewport-height projection as the viewport's
     const h = (desktop: boolean) => {
       const l = desktop ? DESKTOP : PHONE;

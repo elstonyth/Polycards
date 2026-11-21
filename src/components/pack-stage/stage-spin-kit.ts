@@ -334,16 +334,6 @@ export function startSpin(host: SpinHost): SpinControl {
       if (!on) clearPast(src);
       restore(on);
     }
-    // the Exit spacer, measured: its bottom is where the free part starts
-    const ex = on
-      ? src.flow
-          .querySelector<HTMLElement>("[data-flow-spacer='exit']")
-          ?.getBoundingClientRect()
-      : undefined;
-    const exit =
-      ex && ex.height > 0
-        ? { top: ex.top + window.scrollY - top, height: ex.height }
-        : null;
     // the rise, Return and Last, in the same origin (scroll under the header)
     const rectOf = (el: HTMLElement | null) => {
       const r = on && el ? el.getBoundingClientRect() : null;
@@ -360,7 +350,6 @@ export function startSpin(host: SpinHost): SpinControl {
             top: r0,
             panel,
             viewport: window.innerHeight,
-            exit,
             telegram: tg ? { top: tg.top, bottom: tg.top + tg.height } : null,
             ret: rectOf(retEl),
             last: rectOf(
