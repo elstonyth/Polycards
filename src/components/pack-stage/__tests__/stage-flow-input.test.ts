@@ -9,7 +9,14 @@ import {
 import { focusStops } from '../stage-focus-keys';
 
 // panel 800: S = 1000; rests 1000..6000, RL 7000, edge 7500, exit 7000 to 9000
-const GEO = { top: 0, panel: 800, viewport: 800 };
+// (a measured Exit spacer pins the exit end; the page's own layout, with no
+// Exit height, is proven in stage-flow.test.ts)
+const GEO = {
+  top: 0,
+  panel: 800,
+  viewport: 800,
+  exit: { top: 8000, height: 1000 },
+};
 const SLEEVE = focusStops('sleeve');
 
 /** A page with a centred pack: focusable (sleeve) unless `kinds` is null. */
@@ -309,6 +316,7 @@ describe('flow input: a re-measure keeps P', () => {
     ...GEO,
     panel,
     viewport: panel,
+    exit: { top: 8000 * k, height: 1000 * k },
     telegram: { top: 11000 * k, bottom: 12000 * k },
     ret: { top: 12000 * k, height: 1000 * k },
     last: { top: 13000 * k, height: 801 },

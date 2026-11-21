@@ -46,12 +46,12 @@ const table = (g: Partial<FlowGeometry> = {}): FlowTable => {
 };
 
 describe('stage flow: the section table', () => {
-  it('a section is 1.25 panels (CIAO_EXIT_PANELS); the lineup exit runs over two', () => {
+  it("a section is 1.25 panels, the row exit's length; the lineup exit runs over one", () => {
     expect(FLOW_SECTION_PANELS).toBe(1.25);
     expect(FLOW_SECTION_PANELS).toBe(CIAO_EXIT_PANELS);
     expect(table().section).toBe(1000);
     const t = table();
-    expect(t.exitEnd - t.exitStart).toBe(2 * t.section);
+    expect(t.exitEnd - t.exitStart).toBe(t.section);
   });
 
   it('sleeve: the row, six stops one section apart, the lineup, the exit', () => {
@@ -60,9 +60,10 @@ describe('stage flow: the section table', () => {
     expect(t.rests).toEqual([1000, 2000, 3000, 4000, 5000, 6000]);
     expect(t.rl).toBe(7000);
     // the exit starts at the lineup rest and plays over the Lineup spacer
-    // (RL to RL + S) and the Exit spacer (to RL + 2 S)
+    // only (RL to RL + S): Just Pulled's top meets the viewport top there
     expect(t.exitStart).toBe(7000);
-    expect(t.exitEnd).toBe(9000);
+    expect(t.exitEnd).toBe(8000);
+    // the paged edge lies inside the exit, half a section past the lineup
     expect(t.edge).toBe(7500);
     expect(flowStops(t)).toEqual([0, 1000, 2000, 3000, 4000, 5000, 6000, 7000]);
   });
@@ -84,8 +85,8 @@ describe('stage flow: the section table', () => {
     expect(flowAt(9201, m).zone === 'free' && flowAt(9201, m)).toMatchObject({
       span: 'free',
     });
-    // the spacer as the CSS lays it (R0 + 8 S, one section tall) is the fallback
-    const css = table({ top: 120, exit: { top: 8120, height: 1000 } });
+    // the spacer as the CSS lays it (R0 + 8 S, no height) leaves the fallback
+    const css = table({ top: 120, exit: { top: 8120, height: 0 } });
     const fallback = table({ top: 120 });
     expect([css.exitStart, css.exitEnd]).toEqual([
       fallback.exitStart,
@@ -93,7 +94,7 @@ describe('stage flow: the section table', () => {
     ]);
     // a spacer with no height yet (the flag is off): the fallback
     const z = table({ exit: { top: 8100, height: 0 } });
-    expect([z.exitStart, z.exitEnd]).toEqual([7000, 9000]);
+    expect([z.exitStart, z.exitEnd]).toEqual([7000, 8000]);
     // never above the lineup rest
     const up = table({ exit: { top: 6000, height: 500 } });
     expect(up.exitStart).toBe(7000);
@@ -130,7 +131,7 @@ describe('stage flow: the section table', () => {
     expect(noOdds.rests).toEqual([1000, 2667, 4333, 6000]);
     for (const t of [table(), capsule, noOdds]) {
       expect(t.rl).toBe(7000);
-      expect(t.exitEnd).toBe(9000);
+      expect(t.exitEnd).toBe(8000);
       expect(t.rests[0]).toBe(1000);
       expect(t.rests[t.rests.length - 1]).toBe(6000);
       for (const r of t.rests) expect(Number.isInteger(r)).toBe(true);
@@ -191,15 +192,18 @@ describe('stage flow: the flow position P', () => {
   });
 
   it('free: the named spans with their progress', () => {
-    // the exit starts at the lineup rest and plays over both sections
+    // the exit starts at the lineup rest and plays over one section
     expect(flowAt(7001, t).zone === 'free' && flowAt(7001, t)).toMatchObject({
       span: 'exit',
     });
-    expect(flowAt(7500, t)).toEqual({ zone: 'free', span: 'exit', t: 0.25 });
-    expect(flowAt(8000, t)).toEqual({ zone: 'free', span: 'exit', t: 0.5 });
-    expect(flowAt(8500, t)).toEqual({ zone: 'free', span: 'exit', t: 0.75 });
-    expect(flowAt(9000, t)).toEqual({ zone: 'free', span: 'exit', t: 1 });
-    const free = flowAt(9860, t);
+    expect(flowAt(7250, t)).toEqual({ zone: 'free', span: 'exit', t: 0.25 });
+    expect(flowAt(7500, t)).toEqual({ zone: 'free', span: 'exit', t: 0.5 });
+    expect(flowAt(7750, t)).toEqual({ zone: 'free', span: 'exit', t: 0.75 });
+    expect(flowAt(8000, t)).toEqual({ zone: 'free', span: 'exit', t: 1 });
+    expect(flowAt(8001, t).zone === 'free' && flowAt(8001, t)).toMatchObject({
+      span: 'free',
+    });
+    const free = flowAt(9360, t);
     expect(free.zone === 'free' && free.span).toBe('free');
     expect(free.zone === 'free' && free.t).toBeCloseTo(0.5, 6);
     expect(flowAt(11360, t)).toEqual({ zone: 'free', span: 'rise', t: 0.5 });
@@ -214,9 +218,9 @@ describe('stage flow: the flow position P', () => {
   });
 
   it('a page shorter than the rise start clamps the spans in order', () => {
-    const s = table({ telegram: { top: 8600, bottom: 9200 } });
-    expect(s.rise!.start).toBe(9000);
-    expect(s.rise!.end).toBe(9200);
+    const s = table({ telegram: { top: 7600, bottom: 8200 } });
+    expect(s.rise!.start).toBe(8000);
+    expect(s.rise!.end).toBe(8200);
     expect(s.ret!.start).toBeGreaterThanOrEqual(s.rise!.end);
   });
 
@@ -381,13 +385,13 @@ describe('stage flow: term weights', () => {
   });
 
   it('free spans: exit on the lineup term, nothing drawn in free, then rise and return', () => {
-    expect(flowTerms(flowAt(7600, t), 6)).toMatchObject({
+    expect(flowTerms(flowAt(7300, t), 6)).toMatchObject({
       exit: 0.3,
       handoff: 1,
       spread: 1,
       weights: { lineup: 1 },
     });
-    expect(flowTerms(flowAt(8600, t), 6)).toMatchObject({
+    expect(flowTerms(flowAt(7800, t), 6)).toMatchObject({
       exit: 0.8,
       weights: { lineup: 1 },
     });
@@ -490,9 +494,9 @@ describe('stage flow: the lap at a flow position', () => {
   });
 
   it('only the chosen pack is kept from a quarter viewport past the exit end to a quarter viewport before the rise, so both ends find the packs loaded', () => {
-    const t = table(); // exit end 9000, rise start 10720, viewport 800
-    expect(lapTrim(9199, t, 800)).toBe(false);
-    expect(lapTrim(9200, t, 800)).toBe(true);
+    const t = table(); // exit end 8000, rise start 10720, viewport 800
+    expect(lapTrim(8199, t, 800)).toBe(false);
+    expect(lapTrim(8200, t, 800)).toBe(true);
     expect(lapTrim(10519, t, 800)).toBe(true);
     expect(lapTrim(10520, t, 800)).toBe(false);
     expect(lapTrim(12500, t, 800)).toBe(false);
@@ -500,8 +504,58 @@ describe('stage flow: the lap at a flow position', () => {
     expect(lapTrim(20000, table({ telegram: null }), 800)).toBe(true);
     // a free span shorter than both margins: never trimmed
     expect(
-      lapTrim(9150, table({ telegram: { top: 9600, bottom: 10600 } }), 800),
+      lapTrim(8150, table({ telegram: { top: 8600, bottom: 9600 } }), 800),
     ).toBe(false);
+  });
+});
+
+describe('stage flow: Just Pulled follows the lineup directly', () => {
+  // the page as laid out now: the Exit spacer has no height, so Just Pulled
+  // starts where the Lineup spacer ends (R0 + 8 S)
+  const page: Partial<FlowGeometry> = {
+    exit: { top: 8000, height: 0 },
+    telegram: { top: 10000, bottom: 11000 },
+    ret: { top: 11000, height: 1000 },
+    last: { top: 12000, height: 801 },
+  };
+  const t = table(page);
+  const sections = [
+    { top: 8000, height: 2000 }, // Just Pulled
+    { top: 10000, height: 1000 }, // Telegram
+    { top: 11000, height: 1000 }, // Return
+    { top: 12000, height: 801 }, // Last
+  ];
+
+  it("the exit ends where Just Pulled's top meets the viewport top", () => {
+    expect(t.exitEnd).toBe(sections[0]!.top);
+    // Just Pulled enters at the viewport bottom less than a section past the lineup
+    expect(sections[0]!.top - 800 - t.rl).toBeLessThan(t.section);
+  });
+
+  it('the rise, Return and Last follow from the measured sections, and the wrap at Last', () => {
+    expect(t.rise).toEqual({ start: 9720, end: 11000 });
+    expect(t.ret).toEqual({ start: 11000, end: 12000 });
+    expect(t.lastTop).toBe(12000);
+    expect(wrapTarget(11990, 12030, t.lastTop)).toBe(30);
+    expect(wrapTarget(11900, 11990, t.lastTop)).toBeNull();
+  });
+
+  it('the free span still has a trimmed middle, with a quarter viewport kept at each end', () => {
+    expect(lapTrim(8199, t, 800)).toBe(false);
+    expect(lapTrim(8200, t, 800)).toBe(true);
+    expect(lapTrim(9519, t, 800)).toBe(true);
+    expect(lapTrim(9520, t, 800)).toBe(false);
+  });
+
+  it('flowPosition is the inverse of flowAt over the whole page', () => {
+    for (let y = 0; y <= 12400; y += 50)
+      expect(flowPosition(flowAt(y, t), t)).toBeCloseTo(y, 6);
+  });
+
+  it('the first free frame keeps its place in Just Pulled across a re-measure', () => {
+    const a = freeAnchor(t.exitEnd + 1, sections, 800);
+    expect(a?.i).toBe(0);
+    expect(freeAnchorY(a!, sections, 800)).toBeCloseTo(t.exitEnd + 1, 6);
   });
 });
 

@@ -11,9 +11,11 @@
   pointer-events: none;
 }
 
+/* The lineup's exit runs over the Lineup spacer alone, so Just Pulled rises
+   in as the packs lift away. There is no Exit spacer: the flow computes the
+   exit's end as one section past the lineup rest (flowTable). */
 :global([data-home-flow][data-flow-on]) .spacer[data-flow-spacer='row'],
-:global([data-home-flow][data-flow-on]) .spacer[data-flow-spacer='lineup'],
-:global([data-home-flow][data-flow-on]) .spacer[data-flow-spacer='exit'] {
+:global([data-home-flow][data-flow-on]) .spacer[data-flow-spacer='lineup'] {
   height: calc(var(--panel) * 1.25);
 }
 

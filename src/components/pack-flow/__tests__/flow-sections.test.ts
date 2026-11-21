@@ -36,11 +36,8 @@ const at = (needle: string) => {
 };
 
 describe('the preview page below the stage', () => {
-  it('runs opening line, Just Pulled, then Telegram with trust and footer', () => {
+  it('runs Just Pulled, then Telegram with trust and footer', () => {
     const order = [
-      'data-flow-section="opening"',
-      'data-mock="offer"',
-      'Ships to Malaysia &amp; Singapore',
       'data-flow-section="just-pulled"',
       'data-jp-drawer',
       'data-mock="ticker"',
@@ -63,30 +60,22 @@ describe('the preview page below the stage', () => {
     expect(html).not.toContain('IS WAITING');
   });
 
-  it('keeps the opening line word for word', () => {
-    expect(html).toContain('vault buyback');
-    expect(html).toContain('href="/how-it-works"');
-    expect(html).toContain('How it works');
-  });
-
-  it('shows no offer row when the stage has no packs', () => {
-    const empty = renderToStaticMarkup(
-      createElement(FlowSections, {
-        feed,
-        topRippers: [],
-        freePackPromo: true,
-        showOffer: false,
-      }),
+  it('has no block between the lineup and Just Pulled: no free pack card, no ships and buyback line', () => {
+    expect(html).not.toContain('data-flow-section="opening"');
+    expect(html).not.toContain('data-mock="offer"');
+    // the first section after the paged spacers is Just Pulled
+    expect(html.indexOf('data-flow-section')).toBe(
+      at('data-flow-section="just-pulled"'),
     );
-    expect(empty).not.toContain('data-mock="offer"');
-    expect(empty).toContain('Ships to Malaysia');
   });
 
-  it('puts the paged spacers before the opening line and Return and Last after the footer', () => {
-    for (const s of ['row', 'band', 'lineup', 'exit'])
+  it('puts the paged spacers before Just Pulled and Return and Last after the footer', () => {
+    for (const s of ['row', 'band', 'lineup'])
       expect(at(`data-flow-spacer="${s}"`)).toBeLessThan(
-        at('data-flow-section="opening"'),
+        at('data-flow-section="just-pulled"'),
       );
+    // no Exit spacer: the lineup exits over the Lineup spacer alone
+    expect(html).not.toContain('data-flow-spacer="exit"');
     for (const s of ['return', 'last'])
       expect(at(`data-flow-spacer="${s}"`)).toBeGreaterThan(at('</footer>'));
   });

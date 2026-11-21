@@ -5,9 +5,9 @@
  * The page is one table of scroll positions. The paged part: the row rest
  * R0, the focused pack's stops spread over a band of six sections, and the
  * lineup rest RL. The free part: the lineup exit, from the lineup rest over
- * both the Lineup and the Exit spacers (ending where the opening line's top
- * meets the viewport top), so the row starts leaving on the first pixel of
- * scroll below RL; then the free content, the rise
+ * the Lineup spacer (ending where Just Pulled's top meets the viewport top),
+ * so the row starts leaving on the first pixel of scroll below RL and Just
+ * Pulled rises in as it leaves; then the free content, the rise
  * (keyed to the Telegram section), Return and Last. One value, the flow
  * position P, is read from the scroll; every pose and text switch is a
  * function of P only, so scrolling back retraces the way down exactly.
@@ -20,7 +20,7 @@ import type { StageLap } from './contract';
 import { power1InOut } from './stage-focus';
 import { clamp01, easeOutCubic } from './stage-spin-math';
 
-/** One section: 1.25 panels (min-height 125svh). Equals CIAO_EXIT_PANELS; the lineup exit runs over two sections. */
+/** One section: 1.25 panels, the same length as the row's own exit; the lineup exit runs over one section. */
 export const FLOW_SECTION_PANELS = 1.25;
 /** The detail band: six slots, Front to Closing, for every variant. */
 export const FLOW_DETAIL_SLOTS = 6;
@@ -48,10 +48,11 @@ export type FlowGeometry = {
   /** The viewport height (px) the rise start is a share of. */
   viewport: number;
   /**
-   * The Exit spacer (after Row S, the band 6 S and Lineup S); its
-   * bottom is the opening line's top, where the free part starts (the exit
-   * itself runs from RL to there). Absent or zero height: the end is
-   * computed as RL + 2 S, from the spacers' CSS heights.
+   * An Exit spacer after Row S, the band 6 S and Lineup S, whose bottom
+   * would be where the free part starts (the exit itself runs from RL to
+   * there). The page has none, so the end is computed as RL + S, the Lineup
+   * spacer's end, where Just Pulled starts; a measured one with height
+   * still wins.
    * Same origin as `top` (document scroll pixels, as the caller derives R0).
    */
   exit?: { top: number; height: number } | null;
@@ -119,7 +120,7 @@ export function flowTable(g: FlowGeometry): FlowTable | null {
   const exitStart = rl;
   const exitEnd = measured
     ? Math.max(exitStart, g.exit!.top + g.exit!.height)
-    : Math.round(rl + 2 * S);
+    : Math.round(rl + S);
   const vp = Math.max(0, g.viewport);
   let after = exitEnd;
   let rise: FlowRange | null = null;

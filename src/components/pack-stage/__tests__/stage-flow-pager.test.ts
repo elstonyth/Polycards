@@ -24,11 +24,14 @@ import {
 } from '../stage-pager';
 
 // panel 800: S = 1000; rests 1000..6000, RL 7000, edge 7500, exit end 9000
+// (a measured Exit spacer pins the exit end; the page's own layout, with no
+// Exit height, is proven in stage-flow.test.ts)
 const GEO: FlowGeometry = {
   top: 0,
   panel: 800,
   stops: 6,
   viewport: 800,
+  exit: { top: 8000, height: 1000 },
   telegram: { top: 11000, bottom: 12000 },
   ret: { top: 12000, height: 1000 },
   last: { top: 13000, height: 801 },
@@ -586,7 +589,9 @@ describe('flow pager: free touch and glide', () => {
       6,
     );
     // something above the flow grew by 120 px: the glide moves with it
-    expect(glideOn({ top: 120 })).toBeCloseTo(plain.end + 120, 6);
+    expect(
+      glideOn({ top: 120, exit: { top: 8120, height: 1000 } }),
+    ).toBeCloseTo(plain.end + 120, 6);
     // the paged part changed (a new panel height): the glide stops
     const p = make();
     let y = 9000;
@@ -1281,5 +1286,14 @@ describe('flow pager: the wrap', () => {
     const p = make({ last: null });
     p.frame(12990, 0);
     expect(p.frame(13050, 16).scrollTo).toBeNull();
+  });
+});
+
+describe('flow pager: the page with no Exit height (Just Pulled follows the lineup)', () => {
+  it('from the lineup, down glides one section to the free part', () => {
+    const p = make({ exit: null });
+    p.wheel(100, 0, false, 7000, 0);
+    expect(run(p, 7000, 0, 1600)).toBe(8000);
+    expect(p.zone(8000)).toBe('free');
   });
 });

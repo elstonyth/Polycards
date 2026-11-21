@@ -2858,7 +2858,7 @@ async function checkSections(label, profile) {
       const r = await page.evaluate(sectionsProbe);
       pass(
         `sections-order-${tag}`,
-        r.order === 'opening,just-pulled,telegram' &&
+        r.order === 'just-pulled,telegram' &&
           r.justPulled &&
           r.collectors &&
           r.telegram &&

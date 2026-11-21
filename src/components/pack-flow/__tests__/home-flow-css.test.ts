@@ -25,6 +25,14 @@ describe('the flow spacers (home-flow.module.css)', () => {
         expect(part, part).toContain('[data-flow-on]');
   });
 
+  it('have no Exit spacer rule: the lineup exits over the Lineup spacer alone', () => {
+    expect(css).not.toContain("[data-flow-spacer='exit']");
+    const lineup = rules.find((r) =>
+      r.selector.includes("[data-flow-spacer='lineup']"),
+    );
+    expect(lineup?.body).toMatch(/height:\s*calc\(var\(--panel\) \* 1\.25\)/);
+  });
+
   it('give Return and Last no height until their own flags', () => {
     const of = (name: string) =>
       rules.filter((r) => r.selector.includes(`[data-flow-spacer='${name}']`));

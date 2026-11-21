@@ -1,7 +1,10 @@
 import styles from './home-flow.module.css';
 
-/** The paged part's spacers, in page order. */
-const PAGED = ['row', 'band', 'lineup', 'exit'] as const;
+/**
+ * The paged part's spacers, in page order. The lineup exits over the Lineup
+ * spacer, so Just Pulled follows it directly.
+ */
+const PAGED = ['row', 'band', 'lineup'] as const;
 /** After the free content: Return, then Last (its top is the wrap line). */
 const END = ['return', 'last'] as const;
 
