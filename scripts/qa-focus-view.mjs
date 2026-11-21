@@ -344,8 +344,11 @@ for (const size of ['phone', 'desktop']) {
     `focus after Forward ${fw?.focus}`,
   );
 
-  // a key during the leave fade does not cancel the leave
+  // a key during the leave fade does not cancel the leave (from Closing: End
+  // pages to the lineup since full-flow WP4, ArrowUp comes back to Closing)
   await page.keyboard.press('End');
+  await page.waitForTimeout(1700);
+  await page.keyboard.press('ArrowUp');
   await settle(
     page,
     await page.evaluate(() => window.__packStage.focus().kinds.length),

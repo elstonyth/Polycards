@@ -11,8 +11,9 @@
 // docs/research/home-3d/full-flow/checkpoints/wp3b).
 //
 // Checks, on a phone (390x844, touch) and a desktop (1440x900, wheel):
-// - from the row a notch or a swipe lands on Front in 1.46-1.52 s (timed
-//   from the gesture to the landing frame in the driver's own trace);
+// - from the row a notch or a swipe lands on Front on the first frame at or
+//   after 1.5 s (no earlier than 1.46 s), read from the gesture to the
+//   landing frame in the driver's own trace;
 // - each stop in turn, down to the free part and back up to the row: the
 //   rest, the text block, the address and history.length at every rest;
 //   scrolling never adds an entry, and leaving the details puts the base
@@ -28,9 +29,16 @@
 // - a reload at the row, at a middle stop and in the free part;
 // - (wp3c) the focused view's chunk failing: plain scrolling reaches the
 //   sections below; a leave asked for off a rest; (phone) a second finger
-//   and a finger landing mid-move past the paged edge; no tap on the faded
-//   pack's controls anywhere past the fade; the 3D asleep in the free part
-//   and awake again back at Closing.
+//   and a finger landing mid-move past the paged edge; no tap on Closing's
+//   controls anywhere past Closing; the 3D asleep in the free part and awake
+//   again back at the lineup.
+// - (lineup, work package 4) Closing to the lineup and back, per frame: the
+//   chosen pack's centre and scale move one way only and never step faster
+//   than the curve allows; the others fade in and out, never cut; when they
+//   come into frame; the stop text gone at the lineup; the GPU estimate's
+//   peak against the cap; the back let go past Closing + 0.5 and printed
+//   again only at rest; a tap mid-move either way lands on its stop; (phone)
+//   diagonal swipes at the lineup end on a rest.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 
@@ -40,7 +48,7 @@ const BASE =
   process.env.PW_BASE ??
   'http://localhost:4300';
 const ONLY = (args.find((a) => a.startsWith('--only=')) ?? '=').split('=')[1];
-/** --part=pass,motion,nav,keys,reload,wp3c: run only these groups. */
+/** --part=pass,motion,nav,keys,reload,wp3c,lineup: run only these groups. */
 const PARTS = (args.find((a) => a.startsWith('--part=')) ?? '=')
   .split('=')[1]
   .split(',')
@@ -50,7 +58,7 @@ const OUT =
   process.env.QA_OUT ?? 'docs/research/home-3d/full-flow/checkpoints/wp3b';
 const SLUG = '151';
 const PREVIEW = '/home-preview';
-/** The landing window for one move [plan 2.2: 1.46-1.5 s]; the landing frame may come up to one frame (measured) after it. */
+/** The landing window for one move [plan 2.2: 1.46-1.5 s]; the landing frame is the first frame at or after it. */
 const LAND_MS = [1460, 1500];
 mkdirSync(OUT, { recursive: true });
 
@@ -166,6 +174,12 @@ const snap = (page) =>
       edge: fl?.table?.edge ?? null,
       kinds: f?.kinds ?? [],
       stage: !!document.querySelector('[data-stage-root]'),
+      // the stop text layer and the panel's taps
+      text: (() => {
+        const el = document.querySelector('[data-testid="focus-stops"]');
+        return el ? getComputedStyle(el).visibility : null;
+      })(),
+      inert: !!document.querySelector('[data-spin-wrap]')?.inert,
     };
   });
 
@@ -327,10 +341,34 @@ for (const size of sizes) {
       .filter((v) => v > 0 && v < 100)
       .sort((a, b) => a - b);
     const frame = gaps[Math.floor(gaps.length / 2)] ?? 17;
+    // The move starts at the gesture's own time and ends on the first frame
+    // at or after 1.5 s. So the end time includes that frame's own length.
+    // On this headless software renderer frames of 45-60 ms come in every
+    // part of the move, against a median of about 28: renderer jitter, not
+    // a hitch at the landing, and not growing with the zoom (measured with
+    // full-flow/checkpoints/wp4/entry-timing-probe.mjs). A fixed allowance
+    // of median frames failed whenever a long frame crossed 1.5 s. So the
+    // check reads the landing frame from the driver's trace instead: the
+    // last frame drawn before the move was seen to end. It passes when that
+    // frame is at least 1460 ms after the gesture, the frame before it came
+    // before 1500 ms (the move did not run on past its end), and the scroll
+    // there is Front.
+    const endIdx =
+      landAt === null || !g
+        ? -1
+        : tr.trace.findLastIndex(([t]) => t <= landAt && t > g);
+    const endF = endIdx > 0 ? tr.trace[endIdx] : null;
+    const prevF = endIdx > 0 ? tr.trace[endIdx - 1] : null;
+    const endMs = endF ? endF[0] - g : null;
+    const prevMs = prevF ? prevF[0] - g : null;
     report(
       `entry-timing-${size}`,
-      ms !== null && ms >= LAND_MS[0] && ms <= LAND_MS[1] + 1.5 * frame,
-      `gesture to the move's end on Front: ${ms} ms (window ${LAND_MS[0]}-${LAND_MS[1]} ms plus one frame of ${frame.toFixed(1)} ms; scroll ${r.y}, Front at ${r.stops[1]})`,
+      endMs !== null &&
+        prevMs !== null &&
+        endMs >= LAND_MS[0] &&
+        prevMs < LAND_MS[1] &&
+        Math.abs(endF[1] - r.stops[1]) < 1,
+      `gesture to the move's end on Front: ${ms} ms; landing frame at ${endMs?.toFixed(1)} ms, the frame before at ${prevMs?.toFixed(1)} ms (window ${LAND_MS[0]}-${LAND_MS[1]} ms; median frame ${frame.toFixed(1)} ms; scroll ${r.y}, Front at ${r.stops[1]})`,
     );
     report(
       `entry-address-${size}`,
@@ -364,6 +402,25 @@ for (const size of sizes) {
         .map((x) => `${x.block}@${x.y}`)
         .join(' '),
     );
+    // Closing to the lineup (work package 4): a rest, the address back to the
+    // base path, the stop text gone, the panel taking no taps
+    await gesture(s, 1);
+    r = await rest(page);
+    rows.push({ step: 'down: lineup', ...r });
+    await shot(page, size, 'pass-down-lineup');
+    report(
+      `lineup-rest-${size}`,
+      near(r.y, r.stops[n + 1]) &&
+        r.stops.length === n + 2 &&
+        r.on &&
+        r.past &&
+        r.text === 'hidden' &&
+        r.inert &&
+        r.path === PREVIEW &&
+        r.len === s0.len &&
+        r.idx === s0.idx,
+      `scroll ${r.y} (lineup ${r.stops[n + 1]}), past ${r.past}, stop text ${r.text}, inert ${r.inert}, address ${r.path}, history.length ${r.len}`,
+    );
     await gesture(s, 1);
     r = await rest(page);
     rows.push({ step: 'down: free part', ...r });
@@ -377,9 +434,19 @@ for (const size of sizes) {
         r.idx === s0.idx,
       `scroll ${r.y} (exit end ${r.exitEnd}), address ${r.path}, history.length ${r.len}, entry ${r.idx}`,
     );
-    // back up: from just below the paged edge one up gesture rests on Closing
+    // back up: from just below the paged edge one up gesture rests on the
+    // lineup (ours stops at every section), the next on Closing
     await page.evaluate((e) => window.scrollTo(0, e + 40), r.edge);
     await page.waitForTimeout(400);
+    await gesture(s, -1);
+    r = await rest(page);
+    rows.push({ step: 'up: lineup', ...r });
+    await shot(page, size, 'pass-up-lineup');
+    report(
+      `up-into-lineup-${size}`,
+      near(r.y, r.stops[n + 1]) && r.path === PREVIEW && r.len === s0.len,
+      `scroll ${r.y} (lineup ${r.stops[n + 1]}), address ${r.path}, history.length ${r.len}`,
+    );
     await gesture(s, -1);
     r = await rest(page);
     rows.push({ step: 'up: Closing', ...r });
@@ -662,9 +729,17 @@ for (const size of sizes) {
     await page.waitForTimeout(600);
     r = await rest(page);
     check('front-ArrowUp-to-row', atRow(r), r);
+    // End pages to the lineup (plan 2.10, work package 4)
     r = await key(page, 'End');
     check(
-      'row-End-to-closing',
+      'row-End-to-lineup',
+      r.on && near(r.y, r.stops[n + 1]) && r.past && r.path === PREVIEW,
+      r,
+    );
+    await shot(page, size, 'keys-lineup');
+    r = await key(page, 'ArrowUp');
+    check(
+      'lineup-ArrowUp-to-closing',
       r.on && near(r.y, r.stops[n]) && r.block === 'closing',
       r,
     );
@@ -676,7 +751,7 @@ for (const size of sizes) {
     r = await key(page, 'End');
     r = await key(page, 'ArrowDown');
     check(
-      'closing-ArrowDown-to-free',
+      'lineup-ArrowDown-to-free',
       near(r.y, r.exitEnd) && r.past && r.path === PREVIEW && r.len === s0.len,
       r,
     );
@@ -895,11 +970,13 @@ for (const size of sizes) {
       );
     }
 
-    // to Closing, and the controls on it
+    // to Closing (End pages to the lineup, ArrowUp back), and its controls
     await page.keyboard.press('End');
     await page.waitForTimeout(200);
+    await rest(page);
+    await page.keyboard.press('ArrowUp');
+    await page.waitForTimeout(200);
     let r = await rest(page);
-    const closingY = r.y;
     const engineAt = () =>
       page.evaluate(() => ({
         present: window.__packStage.present?.() ?? null,
@@ -931,8 +1008,12 @@ for (const size of sizes) {
       );
     });
 
-    // a finger that lands while the move from Closing crosses the paged
-    // edge: the move still lands on the exit end, the page never following it
+    // on to the lineup; then a finger that lands while the move from the
+    // lineup crosses the paged edge: the move still lands on the exit end,
+    // the page never following it
+    await gesture(s, 1);
+    r = await rest(page);
+    const lineupY = r.y;
     if (s.cdp) {
       await gesture(s, 1);
       await page
@@ -999,9 +1080,11 @@ for (const size of sizes) {
       r = await rest(page);
     }
 
-    // nothing of the faded pack takes a tap anywhere past the fade
+    // nothing of Closing takes a tap anywhere past Closing: the lineup, the
+    // paged edge, the exit
     const t = await page.evaluate(() => window.__packStage.flow().table);
     const ysTap = [
+      Math.round(t.rl),
       Math.round(t.edge + 10),
       ...[0, 0.25, 0.5, 0.75, 1].map((f) =>
         Math.round(t.exitStart + f * (t.exitEnd - t.exitStart)),
@@ -1041,7 +1124,7 @@ for (const size of sizes) {
       ].join('\n') + '\n',
     );
     report(
-      'no-tap-past-fade-' + size,
+      'no-tap-past-closing-' + size,
       tapsOk && Object.keys(pts).length >= 3,
       Object.keys(pts).join(', ') +
         ' at ' +
@@ -1052,11 +1135,11 @@ for (const size of sizes) {
           : 'a tap lands on the hidden panel'),
     );
 
-    // the 3D sleeps in the free part, and wakes on the way back to Closing
+    // the 3D sleeps in the free part, and wakes on the way back to the lineup
     await page.evaluate((v) => window.scrollTo(0, v), t.exitEnd);
     await page.waitForTimeout(1500);
     const e1 = await engineAt();
-    // back up: the scrollbar into the paged part, which snaps to Closing
+    // back up: the scrollbar into the paged part, which snaps to the lineup
     await page.evaluate((v) => window.scrollTo(0, v), t.edge - 50);
     await page.waitForTimeout(300);
     r = await rest(page);
@@ -1064,13 +1147,13 @@ for (const size of sizes) {
     const e2 = await engineAt();
     const MB = (b) => (b === null ? null : Math.round((b / 1048576) * 10) / 10);
     report(
-      'engine-sleeps-past-closing-' + size,
+      'engine-sleeps-in-the-free-part-' + size,
       e0.present === true &&
         e1.present === false &&
         !e1.running &&
         e2.present === true &&
         e2.running &&
-        near(r.y, closingY) &&
+        near(r.y, lineupY) &&
         e2.live.length > 0,
       'Closing: present ' +
         e0.present +
@@ -1084,7 +1167,7 @@ for (const size of sizes) {
         e1.running +
         ', ' +
         MB(e1.gpu) +
-        ' MB; back at Closing (' +
+        ' MB; back at the lineup (' +
         r.y +
         '): present ' +
         e2.present +
@@ -1095,6 +1178,247 @@ for (const size of sizes) {
     );
     report(
       'errors-wp3c-' + size,
+      page.errors.length === 0,
+      page.errors.join(' | '),
+    );
+    await s.ctx.close();
+  }
+
+  // ---- Closing to the lineup and back (work package 4) ----
+  if (part('lineup')) {
+    const s = await open(size);
+    const { page } = s;
+    await load(s);
+    // to Closing (End pages to the lineup, ArrowUp back), the back printed
+    await page.keyboard.press('End');
+    await page.waitForTimeout(200);
+    await rest(page);
+    await page.keyboard.press('ArrowUp');
+    await page.waitForTimeout(200);
+    let r = await rest(page);
+    await page.waitForTimeout(2500);
+    const n = r.kinds.length;
+    const closingY = r.stops[n];
+    const lineupY = r.stops[n + 1];
+    const backAtClosing = await page.evaluate(
+      () => window.__packStage.runtime?.()?.focusBack?.state ?? null,
+    );
+    /** Every frame for `ms`: the chosen pack as drawn, the others, the GPU, the back. */
+    const record = (ms) =>
+      page.evaluate(
+        (len) =>
+          new Promise((done) => {
+            const out = [];
+            const t0 = performance.now();
+            const index = window.__packStage.state.focusOn?.ctx?.index ?? null;
+            const tick = () => {
+              const ps = window.__packStage;
+              const rt = ps.runtime?.();
+              const all = rt?.drawn ?? [];
+              const tx = document.querySelector('[data-testid="focus-stops"]');
+              out.push({
+                t: performance.now() - t0,
+                y: scrollY,
+                spin: ps.state.spin,
+                foc: all.find((d) => d.index === index) ?? null,
+                others: all
+                  .filter((d) => d.index !== index && d.opacity > 0.001)
+                  .map((d) => [d.id, d.opacity]),
+                live: (ps.live?.() ?? []).length,
+                gpu: ps.stats?.()?.gpuBytesEstimate ?? 0,
+                back: rt?.focusBack?.state ?? null,
+                busy: ps.flow().busy,
+                text: tx ? Number(getComputedStyle(tx).opacity) : null,
+              });
+              if (performance.now() - t0 < len) requestAnimationFrame(tick);
+              else done(out);
+            };
+            requestAnimationFrame(tick);
+          }),
+        ms,
+      );
+    const MOVE = 1500;
+    /** The chosen pack along the move (qa-focus-frames' rule): one way, no step faster than the curve allows. */
+    const curve = (frames) => {
+      const mv = frames.filter(
+        (f, i) => f.foc && (i === 0 || f.foc.at !== frames[i - 1].foc?.at),
+      );
+      const bad = [];
+      const a0 = mv[0]?.foc;
+      const a1 = mv.at(-1)?.foc;
+      if (!a0 || !a1) return ['the chosen pack was not drawn'];
+      const span = {
+        scale: Math.abs(a1.scale - a0.scale),
+        pos: Math.hypot(a1.x - a0.x, a1.y - a0.y),
+      };
+      const allow = (dt, v) => ((v * 3 * dt) / MOVE) * 1.3 + v * 0.01;
+      const want = Math.sign(a1.scale - a0.scale);
+      let prevD = 0;
+      for (let i = 1; i < mv.length; i++) {
+        const a = mv[i - 1].foc;
+        const b = mv[i].foc;
+        const dt = b.at - a.at;
+        const ds = b.scale - a.scale;
+        if (ds * want < -span.scale * 0.01)
+          bad.push(
+            `scale went back ${a.scale.toFixed(3)} -> ${b.scale.toFixed(3)}`,
+          );
+        if (Math.abs(ds) > allow(dt, span.scale))
+          bad.push(
+            `scale step ${Math.abs(ds).toFixed(3)} in ${dt.toFixed(0)} ms`,
+          );
+        const dp = Math.hypot(b.x - a.x, b.y - a.y);
+        if (dp > allow(dt, span.pos))
+          bad.push(`centre step ${dp.toFixed(3)} in ${dt.toFixed(0)} ms`);
+        // one way: the distance from the start never shrinks
+        const d = Math.hypot(b.x - a0.x, b.y - a0.y);
+        if (d < prevD - span.pos * 0.01) bad.push('centre went back');
+        prevD = Math.max(prevD, d);
+      }
+      return bad;
+    };
+    /** The others' opacity, frame to frame: a fade, never a cut. */
+    const ramp = (frames) => {
+      const bad = [];
+      for (let i = 1; i < frames.length; i++) {
+        const a = new Map(frames[i - 1].others);
+        const b = new Map(frames[i].others);
+        const span = Math.max(1, (frames[i].t - frames[i - 1].t) / (1000 / 60));
+        for (const id of new Set([...a.keys(), ...b.keys()])) {
+          const d = Math.abs((b.get(id) ?? 0) - (a.get(id) ?? 0));
+          if (d > 0.15 * span)
+            bad.push(
+              `${id} ${(a.get(id) ?? 0).toFixed(2)} -> ${(b.get(id) ?? 0).toFixed(2)}`,
+            );
+        }
+      }
+      return bad;
+    };
+    const MB = (b) => Math.round((b / 1048576) * 10) / 10;
+    const cap = size === 'phone' ? 40 : 96;
+    // down: Closing to the lineup
+    const pd = record(2600);
+    await gesture(s, 1);
+    const down = await pd;
+    r = await rest(page);
+    await shot(page, size, 'lineup-rest');
+    const cd = curve(down);
+    report(
+      `closing-to-lineup-pack-follows-the-curve-${size}`,
+      cd.length === 0 && near(r.y, lineupY),
+      `${down.length} frames, landing ${r.y} (lineup ${lineupY})${cd.length ? '; ' + cd.slice(0, 3).join('; ') : ''}`,
+    );
+    const rd = ramp(down);
+    report(
+      `closing-to-lineup-others-fade-in-${size}`,
+      rd.length === 0 && down.at(-1).others.length > 0,
+      `${down.at(-1).others.length} others drawn at the end${rd.length ? '; cuts: ' + rd.slice(0, 3).join('; ') : ''}`,
+    );
+    // when the others come into frame, from the move's own start (its first
+    // frame with the hand-off under way; the recording starts before the
+    // gesture), counting a pack once it is in frame at 25% opacity or more
+    // (the reference: 1 to the full row between 25% and 74% of the move
+    // [measured D §C])
+    {
+      const i0 = Math.max(0, down.findIndex((f) => f.spin > 0) - 1);
+      const t0 = down[i0].t;
+      const full = down.at(-1).live;
+      const seen = (f) =>
+        f.live > 1 && Math.max(0, ...f.others.map((o) => o[1])) >= 0.25;
+      const firstIn = down.find(seen);
+      const allIn = down.find((f) => seen(f) && f.live >= full);
+      const pct = (f) => (f ? ((f.t - t0) / MOVE) * 100 : null);
+      console.log(
+        `INFO lineup-in-frame-${size}: packs in frame 1 -> ${full}; the first other at ${pct(firstIn)?.toFixed(0) ?? 'never'}%, all at ${pct(allIn)?.toFixed(0) ?? 'never'}% of the move (reference 25% to 74%)`,
+      );
+    }
+    const gDown = Math.max(...down.map((f) => f.gpu));
+    const heldBack = down.filter((f) => f.spin >= 0.5 && f.back !== null);
+    report(
+      `closing-to-lineup-back-let-go-${size}`,
+      backAtClosing === 'ready' && heldBack.length === 0,
+      `back at Closing ${backAtClosing}; frames past Closing + 0.5 still holding it: ${heldBack.length}`,
+    );
+    // up: the lineup to Closing
+    const pu = record(2600);
+    await gesture(s, -1);
+    const up = await pu;
+    r = await rest(page);
+    const cu = curve(up);
+    report(
+      `lineup-to-closing-pack-follows-the-curve-${size}`,
+      cu.length === 0 && near(r.y, closingY) && r.block === 'closing',
+      `${up.length} frames, landing ${r.y} (Closing ${closingY}), block ${r.block}${cu.length ? '; ' + cu.slice(0, 3).join('; ') : ''}`,
+    );
+    const ru = ramp(up);
+    report(
+      `lineup-to-closing-others-fade-out-${size}`,
+      ru.length === 0 && up.at(-1).others.length === 0,
+      `${up.at(-1).others.length} others drawn at the end${ru.length ? '; cuts: ' + ru.slice(0, 3).join('; ') : ''}`,
+    );
+    const printedMid = up.filter((f) => f.busy && f.back === 'printing');
+    await page.waitForTimeout(2500);
+    const backAgain = await page.evaluate(
+      () => window.__packStage.runtime?.()?.focusBack?.state ?? null,
+    );
+    report(
+      `lineup-to-closing-back-printed-at-rest-${size}`,
+      printedMid.length === 0 && backAgain === 'ready',
+      `frames printing the back mid-move: ${printedMid.length}; at rest on Closing: ${backAgain}`,
+    );
+    const gUp = Math.max(...up.map((f) => f.gpu));
+    report(
+      `hand-off-gpu-${size}`,
+      MB(Math.max(gDown, gUp)) <= cap,
+      `peak ${MB(gDown)} MB down, ${MB(gUp)} MB up (cap ${cap} MB)`,
+    );
+    // fault 1 at the hand-off: a tap 300 ms into the move, either way
+    await gesture(s, 1);
+    await page.waitForTimeout(300);
+    await tap(s, 30, s.cdp ? 300 : 450);
+    await page.waitForTimeout(1600);
+    r = await rest(page);
+    const tapDown = near(r.y, lineupY);
+    await gesture(s, -1);
+    await page.waitForTimeout(300);
+    await tap(s, 30, s.cdp ? 300 : 450);
+    await page.waitForTimeout(1600);
+    r = await rest(page);
+    const tapUp = near(r.y, closingY);
+    report(
+      `tap-mid-hand-off-${size}`,
+      tapDown && tapUp,
+      `down: on the lineup ${tapDown}; up: on Closing ${tapUp} (${r.y})`,
+    );
+    // fault 2 at the lineup (phone): diagonal swipes end on a rest
+    if (s.cdp) {
+      const ends = [];
+      for (const deg of [46, 60, 44, 30]) {
+        await page.evaluate((v) => window.scrollTo(0, v), lineupY);
+        r = await rest(page);
+        const a = (deg * Math.PI) / 180;
+        const dx = 220 * Math.sin(a);
+        const dy = 220 * Math.cos(a);
+        await swipe(s, 195 - dx / 2, 640, 195 + dx / 2, 640 - dy);
+        await page.waitForTimeout(300);
+        r = await rest(page);
+        const ok = onRest(r) || near(r.y, r.exitEnd);
+        ends.push({ deg, y: r.y, ok });
+      }
+      report(
+        `diagonal-swipes-at-the-lineup-${size}`,
+        ends.every((e) => e.ok),
+        ends
+          .map((e) => `${e.deg}deg -> ${e.y}${e.ok ? '' : ' OFF A REST'}`)
+          .join(', '),
+      );
+    }
+    writeFileSync(
+      `${OUT}/lineup-frames-${size}.json`,
+      JSON.stringify({ down, up }, null, 1),
+    );
+    report(
+      `errors-lineup-${size}`,
       page.errors.length === 0,
       page.errors.join(' | '),
     );

@@ -26,9 +26,11 @@
 //   (a block fades as one piece, both ways);
 // - the Front block shows while leaving from another stop;
 // - (full-flow WP3a) a scroll entry at the row strays from the tap's curve;
-//   past Closing, the panel's opacity rises, another pack shows, or the move
-//   does not land on the free part's start; an up wheel there does not come
-//   back to rest on Closing.
+// - (full-flow WP4) past Closing the panel fades, the page's content comes
+//   into view over the hand-off, another pack is cut in rather than faded,
+//   a stop block still shows at the lineup, or the move does not land on the
+//   lineup; an up wheel from the free part does not rest on the lineup, or
+//   the next up gesture does not rest on Closing.
 import { chromium } from 'playwright';
 
 const args = process.argv.slice(2);
@@ -641,13 +643,23 @@ for (const size of ['phone', 'desktop']) {
     }
   });
   judge(`${size}-stops`, walk);
-  // past Closing (full-flow WP3a): one gesture pages to the free part's
-  // start while the panel fades out with the scroll, and is then hidden; an
-  // up wheel from there comes back to rest on Closing
+  // past Closing (full-flow WP4): one gesture pages to the lineup rest while
+  // the pack hands over to the tilted lineup: the panel never fades, the
+  // page's content never comes into view over the hand-off, the others fade
+  // in (never cut) and the stop text leaves; one more pages through the
+  // lineup's exit to the free part's start
+  const lineupAt = () =>
+    page.evaluate(() => {
+      const fl = window.__packStage.flow();
+      return !fl.busy && Math.abs(scrollY - fl.stops.at(-1)) < 1;
+    });
   const past = await frames(async () => {
     await next();
     await page.waitForFunction(
-      () => document.querySelector('[data-home-flow][data-flow-free]'),
+      () => {
+        const fl = window.__packStage.flow();
+        return !fl.busy && Math.abs(scrollY - fl.stops.at(-1)) < 1;
+      },
       null,
       { timeout: 8000 },
     );
@@ -655,19 +667,17 @@ for (const size of ['phone', 'desktop']) {
   });
   {
     const moving = past.filter((fr) => fr.on);
-    let back = 0;
-    for (let i = 1; i < moving.length; i++)
-      if (moving[i].panelOp > moving[i - 1].panelOp + 0.02) back++;
     const end = moving.at(-1);
     const flow = await page.evaluate(() => window.__packStage.flow?.());
+    const faded = moving.filter((fr) => fr.panelOp < 1);
     report(
-      `${size}-past-closing-fades-out`,
-      back === 0 &&
+      `${size}-past-closing-into-the-lineup`,
+      faded.length === 0 &&
         !!end &&
-        end.panelOp === 0 &&
-        !!flow?.table &&
-        Math.abs(end.y - flow.table.exitEnd) < 1,
-      `${moving.length} frames, opacity rose in ${back}; last: opacity ${end?.panelOp}, scroll ${end?.y} vs exit end ${flow?.table?.exitEnd}`,
+        !!flow?.stops &&
+        Math.abs(end.y - flow.stops.at(-1)) < 1 &&
+        end.blocks.length === 0,
+      `${moving.length} frames, panel below full opacity in ${faded.length}; last: scroll ${end?.y} vs lineup ${flow?.stops?.at(-1)}, stop blocks shown ${JSON.stringify(end?.blocks ?? null)}`,
     );
     const over = moving.filter(
       (fr) => fr.panelOp > 0.01 && fr.openTop !== null && fr.openTop < fr.vh,
@@ -677,14 +687,36 @@ for (const size of ['phone', 'desktop']) {
       over.length === 0,
       `frames with the page's content in view while the pack shows: ${over.length}${over[0] ? `; first: opacity ${over[0].panelOp}, content top ${over[0].openTop}` : ''}`,
     );
+    const cuts = [];
+    for (let i = 1; i < moving.length; i++) {
+      const a = new Map(moving[i - 1].drawn.map(([id, o]) => [id, o]));
+      const b = new Map(moving[i].drawn.map(([id, o]) => [id, o]));
+      const span = Math.max(1, (moving[i].at - moving[i - 1].at) / (1000 / 60));
+      for (const id of new Set([...a.keys(), ...b.keys()])) {
+        const d = Math.abs((b.get(id) ?? 0) - (a.get(id) ?? 0));
+        if (d > RAMP_STEP * span)
+          cuts.push(
+            `${id} ${(a.get(id) ?? 0).toFixed(2)} -> ${(b.get(id) ?? 0).toFixed(2)}`,
+          );
+      }
+    }
     report(
-      `${size}-past-closing-no-other-pack`,
-      moving.every((fr) => fr.css.length === 0 && fr.drawn.length === 0),
-      `frames with another pack shown: ${moving.filter((fr) => fr.css.length || fr.drawn.length).length}`,
+      `${size}-past-closing-others-fade-in`,
+      cuts.length === 0 && (end?.drawn.length ?? 0) > 0,
+      `others drawn at the lineup: ${end?.drawn.length ?? 0}${cuts.length ? '; cuts: ' + cuts.slice(0, 3).join('; ') : ''}`,
     );
   }
+  // on through the lineup's exit to the free part's start
+  await next();
+  await page.waitForFunction(
+    () => document.querySelector('[data-home-flow][data-flow-free]'),
+    null,
+    { timeout: 8000 },
+  );
+  await page.waitForTimeout(400);
   // the free part's wheel is the browser's own until a notch crosses the
-  // paged edge (half a section below the lineup rest), which pages to Closing
+  // paged edge (half a section below the lineup rest), which pages to the
+  // lineup: ours stops there, then one more up gesture rests on Closing
   for (let i = 0; i < 30; i++) {
     await page.mouse.move(V.width / 2, V.height / 2);
     await page.mouse.wheel(0, -120);
@@ -704,17 +736,31 @@ for (const size of ['phone', 'desktop']) {
       null,
       { timeout: 10000 },
     )
-    .then(() => settle(page, kinds.length))
     .then(() => true)
     .catch(() => false);
   const at = await page.evaluate(() => ({
     y: scrollY,
-    closing: window.__packStage.flow().stops.at(-1),
+    lineup: window.__packStage.flow().stops.at(-1),
   }));
   report(
-    `${size}-up-from-the-free-part-rests-on-closing`,
-    backAt,
-    `scroll ${at.y}, Closing rest ${at.closing}`,
+    `${size}-up-from-the-free-part-rests-on-the-lineup`,
+    backAt && (await lineupAt()),
+    `scroll ${at.y}, lineup rest ${at.lineup}`,
+  );
+  await page.keyboard.press('ArrowUp');
+  const closingAt = await settle(page, kinds.length)
+    .then(() =>
+      page.evaluate(
+        () =>
+          Math.abs(scrollY - window.__packStage.flow().stops.at(-2)) < 1 &&
+          !window.__packStage.flow().busy,
+      ),
+    )
+    .catch(() => false);
+  report(
+    `${size}-up-from-the-lineup-rests-on-closing`,
+    closingAt,
+    `scroll ${await page.evaluate(() => scrollY)}, Closing rest ${await page.evaluate(() => window.__packStage.flow().stops.at(-2))}`,
   );
   // leave from every stop (the last one with its "All" button)
   for (let k = kinds.length; k >= 1; k--) {

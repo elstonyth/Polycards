@@ -11,15 +11,17 @@
  * - a page that reaches the band by other means (the scrollbar, a key's
  *   native scroll) focuses the centred pack as well, or goes back to the row
  *   when it cannot be focused;
- * - the stop list ends at Closing: a down gesture there pages to the end of
- *   the Exit spacer (the opening line's top, where the free part starts),
- *   and the focused pack fades out over that move (`fade`, a function of
- *   the scroll); the lineup and its exit are built by later packages;
+ * - the stop list ends at the lineup rest RL (work package 4): a down
+ *   gesture at Closing pages to RL while the focused pack hands over to the
+ *   tilted lineup (`handoff`, the local progress, a function of the
+ *   scroll); a down gesture at RL pages through the lineup's exit
+ *   (`exit`) to the end of the Exit spacer, where the free part starts; a
+ *   pack that cannot be focused keeps the row alone;
  * - a re-measure keeps the flow position P (a rotation never leaves the page
  *   off its section).
  * Touches that start in the free part stay the browser's own until the free
  * part's touch is built (work package 6); the wheel there is native except an
- * up notch that crosses the paged edge, which pages back to Closing.
+ * up notch that crosses the paged edge, which pages back to the lineup.
  */
 import {
   flowAt,
@@ -30,6 +32,7 @@ import {
 } from './stage-flow';
 import {
   createFlowPager,
+  flowPagerTable,
   type FlowKeyResult,
   type FlowPagerFrame,
   type FlowPagerTable,
@@ -65,8 +68,13 @@ export type FlowInputFrame = FlowPagerFrame & {
   at: FlowAt | null;
   /** The focus value F: P in the band, held at the last stop past it. */
   focus: number;
-  /** The focused pack's fade past its last stop: 0 shown, 1 gone (from the Exit spacer's top). */
-  fade: number;
+  /**
+   * The hand-off from Closing to the lineup rest (plan 2.4): the local
+   * progress, 0 at Closing and above, 1 at RL and below (the pose eases it).
+   */
+  handoff: number;
+  /** The lineup's exit over the Exit spacer: 0 above it, 1 at its end and below. */
+  exit: number;
   /**
    * The page has left the details downwards: the free part, or past the
    * last stop by the text's own line (20% into the move below it, either
@@ -187,16 +195,21 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
 
   const kindsNow = (): readonly string[] =>
     d.focused() ? d.kinds() : (d.centreKinds() ?? []);
+  // a pack to focus pages on to the lineup; a pack that cannot be focused
+  // keeps the row alone, so no snap rests an unfocused page on the lineup
   const pagerTable = (
     t: FlowTable,
     kinds: readonly string[],
-  ): FlowPagerTable => ({
-    stops: [t.r0, ...t.rests],
-    kinds,
-    exitEnd: t.exitEnd,
-    edge: t.edge,
-    lineup: false,
-  });
+  ): FlowPagerTable =>
+    kinds.length > 0
+      ? flowPagerTable(t, kinds)
+      : {
+          stops: [t.r0],
+          kinds,
+          exitEnd: t.exitEnd,
+          edge: t.edge,
+          lineup: false,
+        };
   /** Rebuilds the table for these kinds (a new pack, or the first geometry). */
   const build = (force = false): void => {
     if (!geo) {
@@ -221,7 +234,8 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
   const entered = () => {
     if (!d.focused() && pager.busy() && d.enter()) build();
   };
-  const stops = () => (table ? [table.r0, ...table.rests] : []);
+  const stops = (): readonly number[] =>
+    table ? (table.rests.length > 0 ? table.stops : [table.r0]) : [];
 
   return {
     measure(g, scrollY) {
@@ -332,17 +346,22 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
         d.enter()
       )
         build();
-      if (!t) return { ...f, at: null, focus: 0, fade: 0, past: false };
+      if (!t)
+        return { ...f, at: null, focus: 0, handoff: 0, exit: 0, past: false };
       const at = flowAt(y, t);
       const n = t.rests.length;
-      const last = n > 0 ? t.rests[n - 1]! : t.r0;
       const focus = at.zone === 'paged' ? Math.min(n, at.p) : n;
-      // gone by the Exit spacer's top: the free content below it never comes
-      // into view over the fading pack
-      const fade =
-        t.exitStart > last ? clamp01((y - last) / (t.exitStart - last)) : 0;
+      let handoff = 0;
+      let exit = 0;
+      if (n > 0) {
+        if (at.zone === 'paged') handoff = clamp01(at.p - n);
+        else {
+          handoff = 1;
+          exit = at.span === 'lineup' ? 0 : at.span === 'exit' ? at.t : 1;
+        }
+      }
       const past = at.zone === 'free' || blockAt(at.p, n + 1) > n;
-      return { ...f, at, focus, fade, past };
+      return { ...f, at, focus, handoff, exit, past };
     },
     busy: () => pager.busy(),
     refused: () => pager.refused(),

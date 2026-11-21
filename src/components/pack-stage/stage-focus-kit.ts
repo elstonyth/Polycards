@@ -32,6 +32,7 @@ import type {
   StageState,
 } from './contract';
 import { FOCUS_TERM } from './stage-compose';
+import { focusBackWanted } from './stage-flow';
 import { spotAt } from './stage-focus';
 import {
   focusKeys,
@@ -115,7 +116,7 @@ export type FocusRunDeps = {
   go(k: number, o?: { from?: number; ms?: number }): boolean;
   /** A move is playing. */
   busy(): boolean;
-  /** The paged stops: the row, then the pack's rests. */
+  /** The paged stops: the row, the pack's rests, then the lineup rest. */
   stops(): readonly number[];
   /** Repaints the row's CSS tiles from the state (focus included). */
   paint(): void;
@@ -133,6 +134,8 @@ export type FocusFrame = {
   idle: boolean;
   /** The page has left the details downwards (the address shows the base path). */
   past?: boolean;
+  /** The hand-off from Closing to the lineup: 0 at Closing and above, 1 at the lineup. */
+  handoff?: number;
 };
 
 /** How a focus begins. */
@@ -473,7 +476,15 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
         end();
         return true;
       }
-      if (f.idle && !settled && f.focus >= 1 - 1e-3) {
+      // past Closing + 0.5 the back is let go (the lineup's fronts take its
+      // room); back at a stop it is printed again once the pack rests there,
+      // never mid-move (full-flow plan 2.12, risk 4)
+      const handoff = f.handoff ?? 0;
+      if (settled && !focusBackWanted(handoff)) {
+        settled = false;
+        publish();
+      }
+      if (f.idle && !settled && f.focus >= 1 - 1e-3 && !(handoff > 0)) {
         settled = true;
         publish();
       }

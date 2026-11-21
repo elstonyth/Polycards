@@ -530,13 +530,17 @@ function ciaoRowBlock(
   cam: Readonly<CiaoCamera>,
   soldOut: boolean,
   capsule: boolean,
+  spread = 1,
 ): SpinPoseBlock {
   const r = ciaoRatio(panel.w);
   const artW = l.artW && l.artW > 0 ? l.artW : l.artH * DEFAULT_ART_ASPECT;
   const spacingScale =
     ciaoPackStep(artW / l.artH) / (CIAO_ROW.step * CIAO_PACKSHOT.spacing);
   const ref = ciaoView(0, CIAO_PACKSHOT, r, { spacingScale });
-  const v = ciaoView(dp, cam, r, { spacingScale, capsule });
+  const v = ciaoView(dp, cam, r, {
+    spacingScale: spacingScale * spread,
+    capsule,
+  });
   const t = Math.tan(((cam.fov / 2) * Math.PI) / 180);
   // Ciao maps its fov to the VIEWPORT height; so do we, so sizes match in px
   const projH = panel.viewH ?? panel.h;
@@ -611,6 +615,7 @@ export const ciaoPose: SpinPoseFn = (rest, st, i, l, desktop, ctx) => {
     ciaoCameraAt(exit),
     !!ctx.soldOut,
     !!ctx.capsule,
+    ctx.spread ?? 1,
   );
   // a wrapped pack or a copy takes its slot outright and fades in there
   if (Math.abs(dp - d) > 1e-9) return row;

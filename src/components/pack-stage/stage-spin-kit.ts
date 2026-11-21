@@ -29,9 +29,9 @@ import type { FocusRun } from './stage-focus-kit';
 import { STAGE_DESKTOP_QUERY } from './stage-gate';
 import { tileVars } from './StageTile';
 import { cancelFrame, frame, type FrameData } from './stage-motion';
-import { poseAt, stageOpacity } from './stage-pose';
+import { poseAt } from './stage-pose';
 import { CAPSULE_LEAN, LEAN } from './stage-spin-math';
-import { composePose } from './stage-pose-compose';
+import { composeOpacity, composePose } from './stage-pose-compose';
 import { ciaoCopies, ciaoOpacity, ciaoPose } from './stage-spin';
 import {
   createFlowInput,
@@ -172,9 +172,7 @@ export const SPIN_KIT: StageSpinKit = {
         ctx.focusTerm = fo.term;
       }
       const pose = poseAt(state, i, lf, g.desktop, soldOut, ctx);
-      const op =
-        stageOpacity(state, i, g.desktop, count, ctx) *
-        (fo ? fo.term.opacity(state.focus, i === fo.ctx.index, fo.ctx) : 1);
+      const op = composeOpacity(state, i, g.desktop, count, ctx);
       const k = 1 / g.artH;
       vars[`--${p}-dx`] = fmt((pose.dx + pose.fx * g.panel.w) * k);
       vars[`--${p}-dy`] = fmt((pose.dy + pose.fy * g.panel.h) * k);
@@ -315,25 +313,39 @@ export function startSpin(host: SpinHost): SpinControl {
   };
 
   /**
-   * The panel past Closing: the focused pack fades (and takes no taps from
-   * its first faded frame), the 3D is not drawn once it is gone, and the
-   * panel is hidden in the free part.
+   * The panel past Closing (work package 4): the focused pack hands over to
+   * the tilted lineup and its exit (the stage's spin and exit, read from the
+   * scroll while a pack is focused); the stop text leaves on its own line
+   * (data-flow-past); the panel takes no taps from the hand-off's first
+   * frame, and is hidden, with the 3D not drawn, in the free part.
    */
-  let shownFade = -1;
+  let shownSpin = -1;
+  let shownExit = -1;
+  let shownPast = false;
   let hidden = false;
   let inert = false;
   let shown = true;
-  const setFade = (f: FlowInputFrame, y: number) => {
+  const setPanel = (f: FlowInputFrame, y: number) => {
     const s = src;
     const t = input.table();
     if (!s || !t) return;
-    const fade = Math.round(f.fade * 1000) / 1000;
-    if (fade !== shownFade) {
-      shownFade = fade;
-      if (fade > 0) s.panel.style.setProperty('--flow-fade', String(1 - fade));
-      else s.panel.style.removeProperty('--flow-fade');
+    const on = !!focus?.active();
+    const sp = on ? f.handoff : 0;
+    const ex = on ? f.exit : 0;
+    if (sp !== shownSpin) {
+      shownSpin = sp;
+      stage.values.spin.set(sp);
     }
-    const p = panelState(f.fade, y, t.exitEnd);
+    if (ex !== shownExit) {
+      shownExit = ex;
+      stage.values.exit.set(ex);
+    }
+    const past = on && f.past;
+    if (past !== shownPast) {
+      shownPast = past;
+      s.flow.toggleAttribute('data-flow-past', past);
+    }
+    const p = panelState(sp, y, t.exitEnd);
     if (p.free !== hidden) {
       hidden = p.free;
       s.flow.toggleAttribute('data-flow-free', p.free);
@@ -350,9 +362,13 @@ export function startSpin(host: SpinHost): SpinControl {
   /** Back to the panel as the row shows it (the flow off or unbound). */
   const clearPast = (s: StageSpinSource) => {
     s.flow.removeAttribute('data-flow-free');
-    s.panel.style.removeProperty('--flow-fade');
+    s.flow.removeAttribute('data-flow-past');
     s.wrap.inert = false;
-    shownFade = -1;
+    shownPast = false;
+    if (shownSpin !== 0) stage.values.spin.set(0);
+    if (shownExit !== 0) stage.values.exit.set(0);
+    shownSpin = 0;
+    shownExit = 0;
     hidden = false;
     inert = false;
     if (!shown) {
@@ -389,9 +405,13 @@ export function startSpin(host: SpinHost): SpinControl {
       window.scrollTo(0, f.scrollTo);
     const y = window.scrollY;
     const p =
-      f.at === null ? 0 : f.at.zone === 'paged' ? f.at.p : f.focus + f.fade;
+      f.at === null
+        ? 0
+        : f.at.zone === 'paged'
+          ? f.at.p
+          : f.focus + f.handoff + f.exit;
     if (trace && trace.push([t, y, p]) > 4000) trace.splice(0, 2000);
-    setFade(f, y);
+    setPanel(f, y);
     const rest = focus?.active()
       ? focus.frame(t, {
           focus: f.focus,
@@ -399,6 +419,7 @@ export function startSpin(host: SpinHost): SpinControl {
           animating: f.animating,
           idle: f.idle,
           past: f.past,
+          handoff: f.handoff,
         })
       : true;
     if (f.idle && rest && t - wokeAt > 250) stopLoop();
@@ -551,7 +572,8 @@ export function startSpin(host: SpinHost): SpinControl {
           stops: () => input.stops(),
           paint: paintRow,
           ended: () => {
-            shownFade = -1;
+            shownSpin = -1;
+            shownExit = -1;
             measure();
           },
         });

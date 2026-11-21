@@ -67,10 +67,28 @@
   pointer-events: auto;
 }
 
-/* Past Closing the focused pack fades out with the scroll (--flow-fade, set
-   by the spin chunk), and the panel is hidden once the free part starts. */
-.flow[data-flow-on] .stage.panel {
-  opacity: var(--flow-fade, 1);
+/* Past Closing the pack carries on into the lineup (full-flow plan 2.4);
+   its stop text and controls leave on the text's own line (20% into the
+   move down, 80% into it back up: data-flow-past, set by the spin chunk),
+   fading as a stop's block does. The panel is hidden once the free part
+   starts. */
+.flow[data-flow-on] .stage.panel [data-testid='focus-stops'] {
+  transition: opacity 0.5s cubic-bezier(0.455, 0.03, 0.515, 0.955);
+}
+
+.flow[data-flow-past] .stage.panel [data-testid='focus-stops'] {
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.5s cubic-bezier(0.455, 0.03, 0.515, 0.955),
+    visibility 0s linear 0.5s;
+}
+
+/* the active block sets its own visibility, so it is hidden here too, once
+   the layer has faded */
+.flow[data-flow-past] .stage.panel [data-testid='focus-stops'] * {
+  visibility: hidden;
+  transition: visibility 0s linear 0.5s;
 }
 
 .flow[data-flow-free] .stage.panel {

@@ -35,7 +35,7 @@ import type {
   StageState,
 } from '../contract';
 import type { Capsule3dModel } from '@/components/pack-3d/capsule/build';
-import { clamp01, poseAt, stageOpacity, stageSpring } from '../stage-pose';
+import { clamp01, poseAt, stageSpring } from '../stage-pose';
 import { CAPSULE_LEAN, LEAN } from '../stage-spin-math';
 import {
   capsuleEstimateBytes,
@@ -52,7 +52,8 @@ import {
   ciaoPose,
   wrapRow,
 } from '../stage-spin';
-import { composePose } from '../stage-pose-compose';
+import { composeOpacity, composePose } from '../stage-pose-compose';
+import { focusBackWanted, lineupAppear, lineupResident } from '../stage-flow';
 import {
   NO_PROMOTION,
   PROMOTE_MIN_DPR,
@@ -308,6 +309,8 @@ export function createStageRuntime(
   /** The focused pack's back (one at a time). */
   let focusBack: FocusBack | null = null;
   let backW = 0;
+  /** When each front was first drawable in a frame: a lineup pack fades in from it. */
+  const firstShown = new WeakMap<Variant, number>();
   /** The material the spotlight was last set on. */
   let spotted: PackFoilMaterial | null = null;
   let lastFocusOn: StageFocusOn | null = null;
@@ -633,7 +636,12 @@ export function createStageRuntime(
    * this plan holds still through a move; residency maps each pack to its
    * wrapped index so the plan's distances are row distances.
    */
-  const applyPlan = (track: number, now: number, spinRow = false) => {
+  const applyPlan = (
+    track: number,
+    now: number,
+    spinRow = false,
+    promote = !spinRow,
+  ) => {
     if (slots.length === 0) return;
     const n = Math.max(rowCount, slots.length);
     const wrapped = (i: number) =>
@@ -657,7 +665,7 @@ export function createStageRuntime(
             maxResident: Math.max(config.maxResident, slots.length),
           }
         : config,
-      promote: spinRow ? null : promotion.index,
+      promote: promote ? promotion.index : null,
       // A prefetch for the coming list holds its share of the budget.
       budgetBytes: Math.max(0, budget() - stagedBytes() - focusBackBytes()),
       bytes: (i, res) => {
@@ -1063,7 +1071,20 @@ export function createStageRuntime(
         ? nextDirection(direction, track)
         : initialDirection(track);
       const fo = s.focus > 0 ? (s.focusOn ?? null) : null;
-      const spinRow = (s.spin > 0 || s.exit > 0) && !fo;
+      // the row (Ciao's packshot), or the focused pack's hand-off into the
+      // lineup and its exit (full-flow plan 2.4): the row's residency and
+      // repeats. Up to Closing + 0.5 the focused pack keeps its back and its
+      // promoted front; past it both are let go for the lineup's fronts.
+      const spinRow = s.spin > 0 || s.exit > 0;
+      // the row's residency from the rest on Closing on, so no lineup front
+      // is uploaded mid-move (it would pop in at the fade it had reached)
+      const rowPlan = lineupResident({
+        focus: s.focus,
+        stops: fo?.ctx.keys.length ?? 0,
+        spin: s.spin,
+        exit: s.exit,
+      });
+      const keepFocus = fo !== null && focusBackWanted(s.spin) && !(s.exit > 0);
       // the focused pack's stops reach the whole panel too
       const wide = spinRow || fo !== null;
       if (wide !== spinBand) {
@@ -1075,19 +1096,20 @@ export function createStageRuntime(
         tier === 'full' &&
         pixelRatio >= PROMOTE_MIN_DPR &&
         !switching &&
-        !spinRow;
+        (!rowPlan || keepFocus);
       promotion = nextPromotion(promotion, track, now, promoteOn);
-      if (!booting) applyPlan(track, now, spinRow);
-      const next = booting ? null : nextUpload(track, spinRow);
+      if (!booting) applyPlan(track, now, rowPlan, !rowPlan || keepFocus);
+      const next = booting ? null : nextUpload(track, rowPlan);
       if (next) upload(next);
 
       if (fo !== lastFocusOn) {
         lastFocusOn = fo;
         needsDraw = true;
       }
-      if (!booting) syncFocusBack(fo);
+      if (!booting) syncFocusBack(fo && (!rowPlan || keepFocus) ? fo : null);
       const fb = focusBack;
       let turning = false;
+      let appearing = false;
       if (fb?.state === 'ready') {
         if (Number.isNaN(fb.readyAt)) fb.readyAt = now;
         const t = clamp01((now - fb.readyAt) / BACK_TURN_MS);
@@ -1139,6 +1161,18 @@ export function createStageRuntime(
           }
           const model = shown ? drawObject(shown) : null;
           if (!shown || !model) continue;
+          // in the hand-off, the lineup and its exit, a pack whose front has
+          // only just come (back) fades in instead of cutting in
+          let since = firstShown.get(shown);
+          if (since === undefined) {
+            since = now;
+            firstShown.set(shown, since);
+          }
+          const appear =
+            spinRow && fo !== null && slot.index !== fo.ctx.index
+              ? lineupAppear(now - since)
+              : 1;
+          if (appear < 1) appearing = true;
           // One context for the CSS tiles and the canvas: the Ciao row, its
           // exit, the row's own fade (stage-pose composes the rest).
           const ctx: ComposeCtx = {
@@ -1208,7 +1242,8 @@ export function createStageRuntime(
           for (const [o, c] of shown.copies)
             if (!offsets.includes(o)) c.visible = false;
           for (const o of offsets) {
-            const op = ciaoOpacity(s, slot.index, desktop, n, o) * rise;
+            const op =
+              composeOpacity(s, slot.index, desktop, n, ctx, o) * rise * appear;
             const have = shown.copies.get(o);
             if (!(op > 0)) {
               if (have) have.visible = false;
@@ -1231,8 +1266,7 @@ export function createStageRuntime(
           }
           // The same fade as the CSS tiles: reach (the row's, in the spin) and the category switch.
           const opacity =
-            stageOpacity(s, slot.index, desktop, n, ctx) *
-            (fo ? fo.term.opacity(s.focus, focused, fo.ctx) : 1);
+            composeOpacity(s, slot.index, desktop, n, ctx) * appear;
           if (opacity <= 0) {
             model.visible = false;
             continue;
@@ -1290,6 +1324,7 @@ export function createStageRuntime(
         promotionPending(promotion, track, promoteOn) ||
         focusBack?.state === 'printing' ||
         turning ||
+        appearing ||
         (needsDraw && canDraw);
       return { live: [...live], wantsFrame: pending };
     } catch {

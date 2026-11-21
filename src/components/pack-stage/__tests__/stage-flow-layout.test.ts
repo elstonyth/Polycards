@@ -47,6 +47,21 @@ describe('the flow layout (pack-stage.module.css)', () => {
     ).toBe(false);
   });
 
+  it('past Closing the stop text and its controls leave, while the panel (the pack) stays drawn into the lineup', () => {
+    expect(css.includes('--flow-fade')).toBe(false);
+    const past = find(
+      ".flow[data-flow-past] .stage.panel [data-testid='focus-stops']",
+    );
+    expect(past.some((r) => /opacity:\s*0/.test(r.body))).toBe(true);
+    expect(past.some((r) => /visibility:\s*hidden/.test(r.body))).toBe(true);
+    // a stop block sets its own visibility (visible while on), so the hiding
+    // must reach the blocks too, not only their layer
+    const inside = find(
+      ".flow[data-flow-past] .stage.panel [data-testid='focus-stops'] *",
+    );
+    expect(inside.some((r) => /visibility:\s*hidden/.test(r.body))).toBe(true);
+  });
+
   it('hides the panel in the free part', () => {
     const free = find('.flow[data-flow-free] .stage.panel');
     expect(free.some((r) => /visibility:\s*hidden/.test(r.body))).toBe(true);

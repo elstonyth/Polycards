@@ -125,8 +125,11 @@ describe('the spin composes with the other terms', () => {
     expect(p.rotZ).toBe(0);
   });
 
-  it('the spin is ignored while focused (held at 0)', () => {
-    const s: StageState = { ...restState(0), spin: 0.5, focus: 0.5 };
+  // Spin and focus are no longer exclusive (full-flow plan 2.4): while a
+  // pack is focused the spin is the hand-off into the lineup
+  // (stage-handoff.test.ts). With no hand-off the focus pose is alone.
+  it('focused with no hand-off (spin 0), the row term is not drawn', () => {
+    const s: StageState = { ...restState(0), spin: 0, focus: 0.5 };
     const p = poseStep2(s, 1, PHONE, false, false, {
       spin,
       focus: {

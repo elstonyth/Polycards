@@ -161,17 +161,18 @@ export function createFocusLoad<T>(d: {
 }
 
 /**
- * The panel past Closing, from the focused pack's fade (0 shown, 1 gone) and
- * the scroll: a fading pack takes no taps (nothing on it can be tapped while
- * it goes, nor once it is invisible); a gone pack is not drawn (the 3D sleeps
- * and, after a while, lets its packs go); the free part hides the panel.
+ * The panel past Closing, from the hand-off's progress (0 at Closing, 1 at
+ * the lineup) and the scroll: from the hand-off's first frame the panel
+ * takes no taps (Closing's controls are leaving with their text); the
+ * lineup and its exit are drawn; the free part hides the panel, and the 3D
+ * is not drawn there (it sleeps and, after a while, lets its packs go).
  */
 export function panelState(
-  fade: number,
+  handoff: number,
   scrollY: number,
   exitEnd: number,
 ): { inert: boolean; free: boolean; shown: boolean } {
-  const f = Math.round(fade * 1000) / 1000;
+  const h = Math.round(handoff * 1000) / 1000;
   const free = scrollY >= exitEnd - 0.5;
-  return { inert: free || f > 0, free, shown: !free && f < 1 };
+  return { inert: free || h > 0, free, shown: !free };
 }

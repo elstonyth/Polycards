@@ -180,6 +180,8 @@ export type SpinPanel = {
  * - `panel`: the panel, for the Ciao row's projection and the exit.
  * - `copy`: row-slot offset of this drawn repeat (`ciaoCopies`); 0 = the pack.
  * - `capsule`: a capsule, whose ramp is clamped to the owner's tip limits.
+ * - `spread`: the row's spacing as a multiple of its own (default 1); the
+ *   hand-off from Closing widens the others' row by 5 falling to 1.
  */
 export type SpinCtx = {
   count: number;
@@ -191,6 +193,7 @@ export type SpinCtx = {
   panel?: SpinPanel;
   copy?: number;
   capsule?: boolean;
+  spread?: number;
 };
 
 /** The spin row's opacity rule (`ciaoOpacity`), when loaded. */

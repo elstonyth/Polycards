@@ -224,7 +224,7 @@ describe("focus load: the focused view's chunk (review finding 1)", () => {
   });
 });
 
-describe('panel state past Closing (review findings 4 and 5)', () => {
+describe('panel state past Closing (review findings 4 and 5; work package 4)', () => {
   it('at a stop the panel takes taps and the 3D is shown', () => {
     expect(panelState(0, 6000, 9000)).toEqual({
       inert: false,
@@ -239,16 +239,22 @@ describe('panel state past Closing (review findings 4 and 5)', () => {
     });
   });
 
-  it('a fading pack takes no taps; a gone one is not drawn; the free part hides the panel', () => {
+  it('from the first frame of the hand-off the panel takes no taps, the 3D stays drawn through the lineup and its exit, and the free part hides it', () => {
     expect(panelState(0.4, 6800, 9000)).toEqual({
       inert: true,
       free: false,
       shown: true,
     });
-    expect(panelState(1, 8000, 9000)).toEqual({
+    // the lineup at rest, and its exit
+    expect(panelState(1, 7000, 9000)).toEqual({
       inert: true,
       free: false,
-      shown: false,
+      shown: true,
+    });
+    expect(panelState(1, 8900, 9000)).toEqual({
+      inert: true,
+      free: false,
+      shown: true,
     });
     expect(panelState(1, 9000, 9000)).toEqual({
       inert: true,
@@ -257,7 +263,7 @@ describe('panel state past Closing (review findings 4 and 5)', () => {
     });
   });
 
-  it('the free part hides it even with no fade span', () => {
+  it('the free part hides it even with no hand-off (a pack that cannot be focused)', () => {
     expect(panelState(0, 9000, 9000)).toEqual({
       inert: true,
       free: true,

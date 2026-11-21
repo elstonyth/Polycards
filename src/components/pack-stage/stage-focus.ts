@@ -18,7 +18,6 @@ import type {
   SpotRect,
   StageLayout,
 } from './contract';
-import { SPIN_LOCK } from './stage-pose';
 import { smoothstep } from './stage-spin-math';
 
 const DEG = Math.PI / 180;
@@ -243,16 +242,6 @@ export function spotAt(
 /** The text block shown at F: switches 20% into a move, either way (Ciao). */
 export function blockAt(focus: number, n: number): number {
   return Math.min(n, Math.max(0, Math.floor(focus + 0.8)));
-}
-
-/** Spin and focus are exclusive (10.4): focus may start only below 0.02, target and value. */
-export function canStartFocus(spin: number, spinTarget: number): boolean {
-  return spin < SPIN_LOCK && spinTarget < SPIN_LOCK;
-}
-
-/** While focus > 0 the spin is held at 0 (10.4). */
-export function spinWhileFocused(focus: number, spin: number): number {
-  return focus > 0 ? 0 : spin;
 }
 
 /** A neighbour's fade, in step with its slide (neighbourOut); the focused pack stays 1. */

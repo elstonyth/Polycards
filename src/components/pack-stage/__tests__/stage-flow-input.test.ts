@@ -144,45 +144,87 @@ describe('flow input: Closing to the free part', () => {
     return { ...p, y };
   }
 
-  it('the stop list ends at Closing', () => {
+  it('the stop list ends at the lineup rest', () => {
     const p = atClosing();
-    expect(p.input.stops()).toEqual([0, 1000, 2000, 3000, 4000, 5000, 6000]);
+    expect(p.input.stops()).toEqual([
+      0, 1000, 2000, 3000, 4000, 5000, 6000, 7000,
+    ]);
   });
 
-  it('a down notch at Closing pages in 1.5 s to the end of the Exit spacer, fading the pack out with the scroll by the top of the Exit spacer', () => {
+  it('a pack that cannot be focused keeps the row alone (no lineup to rest on)', () => {
+    const p = page(null);
+    expect(p.input.stops()).toEqual([0]);
+    // the scrollbar left the page near the lineup: back to the row, unfocused
+    expect(run(p.input, 6900, 0, 1800)).toBe(0);
+    expect(p.input.frame(0, 1816).handoff).toBe(0);
+  });
+
+  it('a down notch at Closing pages in 1.5 s to the lineup rest, the hand-off following the scroll', () => {
     const p = atClosing();
     p.input.wheel(100, 0, false, p.y, 2000);
-    // the pack is gone by the Exit spacer's top (8000), before the free
-    // content can come into view
     const early = p.input.frame(p.y, 2250);
     const e = 1 - (1 - 250 / 1500) ** 3;
-    expect(early.scrollTo).toBeCloseTo(6000 + 3000 * e, 6);
-    expect(early.fade).toBeCloseTo((3000 * e) / 2000, 6);
-    const mid = p.input.frame(early.scrollTo ?? 0, 2750);
-    expect(mid.scrollTo).toBeCloseTo(6000 + 3000 * 0.875, 6);
-    expect(mid.fade).toBe(1);
-    expect(mid.focus).toBe(6);
-    const y = run(p.input, mid.scrollTo ?? 0, 2766, 3600);
-    expect(y).toBe(9000);
+    expect(early.scrollTo).toBeCloseTo(6000 + 1000 * e, 6);
+    // the local progress from Closing to the lineup (eased by the pose)
+    expect(early.handoff).toBeCloseTo(e, 6);
+    expect(early.exit).toBe(0);
+    expect(early.focus).toBe(6);
+    const y = run(p.input, early.scrollTo ?? 0, 2266, 3600);
+    expect(y).toBe(7000);
     const rest = p.input.frame(y, 3616);
-    expect(rest.zone).toBe('free');
-    expect(rest.fade).toBe(1);
-    // and it stays there (the landing is not snapped back to Closing)
-    expect(run(p.input, y, 3632, 5000)).toBe(9000);
+    expect(rest.zone).toBe('paged');
+    expect(rest.handoff).toBe(1);
+    expect(rest.exit).toBe(0);
+    expect(rest.past).toBe(true);
+    // a rest: it stays there
+    expect(run(p.input, y, 3632, 5000)).toBe(7000);
   });
 
-  it('the fade is 0 at every stop', () => {
+  it('a down notch at the lineup pages in 1.5 s through the exit to the free part', () => {
     const p = atClosing();
-    expect(p.input.frame(6000, 1800).fade).toBe(0);
-    expect(p.input.frame(3000, 1816).fade).toBe(0);
+    p.input.wheel(100, 0, false, p.y, 2000);
+    let y = run(p.input, p.y, 2016, 3600);
+    expect(y).toBe(7000);
+    p.input.wheel(100, 0, false, y, 3800);
+    // the lineup holds through its own section, then the exit plays
+    const hold = p.input.frame(y, 3850);
+    expect(hold.handoff).toBe(1);
+    expect(hold.exit).toBe(0);
+    y = run(p.input, y, 3866, 4400);
+    const mid = p.input.frame(y, 4416);
+    expect(mid.exit).toBeCloseTo(
+      Math.max(0, ((mid.scrollTo ?? y) - 8000) / 1000),
+      6,
+    );
+    y = run(p.input, mid.scrollTo ?? y, 4432, 5400);
+    expect(y).toBe(9000);
+    const free = p.input.frame(y, 5416);
+    expect(free.zone).toBe('free');
+    expect([free.handoff, free.exit]).toEqual([1, 1]);
   });
 
-  it('an up notch in the free part that crosses the edge pages back to Closing', () => {
+  it('the hand-off and the exit are 0 at every detail stop', () => {
+    const p = atClosing();
+    for (const y of [6000, 3000, 1000]) {
+      const f = p.input.frame(y, 1800 + y / 100);
+      expect([f.handoff, f.exit], String(y)).toEqual([0, 0]);
+    }
+  });
+
+  it('an up notch in the free part that crosses the edge pages back to the lineup, and the next one to Closing', () => {
     const p = atClosing();
     // native wheel down in the free part is the browser's
     expect(p.input.wheel(100, 0, false, 9000, 2000)).toBe(false);
     expect(p.input.wheel(-100, 0, false, 7560, 2400)).toBe(true);
-    expect(run(p.input, 7560, 2416, 4000)).toBe(6000);
+    const y = run(p.input, 7560, 2416, 4000);
+    expect(y).toBe(7000);
+    expect(p.input.wheel(-100, 0, false, y, 4200)).toBe(true);
+    expect(run(p.input, y, 4216, 5800)).toBe(6000);
+  });
+
+  it('a page the browser left between the lineup and the edge snaps to the lineup', () => {
+    const p = atClosing();
+    expect(run(p.input, 7480, 2000, 3200)).toBe(7000);
   });
 });
 
@@ -262,11 +304,11 @@ describe('flow input: keys (plan 2.10)', () => {
     expect(run(p.input, 0, 16, 2000)).toBe(0);
   });
 
-  it('end at the row focuses the centred pack and pages to the last stop', () => {
+  it('end at the row focuses the centred pack and pages to the lineup (plan 2.10)', () => {
     const p = page();
     expect(p.input.key('last', 0, 0)).toBe('moved');
     expect(p.calls).toEqual(['enter']);
-    expect(run(p.input, 0, 16, 1600)).toBe(6000);
+    expect(run(p.input, 0, 16, 1600)).toBe(7000);
   });
 
   it('next and prev page one stop either way between the stops', () => {
@@ -279,10 +321,10 @@ describe('flow input: keys (plan 2.10)', () => {
     expect(y).toBe(2000);
   });
 
-  it('end pages to the last stop, from any stop', () => {
+  it('end pages to the lineup, from any stop', () => {
     const p = atStop(2);
     expect(p.input.key('last', p.y, 2000)).toBe('moved');
-    expect(run(p.input, p.y, 2016, 3600)).toBe(6000);
+    expect(run(p.input, p.y, 2016, 3600)).toBe(7000);
   });
 
   it('prev at Front, home at any stop and escape in the details hand over to the leave', () => {
@@ -292,10 +334,19 @@ describe('flow input: keys (plan 2.10)', () => {
     expect(p.input.key('escape', p.y, 2000)).toBe('leave');
   });
 
-  it('next at Closing pages on to the free part, as a wheel notch does', () => {
+  it('next at Closing pages on to the lineup, and next there to the free part, as wheel notches do', () => {
     const p = atStop(6);
     expect(p.input.key('next', p.y, 2000)).toBe('moved');
-    expect(run(p.input, p.y, 2016, 3600)).toBe(9000);
+    const y = run(p.input, p.y, 2016, 3600);
+    expect(y).toBe(7000);
+    expect(p.input.key('next', y, 3700)).toBe('moved');
+    expect(run(p.input, y, 3716, 5300)).toBe(9000);
+  });
+
+  it('prev at the lineup pages back up to Closing', () => {
+    const p = atStop(7);
+    expect(p.input.key('prev', p.y, 2000)).toBe('moved');
+    expect(run(p.input, p.y, 2016, 3600)).toBe(6000);
   });
 
   it('keys during a move are swallowed', () => {
@@ -353,45 +404,47 @@ describe('flow load start (plan 2.8: a reload starts at the row)', () => {
 });
 
 describe('flow input: a touch during a move across the paged edge (review finding 3)', () => {
-  /** Focused and resting on Closing (6000). */
-  function closing() {
+  /** Focused and resting on the lineup (7000). */
+  function lineup() {
     const p = page();
     p.input.wheel(100, 0, false, 0, 0);
     run(p.input, 0, 16, 1600);
     p.input.frame(6000, 1700);
     p.input.frame(6000, 1716);
+    p.input.wheel(100, 0, false, 6000, 2000);
+    expect(run(p.input, 6000, 2016, 3600)).toBe(7000);
     return p;
   }
 
   it('a finger that lands past the edge on the way down is ignored: the move lands on the exit end', () => {
-    const p = closing();
-    p.input.wheel(100, 0, false, 6000, 2000);
+    const p = lineup();
+    p.input.wheel(100, 0, false, 7000, 3800);
     // 0.9 s in: past the edge (7500), the move still running
-    const y = run(p.input, 6000, 2016, 2900);
+    const y = run(p.input, 7000, 3816, 4700);
     expect(y).toBeGreaterThan(7500);
-    p.input.touchStart(200, 600, y, 2910);
-    expect(p.input.touchMove(200, 500, y, 2926)).toBe(true);
-    p.input.touchEnd(y, 2942);
-    expect(run(p.input, y, 2958, 4000)).toBe(9000);
+    p.input.touchStart(200, 600, y, 4710);
+    expect(p.input.touchMove(200, 500, y, 4726)).toBe(true);
+    p.input.touchEnd(y, 4742);
+    expect(run(p.input, y, 4758, 5800)).toBe(9000);
   });
 
-  it('a finger that lands past the edge on the way back up is ignored: the move lands on Closing', () => {
-    const p = closing();
-    p.input.wheel(100, 0, false, 6000, 2000);
-    let y = run(p.input, 6000, 2016, 3600);
+  it('a finger that lands past the edge on the way back up is ignored: the move lands on the lineup', () => {
+    const p = lineup();
+    p.input.wheel(100, 0, false, 7000, 3800);
+    let y = run(p.input, 7000, 3816, 5400);
     expect(y).toBe(9000);
     // the browser's own scroll up to just below the edge, then an up notch
-    // that crosses it pages back to Closing
-    y = run(p.input, 7560, 3616, 3900);
+    // that crosses it pages back to the lineup
+    y = run(p.input, 7560, 5416, 5700);
     expect(y).toBe(7560);
-    expect(p.input.wheel(-100, 0, false, 7560, 4000)).toBe(true);
+    expect(p.input.wheel(-100, 0, false, 7560, 5800)).toBe(true);
     // the first frame of the move: still below the edge
-    y = run(p.input, 7560, 4004, 4004);
+    y = run(p.input, 7560, 5804, 5804);
     expect(y).toBeGreaterThan(7500);
-    p.input.touchStart(200, 300, y, 4110);
-    expect(p.input.touchMove(200, 400, y, 4126)).toBe(true);
-    p.input.touchEnd(y, 4142);
-    expect(run(p.input, y, 4158, 5700)).toBe(6000);
+    p.input.touchStart(200, 300, y, 5910);
+    expect(p.input.touchMove(200, 400, y, 5926)).toBe(true);
+    p.input.touchEnd(y, 5942);
+    expect(run(p.input, y, 5958, 7500)).toBe(7000);
   });
 });
 

@@ -364,6 +364,47 @@ export function flowTerms(at: FlowAt, n: number): FlowTerms {
   }
 }
 
+/**
+ * The focused back is released once the hand-off passes this share of the
+ * move from Closing to the lineup, and wanted again below it (full-flow plan
+ * 2.12, risk 4); it is printed only at rest, so never mid-move.
+ */
+export const BACK_RELEASE_AT = 0.5;
+
+/** Whether the focused pack's back is wanted at hand-off progress x (0 at Closing). */
+export function focusBackWanted(x: number): boolean {
+  return !(x >= BACK_RELEASE_AT);
+}
+
+/**
+ * Whether the lineup's fronts are to be resident: from the rest on Closing
+ * on (the hand-off fades them in from its first frame, so a front uploaded
+ * mid-move would pop in at the fade it had reached), through the hand-off
+ * and the exit; and, with no focus, while the row's own spin or exit runs.
+ * `focus` is F, `stops` the focused pack's stop count (0: none).
+ */
+export function lineupResident(o: {
+  focus: number;
+  stops: number;
+  spin: number;
+  exit: number;
+}): boolean {
+  if (o.spin > 0 || o.exit > 0) return true;
+  return o.stops > 0 && o.focus >= o.stops - 1e-3;
+}
+
+/** A lineup pack whose front was not drawable a moment ago fades in over this [ours]. */
+export const LINEUP_APPEAR_MS = 300;
+
+/**
+ * A lineup pack's fade-in, `elapsed` ms after its front became drawable:
+ * a texture that comes back mid-lineup (the stage let its packs go during a
+ * long stay below) fades in rather than cutting in.
+ */
+export function lineupAppear(elapsed: number): number {
+  return clamp01(elapsed / LINEUP_APPEAR_MS);
+}
+
 /** The others' row spacing at progress x: 5 row steps falling to 1. */
 export function spreadAt(x: number): number {
   return FLOW_SPREAD_FROM + (FLOW_SPREAD_TO - FLOW_SPREAD_FROM) * clamp01(x);
