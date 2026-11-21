@@ -12,29 +12,24 @@ const tabs = [
   { id: 'poly', soon: false },
   { id: 'one-piece', soon: true },
 ];
-const seeds = { '151': {}, ah: {}, 'lucky-pack': {}, 'op-01': {} };
 
 describe('flowStart: where a load onto a pack address opens the flow', () => {
   it('the pack, in its own tab, at its place in the row', () => {
-    expect(flowStart({ categories, tabs, seeds, id: 'ah' })).toEqual({
+    expect(flowStart({ categories, tabs, id: 'ah' })).toEqual({
       category: 'pokemon',
       index: 1,
     });
-    expect(flowStart({ categories, tabs, seeds, id: 'lucky-pack' })).toEqual({
+    expect(flowStart({ categories, tabs, id: 'lucky-pack' })).toEqual({
       category: 'poly',
       index: 0,
     });
   });
 
   it('none for a pack not in the catalogue (unknown or inactive)', () => {
-    expect(flowStart({ categories, tabs, seeds, id: 'nope' })).toBeNull();
-  });
-
-  it('none for a pack with nothing to focus (no starting data)', () => {
-    expect(flowStart({ categories, tabs, seeds, id: 'gold-pack' })).toBeNull();
+    expect(flowStart({ categories, tabs, id: 'nope' })).toBeNull();
   });
 
   it('none for a pack in a tab that cannot be picked', () => {
-    expect(flowStart({ categories, tabs, seeds, id: 'op-01' })).toBeNull();
+    expect(flowStart({ categories, tabs, id: 'op-01' })).toBeNull();
   });
 });

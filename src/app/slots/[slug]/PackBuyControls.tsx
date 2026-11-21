@@ -27,16 +27,15 @@ import type { PackBuyModel } from './use-pack-buy';
 export const FREE_PACK_UNAVAILABLE_MESSAGE =
   "This welcome pack isn't available on this account.";
 
-export type PackBuyVariant = 'dock' | 'panel' | 'compact';
+export type PackBuyVariant = 'dock' | 'panel';
 
 /**
- * The pack's buy controls, in the three places they sit:
+ * The pack's buy controls, in the two places they sit:
  * - `panel`: the desktop configurator's two lower zones (terms + demo spin +
  *   quantity, then the Open footer). A fragment: the caller's panel puts the
  *   pack picker above it, and on a phone the terms zone moves above that
  *   (`order-first`), so both zones must be the panel's own children.
  * - `dock`: the phone's fixed buy bar above the tab bar.
- * - `compact`: one slim row (total, stepper, Open) for a sticky bar.
  * All read one `usePackBuy` model, so they can never disagree.
  */
 export function PackBuyControls({
@@ -47,7 +46,6 @@ export function PackBuyControls({
   variant: PackBuyVariant;
 }) {
   if (variant === 'dock') return <BuyDock m={model} />;
-  if (variant === 'compact') return <BuyCompact m={model} />;
   return <BuyPanel m={model} />;
 }
 
@@ -260,7 +258,7 @@ function PanelCaption({ m }: { m: PackBuyModel }) {
   );
 }
 
-/** The big figure on the dock and the compact bar. */
+/** The big figure on the dock. */
 const totalLine = (m: PackBuyModel) =>
   m.freeClaimUnavailable
     ? 'Unavailable'
@@ -288,7 +286,7 @@ const termsLine = (m: PackBuyModel) =>
             ? 'Lucky Draw tickets'
             : `${m.buybackPercent}% during reveal`;
 
-/** The quiet capsule stepper of the dock and the compact bar. */
+/** The quiet capsule stepper of the dock. */
 function DockStepper({ m }: { m: PackBuyModel }) {
   return (
     <div
@@ -371,27 +369,6 @@ function BuyDock({ m }: { m: PackBuyModel }) {
         </div>
         <DockStepper m={m} />
         <DockOpen m={m} className="shrink-0 grow px-4" />
-      </div>
-      <OpenError m={m} />
-    </div>
-  );
-}
-
-/** One slim row for a sticky bar: the dock's parts without its fixed seat. */
-function BuyCompact({ m }: { m: PackBuyModel }) {
-  return (
-    <div data-testid="pack-buy-compact" className="flex flex-col">
-      <div className="flex items-center gap-2">
-        <div className="min-w-0 flex-1">
-          <p className="truncate font-heading text-lg font-bold leading-none tracking-tight text-white tabular-nums">
-            {totalLine(m)}
-          </p>
-          <p className="mt-1 truncate text-xs leading-none text-neutral-400">
-            {termsLine(m)}
-          </p>
-        </div>
-        <DockStepper m={m} />
-        <DockOpen m={m} className="shrink-0 px-5" />
       </div>
       <OpenError m={m} />
     </div>

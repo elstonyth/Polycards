@@ -33,5 +33,5 @@ export function placeInstantly(doc: Document = document): boolean {
 
 /** The pack was not placed in time: today's pack page instead. */
 export function goToPackPage(id: string): void {
-  window.location.replace(packPagePath(id));
+  window.location.replace(packPagePath(id, window.location.search));
 }

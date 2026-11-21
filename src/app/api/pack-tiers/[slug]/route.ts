@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getPackTiers } from '@/lib/data/packs';
 import { cachedJson } from '@/lib/ttl-cache';
+import { homePreviewOn } from '@/lib/preview-switch';
 
 // The homepage flow's per-pack data: what a logged-out visitor's pack page
 // shows, by tier (lib/pack-tiers), plus the pack's live price, buyback and
@@ -16,6 +17,9 @@ export async function GET(
   { params }: { params: Promise<{ slug: string }> },
 ) {
   const { slug } = await params;
+  // only the home preview reads it: not there with the switch off
+  if (!homePreviewOn())
+    return NextResponse.json({ message: 'not found' }, { status: 404 });
   const miss = `pack tiers route miss: ${slug}`;
   try {
     return await cachedJson(

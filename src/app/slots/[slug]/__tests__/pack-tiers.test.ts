@@ -276,7 +276,12 @@ describe('PackPullOdds renders the board PackDetailClient rendered', () => {
 });
 
 describe('getPackTiers and GET /api/pack-tiers/<slug>', () => {
-  beforeEach(() => clearTtlCache());
+  beforeEach(() => {
+    clearTtlCache();
+    // the route answers only under the home preview's switch
+    vi.stubEnv('HOME_PREVIEW', '1');
+  });
+  afterEach(() => vi.unstubAllEnvs());
   const catalog = (over: Record<string, unknown> = {}) => ({
     slug: 'gold-pack',
     title: 'Gold Pack',

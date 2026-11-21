@@ -1,9 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { ticketCard, type ResolvedPack } from '@/lib/packs-data';
+import type { ResolvedPack } from '@/lib/packs-data';
 import { BUYBACK_RULE } from '@/components/pack-3d/pack-back-details';
 import { backFor, backKey, shapeOf, withLive } from '../flow-back';
-import { flowSeed, flowSeedFromHighlights } from '../flow-seed';
-import type { PackPageData } from '@/lib/data/pack-page';
+import { flowSeedFromHighlights } from '../flow-seed';
 
 const GOLD: ResolvedPack = {
   id: 'gold-pack',
@@ -79,55 +78,7 @@ describe('withLive', () => {
   });
 });
 
-describe('flowSeed (pack page) and flowSeedFromHighlights (homepage)', () => {
-  const data: PackPageData = {
-    pack: GOLD,
-    siblings: [GOLD],
-    categoryTabs: [],
-    detail: {
-      topHits: [],
-      pool: [
-        {
-          handle: 'a',
-          name: 'A',
-          image: '/a.png',
-          slabImage: null,
-          rarity: 'Immortal',
-          priceMyr: 900,
-          pokemonDex: null,
-          spriteImage: null,
-        },
-      ],
-      pullOdds: ODDS,
-    },
-    recentPulls: { pulls: [], drought: {} },
-    freePackMissing: [],
-  };
-
-  it('the pack page seed carries tiers, pulls, the odds and the back', () => {
-    const seed = flowSeed(data);
-    expect(seed.shape).toBe('sleeve');
-    expect(seed.tiers?.tiers[0]).toMatchObject({
-      rarity: 'Immortal',
-      chance: 0.2,
-    });
-    expect(seed.recentPulls).toEqual({ pulls: [], drought: {} });
-    expect(seed.pullOdds).toEqual(ODDS);
-    expect(seed.back?.odds?.[0]).toEqual({ label: 'Immortal', chance: '0.2%' });
-    // Owner rule: nothing the browser receives says "published".
-    expect(JSON.stringify(seed)).not.toMatch(/publish/i);
-  });
-
-  it('no odds entered: no odds, no back, even with a pool', () => {
-    const seed = flowSeed({
-      ...data,
-      detail: { ...data.detail!, pullOdds: null },
-    });
-    expect(seed.pullOdds).toBeNull();
-    expect(seed.back).toBeNull();
-    expect(seed.tiers?.tiers.every((t) => t.chance === null)).toBe(true);
-  });
-
+describe('flowSeedFromHighlights (homepage)', () => {
   it('the homepage seed: the highlights odds, no tiers or pulls yet', () => {
     const seed = flowSeedFromHighlights(GOLD, { pullOdds: ODDS });
     expect(seed).toMatchObject({
@@ -136,23 +87,11 @@ describe('flowSeed (pack page) and flowSeedFromHighlights (homepage)', () => {
       pullOdds: ODDS,
     });
     expect(seed.back).not.toBeNull();
+    // Owner rule: nothing the browser receives says "published".
+    expect(JSON.stringify(seed)).not.toMatch(/publish/i);
     expect(flowSeedFromHighlights(GOLD, null).back).toBeNull();
     const capsule = flowSeedFromHighlights(CAPSULE, { pullOdds: ODDS });
     expect(capsule.shape).toBe('capsule');
     expect(capsule.back).toBeNull();
-  });
-
-  it('a capsule page seed: ticket tiers, no back', () => {
-    const seed = flowSeed({
-      ...data,
-      pack: CAPSULE,
-      detail: {
-        topHits: [],
-        pool: [ticketCard(300, 'Immortal')],
-        pullOdds: { tiers: { Immortal: 100 } },
-      },
-    });
-    expect(seed.tiers?.tiers[0]?.cards?.[0]?.tickets).toBe(300);
-    expect(seed.back).toBeNull();
   });
 });

@@ -291,12 +291,12 @@ describe('PackBuyControls', () => {
     variant,
   }: {
     pack: ResolvedPack;
-    variant: 'dock' | 'panel' | 'compact';
+    variant: 'dock' | 'panel';
   }) {
     const model = usePackBuy(pack, DETAIL);
     return createElement(PackBuyControls, { model, variant });
   }
-  const show = (variant: 'dock' | 'panel' | 'compact', pack = GOLD) =>
+  const show = (variant: 'dock' | 'panel', pack = GOLD) =>
     act(() => root.render(createElement(Harness, { pack, variant })));
   const text = () => (host.textContent ?? '').replace(/\s+/g, ' ');
 
@@ -339,14 +339,10 @@ describe('PackBuyControls', () => {
     expect(text()).toContain('Lucky Draw tickets');
   });
 
-  it('compact: one row with the same parts, and the refusal under it', () => {
+  it('dock: the refusal under it', () => {
     m.customer = { id: 'c' };
     m.balance = 10;
-    show('compact');
-    expect(
-      host.querySelector('[data-testid="pack-buy-compact"]'),
-    ).not.toBeNull();
-    expect(text()).toContain('RM 1,200.00');
+    show('dock');
     const open = [...host.querySelectorAll('button')].find(
       (b) => b.textContent === 'Open Pack',
     );
@@ -358,7 +354,7 @@ describe('PackBuyControls', () => {
   });
 
   it('sold out: the disabled pill in every variant', () => {
-    for (const v of ['panel', 'dock', 'compact'] as const) {
+    for (const v of ['panel', 'dock'] as const) {
       show(v, { ...GOLD, inStock: false });
       const pill = [...host.querySelectorAll('button')].find(
         (b) => b.textContent === 'Sold out',

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
+import { homePreviewOn } from '@/lib/preview-switch';
 import { LoaderPreview, type ReadyMode } from './LoaderPreview';
 
 export const metadata: Metadata = {
@@ -10,8 +11,8 @@ export const metadata: Metadata = {
 const READY_MODES: readonly ReadyMode[] = ['now', '3s', 'never'];
 
 /**
- * Brand loader preview: 404 unless `next dev` or the server runs with
- * LOADER_PREVIEW=1. Reading searchParams keeps the route dynamic, so the gate is
+ * Brand loader preview: 404 unless the home preview's switch is on
+ * (homePreviewOn). Reading searchParams keeps the route dynamic, so the gate is
  * checked per request rather than baked in at build time.
  *
  * Query: `?t=0.5` pins the reveal at that fraction of its timeline (for stills);
@@ -22,13 +23,10 @@ export default async function LoaderPreviewPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  if (
-    process.env.NODE_ENV !== 'development' &&
-    process.env.LOADER_PREVIEW !== '1'
-  ) {
-    notFound();
-  }
+  // Await the query BEFORE the gate: a notFound() reached first lets the build
+  // prerender the route as a static 404, and the runtime flag is never read.
   const query = await searchParams;
+  if (!homePreviewOn()) notFound();
   const tRaw =
     typeof query.t === 'string' ? Number.parseFloat(query.t) : Number.NaN;
   const pinAt = Number.isFinite(tRaw)

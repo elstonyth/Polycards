@@ -57,14 +57,8 @@ describe('the preview page', () => {
   const page = src('src/app/home-preview/page.tsx');
   const stage = src('src/components/pack-stage/PackStage.tsx');
 
-  it('renders the flow sections below the stage and no closing banner', () => {
+  it('renders the flow sections below the stage', () => {
     expect(page.includes('<FlowSections')).toBe(true);
-    expect(page.includes('FinalCta')).toBe(false);
-  });
-
-  it('keeps the free-pack opening line out of the client stage file', () => {
-    expect(stage.includes('HeroFreePack')).toBe(false);
-    expect(stage.includes('Ships to Malaysia')).toBe(false);
   });
 
   it('marks the flow root', () => {

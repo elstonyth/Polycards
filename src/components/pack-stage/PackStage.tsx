@@ -195,7 +195,7 @@ export default function PackStage({
     const s = startRef.current;
     if (!s || wait !== 'gave-up') return;
     if (window.location.pathname !== packPath(s.id)) return;
-    window.location.replace(packPagePath(s.id));
+    window.location.replace(packPagePath(s.id, window.location.search));
   }, [wait]);
   const filterOf = (id: string): StageFilter => filters[id] ?? ALL_FILTER;
   const rows = useMemo(

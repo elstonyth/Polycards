@@ -101,8 +101,8 @@ describe('a pack address with the preview switch on', () => {
   });
 
   it('never writes a script into the page: a document load is redirected by the proxy, any load that reaches the page takes the redirect', async () => {
-    await expect(render({ stage: '3d' })).rejects.toThrow(
-      '/home-preview?stage=3d&focus=151',
+    await expect(render({ utm_source: 'ad' })).rejects.toThrow(
+      '/home-preview?utm_source=ad&focus=151',
     );
     expect(loadPackPage).not.toHaveBeenCalled();
   });
@@ -119,8 +119,8 @@ describe('a pack address with the preview switch on', () => {
 
   it('a move inside the site opens the flow on that pack (its other query kept)', async () => {
     await expect(render({})).rejects.toThrow('/home-preview?focus=151');
-    await expect(render({ stage: '3d' })).rejects.toThrow(
-      '/home-preview?stage=3d&focus=151',
+    await expect(render({ utm_source: 'ad' })).rejects.toThrow(
+      '/home-preview?utm_source=ad&focus=151',
     );
     expect(loadPackPage).not.toHaveBeenCalled();
   });

@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { BRAND_LOADER_SESSION_KEY } from '@/components/loader/first-visit';
 import { STAGE_CRASH_KEY } from '../crash-guard';
 import {
   ENTRY_LOADER_MAX_MS,
@@ -12,6 +11,9 @@ import {
   flowEntryScript,
   stageLoaderScript,
 } from '../stage-loader-script';
+
+// the old once-per-session loader key: the script must never read it again
+const BRAND_LOADER_SESSION_KEY = 'polycards:brand-loader-seen';
 
 type Env = {
   path?: string;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { homePreviewOn, packFlowAddress, packFlowOn } from '../preview-switch';
+import { packPagePath } from '@/components/pack-stage/stage-focus-marks';
 
 describe('homePreviewOn: the preview switch', () => {
   it('on with HOME_PREVIEW=1 or in development, off otherwise', () => {
@@ -39,15 +40,24 @@ describe("packFlowAddress: where a pack's own address opens under the switch", (
   });
 
   it('keeps the other query, never a focus of its own', () => {
-    expect(packFlowAddress('151', q('stage=3d&focus=ah'))).toBe(
-      '/home-preview?stage=3d&focus=151',
+    expect(packFlowAddress('151', q('utm_source=ad&focus=ah'))).toBe(
+      '/home-preview?utm_source=ad&focus=151',
     );
   });
 
   it('drops a key given more than once', () => {
-    expect(packFlowAddress('151', q('jp=a&jp=b&stage=3d'))).toBe(
-      '/home-preview?stage=3d&focus=151',
+    expect(packFlowAddress('151', q('fbclid=a&fbclid=b&utm_source=ad'))).toBe(
+      '/home-preview?utm_source=ad&focus=151',
     );
+  });
+
+  it('drops the QA switches: a public pack link never carries them', () => {
+    expect(
+      packFlowAddress(
+        '151',
+        q('soldout=151&jp=151&debug=1&stage=flat&loader=never&utm_source=ad'),
+      ),
+    ).toBe('/home-preview?utm_source=ad&focus=151');
   });
 
   it('encodes the pack id', () => {
@@ -58,5 +68,27 @@ describe("packFlowAddress: where a pack's own address opens under the switch", (
     expect(packFlowAddress('151', q('count=1'))).toBeNull();
     expect(packFlowAddress('151', q('count='))).toBeNull();
     expect(packFlowAddress('151', q('count=1&count=2'))).toBeNull();
+  });
+});
+
+describe('packPagePath: every way back to the pack page', () => {
+  const back = (id: string, search?: string) =>
+    new URL(packPagePath(id, search), 'https://polycards.gg').searchParams;
+
+  it('is never sent back to the flow (no redirect loop)', () => {
+    for (const id of ['151', 'a b&c']) {
+      expect(packFlowAddress(id, back(id))).toBeNull();
+      expect(
+        packFlowAddress(id, back(id, '?utm_source=ad&focus=x')),
+      ).toBeNull();
+    }
+  });
+
+  it("keeps the visitor's query, minus the focus", () => {
+    expect(packPagePath('151')).toBe('/slots/151?count=1');
+    expect(packPagePath('a b&c')).toBe('/slots/a%20b%26c?count=1');
+    expect(packPagePath('151', '?fbclid=x&focus=151&count=3')).toBe(
+      '/slots/151?fbclid=x&count=1',
+    );
   });
 });

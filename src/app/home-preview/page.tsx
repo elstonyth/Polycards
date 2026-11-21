@@ -37,10 +37,10 @@ export async function generateMetadata({
   const { focus } = await searchParams;
   if (homePreviewOn() && typeof focus === 'string' && focus) {
     // Only a pack the flow can start on, by the page's own check on the
-    // catalogue the page reads anyway (no highlights: they never decide the
-    // start); every other focus costs no pack read and is sent on.
+    // catalogue the page reads anyway (the row's order never decides whether
+    // it can); every other focus costs no pack read and is sent on.
     const categories = await getPackCategories();
-    if (startOn(categories, new Map(), new Map(), focus)) {
+    if (flowStart({ categories, tabs: packTabs(categories), id: focus })) {
       const { title } = await packMetadata(focus);
       if (title && title !== UNKNOWN_PACK_TITLE)
         return { title, robots: ROBOTS };
@@ -69,24 +69,6 @@ function seedsOf(
       ]),
     ),
   );
-}
-
-/**
- * Where the flow starts for a load onto pack `focus`, or null (the pack page
- * shows). The one check both the page and its title use.
- */
-function startOn(
-  categories: PackCategory[],
-  chaseByPack: ReadonlyMap<string, PackCard | null>,
-  highlightOf: ReadonlyMap<string, Highlights | undefined>,
-  focus: string,
-) {
-  return flowStart({
-    categories: toStageCategories(categories, chaseByPack),
-    tabs: packTabs(categories),
-    seeds: seedsOf(categories, highlightOf),
-    id: focus,
-  });
 }
 
 /**
@@ -160,9 +142,18 @@ export default async function HomePreviewPage({
   const tabs = packTabs(categories);
   const focus = one('focus');
   const start = focus
-    ? startOn(categories, chaseByPack, highlightOf, focus)
+    ? flowStart({ categories: stageCategories, tabs, id: focus })
     : null;
-  if (focus && !start) redirect(`/slots/${encodeURIComponent(focus)}?count=1`);
+  // the visitor's query (utm, fbclid) rides along to the pack page
+  const packPage = packPagePath(
+    focus,
+    new URLSearchParams(
+      Object.entries(query).filter(
+        (e): e is [string, string] => typeof e[1] === 'string',
+      ),
+    ),
+  );
+  if (focus && !start) redirect(packPage);
   // The brand loader's pre-paint gate is in the root layout's <head>
   // (stage-loader-script.ts, STAGE_LOADER_PATHS); it reads ?loader= itself.
   return (
@@ -170,7 +161,7 @@ export default async function HomePreviewPage({
       {start && (
         <script
           dangerouslySetInnerHTML={{
-            __html: flowEntryScript(focus, packPagePath(focus)),
+            __html: flowEntryScript(focus, packPage),
           }}
         />
       )}

@@ -15,8 +15,6 @@
 // - a key during the leave fade does not cancel the leave;
 // - Space on a focused button is the button's own;
 // - a second tap while the focus chunk loads loads no page;
-// - /flow-preview/<slug>: the blocks as a document, and "All packs" lands on
-//   /home-preview with the float-in;
 // - reduced motion: a tap opens today's pack page; without JS the tile links
 //   to it.
 import { chromium } from 'playwright';
@@ -425,59 +423,6 @@ for (const size of ['phone', 'desktop']) {
     'double-tap-while-loading',
     loads === 0 && st.on,
     `page loads ${loads}, path ${st.path}, focused ${st.on}`,
-  );
-  await ctx.close();
-}
-
-// /flow-preview: a document, and "All packs" lands on the stage with the float-in
-for (const size of ['phone', 'desktop']) {
-  const { ctx, page } = await open(size);
-  await page.goto(`${BASE}/flow-preview/${SLUG}`, { waitUntil: 'load' });
-  await reject(page);
-  await page.waitForTimeout(1500);
-  const kinds = await page.evaluate(() =>
-    [...document.querySelectorAll('[data-testid="focus-stops"] > section')].map(
-      (s) => s.getAttribute('data-kind'),
-    ),
-  );
-  report(
-    `flow-preview-document-${size}`,
-    kinds.join(',') === 'front,tophits,odds,buyback,pulls,closing',
-    kinds.join(','),
-  );
-  await page
-    .locator('[data-testid="focus-stops"] button', { hasText: /All packs/ })
-    .first()
-    .click();
-  await page.waitForURL(/\/home-preview/, { timeout: 15000 });
-  // the float-in: the tiles' vertical offset (in art heights) eases to 0
-  const key = size === 'phone' ? '--m-dy' : '--d-dy';
-  const samples = [];
-  for (let i = 0; i < 16; i++) {
-    samples.push(
-      await page.evaluate((k) => {
-        const t = [
-          ...document.querySelectorAll(
-            '[data-stage-panel]:not([hidden]) [data-stage-tile]',
-          ),
-        ];
-        return t.length
-          ? Math.max(
-              ...t.map((el) =>
-                Math.abs(Number(el.style.getPropertyValue(k)) || 0),
-              ),
-            )
-          : null;
-      }, key),
-    );
-    await page.waitForTimeout(50);
-  }
-  const dys = samples.filter((v) => v !== null);
-  const played = dys.length > 2 && dys[0] > 0.05 && dys.at(-1) < 0.01;
-  report(
-    `all-packs-arrival-${size}`,
-    played,
-    `largest tile offset over 0.8 s: ${dys.map((v) => v.toFixed(3)).join(' ')}`,
   );
   await ctx.close();
 }

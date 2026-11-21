@@ -9,16 +9,13 @@ export type FlowStart = { category: string; index: number };
 /**
  * The start for pack `id`: the tab holding it (one that can be picked) and
  * its index in that tab's full row. Null when the pack is not in the
- * catalogue, sits in a tab that cannot be picked, or has no starting data
- * for its focused view; the pack page shows then.
+ * catalogue or sits in a tab that cannot be picked; the pack page shows then.
  */
 export function flowStart(o: {
   categories: readonly { id: string; packs: readonly { id: string }[] }[];
   tabs: readonly { id: string; soon: boolean }[];
-  seeds: Readonly<Record<string, unknown>>;
   id: string;
 }): FlowStart | null {
-  if (!(o.id in o.seeds)) return null;
   for (const c of o.categories) {
     const index = c.packs.findIndex((p) => p.id === o.id);
     if (index < 0) continue;

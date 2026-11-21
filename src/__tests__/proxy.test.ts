@@ -120,9 +120,6 @@ describe('unknown routes — a cacheable 404 before rendering', () => {
       '/transactions?ref=gateway',
       '/home-preview',
       '/home-preview?loader=always&stage=flat',
-      // TEMPORARY: the flow groundwork's preview route.
-      '/flow-preview/gold-pack',
-      '/flow-preview/gold-pack?from=stage',
     ]) {
       expect(get(path), path).toBeUndefined();
     }
@@ -362,10 +359,10 @@ describe("a pack's own address under the home preview switch", () => {
 
   it('switch on: a document load of a bare pack address goes to the flow page before anything renders', () => {
     vi.stubEnv('HOME_PREVIEW', '1');
-    const res = get('/slots/151?stage=3d');
+    const res = get('/slots/151?utm_source=ad');
     expect(res?.status).toBe(307);
     expect(res?.headers.get('location')).toBe(
-      'https://polycards.gg/home-preview?stage=3d&focus=151',
+      'https://polycards.gg/home-preview?utm_source=ad&focus=151',
     );
     // never kept by a cache: the same address serves the pack page with the
     // switch off

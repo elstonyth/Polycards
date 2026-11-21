@@ -176,11 +176,11 @@ function sampler() {
             : Number(rcs.opacity)
           : 1,
         y: scrollY,
-        // the page's first section below the stage (Just Pulled), against the viewport
+        // the page's first section below the stage, against the viewport
         openTop: w.__light
           ? null
           : (document
-              .querySelector('[data-flow-section="just-pulled"]')
+              .querySelector('[data-flow-section]')
               ?.getBoundingClientRect().top ?? null),
         vh: innerHeight,
         // the frame time the stage posed this frame with
@@ -700,10 +700,13 @@ for (const size of ['phone', 'desktop']) {
     const over = moving.filter(
       (fr) => fr.panelOp > 0.01 && fr.openTop !== null && fr.openTop < fr.vh,
     );
+    // a missing section reads null in every frame: that fails, never passes
+    // (the light pass reads no DOM, so it has no reading to judge)
+    const measured = HEADED || moving.some((fr) => fr.openTop !== null);
     report(
       `${size}-past-closing-no-content-over-the-pack`,
-      over.length === 0,
-      `frames with the page's content in view while the pack shows: ${over.length}${over[0] ? `; first: opacity ${over[0].panelOp}, content top ${over[0].openTop}` : ''}`,
+      over.length === 0 && measured,
+      `${measured ? '' : 'no section below the stage found; '}frames with the page's content in view while the pack shows: ${over.length}${over[0] ? `; first: opacity ${over[0].panelOp}, content top ${over[0].openTop}` : ''}`,
     );
     const cuts = [];
     for (let i = 1; i < moving.length; i++) {

@@ -22,11 +22,15 @@ export function packFlowOn(
   return env.HOME_PREVIEW === '1';
 }
 
+/** The preview page's QA query, read only there. */
+const QA_SWITCHES = new Set(['soldout', 'jp', 'debug', 'stage', 'loader']);
+
 /**
  * Where the pack's own address (`/slots/<slug>`) opens under the switch: the
  * flow page focused on that pack, its other query kept (each key given once;
- * `focus` is ours). Null when the address carries a `count` (the pack page's
- * own links always do, so those keep the pack page).
+ * `focus` is ours; the preview's QA switches never ride on a public link).
+ * Null when the address carries a `count` (the pack page's own links always
+ * do, so those keep the pack page).
  */
 export function packFlowAddress(
   slug: string,
@@ -35,7 +39,7 @@ export function packFlowAddress(
   if (query.has('count')) return null;
   const q = new URLSearchParams();
   for (const k of new Set(query.keys()))
-    if (k !== 'focus' && query.getAll(k).length === 1)
+    if (k !== 'focus' && !QA_SWITCHES.has(k) && query.getAll(k).length === 1)
       q.set(k, query.get(k) ?? '');
   q.set('focus', slug);
   return `/home-preview?${q.toString()}`;

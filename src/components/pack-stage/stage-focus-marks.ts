@@ -18,5 +18,17 @@ export const fields = (st: unknown): Record<string, unknown> =>
 /** The path of pack `id`. */
 export const packPath = (id: string) => `/slots/${encodeURIComponent(id)}`;
 
-/** Today's pack page for pack `id` (its own links carry a count). */
-export const packPagePath = (id: string) => `${packPath(id)}?count=1`;
+/**
+ * Today's pack page for pack `id`, keeping the visitor's query (`search`)
+ * minus `focus`. Always with a count: the pack page's own links carry one, and
+ * the switch's redirect leaves those alone (no loop back to the flow).
+ */
+export const packPagePath = (
+  id: string,
+  search: string | URLSearchParams = '',
+) => {
+  const q = new URLSearchParams(search);
+  q.delete('focus');
+  q.set('count', '1');
+  return `${packPath(id)}?${q.toString()}`;
+};

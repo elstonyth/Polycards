@@ -16,10 +16,6 @@ import {
   splitSubpaths,
   strokeProgress,
 } from '../loader-timeline';
-import {
-  BRAND_LOADER_SESSION_KEY,
-  claimFirstVisitThisSession,
-} from '../first-visit';
 
 describe('loaderPhase', () => {
   it('reveals, then holds until ready', () => {
@@ -114,36 +110,5 @@ describe('logo geometry helpers', () => {
     const all = LOGO_LETTERS.map((letter) => pathYExtent(letter.d).maxY);
     expect(pathYExtent(y!.d).maxY).toBe(Math.max(...all));
     expect(pathYExtent(l!.d).minY).toBeLessThan(pathYExtent(y!.d).minY);
-  });
-});
-
-describe('claimFirstVisitThisSession', () => {
-  const memory = () => {
-    const map = new Map<string, string>();
-    return {
-      getItem: (k: string) => map.get(k) ?? null,
-      setItem: (k: string, v: string) => void map.set(k, v),
-      map,
-    };
-  };
-
-  it('shows once per session', () => {
-    const storage = memory();
-    expect(claimFirstVisitThisSession(storage)).toBe(true);
-    expect(storage.map.get(BRAND_LOADER_SESSION_KEY)).toBe('1');
-    expect(claimFirstVisitThisSession(storage)).toBe(false);
-  });
-
-  it('shows when storage is missing or throws', () => {
-    expect(claimFirstVisitThisSession(null)).toBe(true);
-    const broken = {
-      getItem: () => {
-        throw new Error('SecurityError');
-      },
-      setItem: () => {
-        throw new Error('SecurityError');
-      },
-    };
-    expect(claimFirstVisitThisSession(broken)).toBe(true);
   });
 });

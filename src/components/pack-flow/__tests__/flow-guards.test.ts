@@ -17,7 +17,6 @@ describe('pack-flow guards', () => {
     expect(files.map((f) => f.name)).toEqual(
       expect.arrayContaining([
         'FocusStops.tsx',
-        'flow-address.ts',
         'flow-back.ts',
         'flow-seed.ts',
         'use-flow-data.ts',
