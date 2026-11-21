@@ -21,15 +21,20 @@
  *   pack that cannot be focused keeps the row alone;
  * - a re-measure keeps the flow position P (a rotation never leaves the page
  *   off its section).
- * Touches that start in the free part stay the browser's own until the free
- * part's touch is built (work package 6); the wheel there is native except an
- * up notch that crosses the paged edge, which pages back to the lineup.
+ * In the free part a vertical touch is the flow's (the page follows the
+ * finger, then glides; plan 2.5) and a sideways one the browser's; the wheel
+ * there is native except an up notch that crosses the paged edge, which
+ * pages back to the lineup. Crossing Last's top going down wraps to the row
+ * (plan 2.7); Home and Escape at the lineup take the same way back.
  */
 import {
   flowAt,
   flowPosition,
   flowTable,
+  freeAnchor,
+  freeAnchorY,
   type FlowAt,
+  type FlowSection,
   type FlowTable,
 } from './stage-flow';
 import {
@@ -77,6 +82,17 @@ export type FlowInputGeometry = {
   viewport: number;
   /** The Exit spacer (its bottom is the opening line's top); null: computed. */
   exit?: { top: number; height: number } | null;
+  /** The Telegram section (the rise is keyed to it); null: not measured. */
+  telegram?: { top: number; bottom: number } | null;
+  /** The Return spacer; null or zero height: none. */
+  ret?: { top: number; height: number } | null;
+  /** The Last spacer (its top is the wrap line); null or zero height: no wrap. */
+  last?: { top: number; height: number } | null;
+  /**
+   * The free part's sections in page order (the opening line, Just Pulled,
+   * Telegram, Return, Last): a re-measure keeps the one under the middle.
+   */
+  sections?: readonly FlowSection[] | null;
 };
 
 export type FlowInputFrame = FlowPagerFrame & {
@@ -209,6 +225,11 @@ export interface FlowInput {
   ): void;
   /** True: the caller cancels the touchmove. */
   touchMove(x: number, y: number, scrollY: number, now: number): boolean;
+  /**
+   * The scroll the last free-part touchmove asks for (the page follows the
+   * finger): the caller writes it at once. Read once; null: nothing to write.
+   */
+  follow(): number | null;
   touchEnd(scrollY: number, now: number): void;
   /** The touch's tracking is dropped: nothing pages, the snap and the idle report come back. */
   touchCancel(): void;
@@ -238,8 +259,14 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
   let geo: FlowInputGeometry | null = null;
   let table: FlowTable | null = null;
   let kindsKey = '';
-  /** A touch that started in the free part: the browser's own. */
-  let nativeTouch = false;
+  /** The free-part follow not yet written (read once by `follow`). */
+  let followTo: number | null = null;
+  /**
+   * The scroll the last frame ended on: a re-measure keeps the place from
+   * here, since the browser may already have clamped the scroll it hands in
+   * (a rotation lays out the shorter page before the resize listener runs).
+   */
+  let lastY: number | null = null;
   /** The lineup's endless pick (plan 2.4). */
   const line = createFlowLine({ canPick: (i) => d.canPick?.(i) ?? true });
   /** A touch that may drag the lineup: where it landed. */
@@ -292,7 +319,8 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
   };
   /** After a gesture: a move that left the row focuses the centred pack. */
   const entered = () => {
-    if (!d.focused() && pager.busy() && d.enter()) build();
+    // (never during the wrap's lock: it lands on the row)
+    if (!d.focused() && pager.busy() && !pager.locking() && d.enter()) build();
   };
   const stops = (): readonly number[] =>
     table ? (table.rests.length > 0 ? table.stops : [table.r0]) : [];
@@ -346,12 +374,32 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
   return {
     measure(g, scrollY) {
       const old = table;
-      const was = old ? flowAt(scrollY, old) : null;
+      const oldGeo = geo;
+      // a new viewport or panel (a rotation, a resize): the place of the
+      // last frame, since the browser may already have clamped the scroll it
+      // hands in; a change of content only: the scroll as it is
+      const resized =
+        !!oldGeo &&
+        !!g &&
+        (oldGeo.panel !== g.panel || oldGeo.viewport !== g.viewport);
+      const y0 = resized ? (lastY ?? scrollY) : scrollY;
+      const was = old ? flowAt(y0, old) : null;
       geo = g;
       build(true);
       if (!old || !table || !was || pager.busy()) return null;
-      if (scrollY > old.edge) return null;
-      const y = flowPosition(was, table);
+      // past the paged edge only a resize moves the page (content that grows
+      // in the free part leaves it where the visitor is reading)
+      if (!resized && y0 > old.edge) return null;
+      // the free part (past the exit): the same share of the same section
+      // under the viewport's middle; elsewhere the flow position P
+      const from = oldGeo?.sections;
+      const to = g?.sections;
+      const a =
+        was.zone === 'free' && was.span !== 'exit' && from?.length && to?.length
+          ? freeAnchor(y0, from, oldGeo!.viewport)
+          : null;
+      const y = a ? freeAnchorY(a, to!, g!.viewport) : flowPosition(was, table);
+      lastY = y;
       return Math.abs(y - scrollY) >= SAME_PX ? y : null;
     },
     table: () => table,
@@ -397,6 +445,13 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
       for (let j = 1; j < s.length; j++)
         if (Math.abs(scrollY - s[j]!) < Math.abs(scrollY - s[k]!)) k = j;
       const inDetails = d.focused() && k >= 1;
+      // at the lineup Home and Escape go back to the row the way the wrap
+      // does: the lineup unforms into the row with the chosen pack, no move
+      // back through the stops (plan 2.10; the details' leave is for stops)
+      const atLineup =
+        inDetails && table.rests.length > 0 && k === s.length - 1;
+      if (atLineup && (intent === 'first' || intent === 'escape'))
+        return pager.home(scrollY, now);
       let r: FlowKeyResult;
       switch (intent) {
         case 'escape':
@@ -421,15 +476,15 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
     },
     touchStart(x, y, scrollY, now, o) {
       arm();
+      followTo = null;
       // a finger that lands during a move (one crossing the paged edge
-      // included) is the pager's, which ignores it: the move always lands
-      nativeTouch = pager.zone(scrollY) === 'free' && !pager.busy();
-      lineTouch = !nativeTouch && lineLive(scrollY) ? { x0: x } : null;
-      if (!nativeTouch) pager.touchStart(x, y, scrollY, now, o);
+      // included) is ignored by the pager: the move always lands
+      lineTouch = lineLive(scrollY) ? { x0: x } : null;
+      pager.touchStart(x, y, scrollY, now, o);
     },
     touchMove(x, y, scrollY, now) {
-      if (nativeTouch) return false;
       const r = pager.touchMove(x, y, scrollY, now);
+      followTo = r.scrollTo;
       if (r.axis === 'x' && lineTouch) {
         // the lineup follows the finger (from where it landed); the page stays
         if (!line.held()) {
@@ -441,12 +496,14 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
       }
       return r.consumed;
     },
+    follow() {
+      const y = followTo;
+      followTo = null;
+      return y;
+    },
     touchEnd(scrollY, now) {
       lineTouch = null;
-      if (nativeTouch) {
-        nativeTouch = false;
-        return;
-      }
+      followTo = null;
       if (line.held()) {
         line.release(now);
         pager.touchCancel();
@@ -458,7 +515,7 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
       entered();
     },
     touchCancel() {
-      nativeTouch = false;
+      followTo = null;
       lineTouch = null;
       if (line.held()) line.release(0, false);
       pager.touchCancel();
@@ -504,17 +561,9 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
       }
       const lineBusy = line.moving() || restAt !== null;
       build();
-      let f: FlowPagerFrame;
-      if (nativeTouch && !pager.busy())
-        f = {
-          scrollTo: null,
-          target: null,
-          animating: false,
-          idle: false,
-          zone: pager.zone(scrollY),
-        };
-      else f = pager.frame(scrollY, now);
+      let f = pager.frame(scrollY, now);
       const y = f.scrollTo ?? scrollY;
+      lastY = y;
       const t = table;
       // the band reached with no pack focused, nearer a stop than the row:
       // focus the centred pack. A pack that cannot be focused has no rests
@@ -527,6 +576,7 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
         f.zone === 'paged' &&
         y > (t.r0 + first) / 2 &&
         !(f.animating && f.target === 0) &&
+        !f.lock &&
         d.enter()
       )
         build();

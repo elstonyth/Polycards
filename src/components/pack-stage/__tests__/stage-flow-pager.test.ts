@@ -833,6 +833,55 @@ describe('flow pager: agrees with the focus pager at the rests', () => {
   });
 });
 
+describe('flow pager: a flick whose last move and release land in the same frame', () => {
+  it('still glides, on the last move not yet sampled by a frame', () => {
+    const p = make();
+    let y = 9500;
+    p.touchStart(200, 600, y, 0);
+    p.frame(y, 0);
+    // moves on every other frame (the frame between sees no movement)
+    for (let i = 1; i <= 3; i++) {
+      y = p.touchMove(200, 600 - 32 * i, y, i * 32).scrollTo ?? y;
+      p.frame(y, i * 32);
+      p.frame(y, i * 32 + 16);
+    }
+    // the fourth move and the release, with no frame between them
+    y = p.touchMove(200, 600 - 32 * 4, y, 128).scrollTo ?? y;
+    p.touchEnd(y, 130);
+    expect(run(p, y, 144, 3000)).toBeGreaterThan(y + 150);
+  });
+});
+
+describe('flow pager: an up drag held at the paged edge', () => {
+  it('pages to the lineup even when the browser rounds the scroll just past the edge', () => {
+    const p = make();
+    let y = 7540;
+    p.touchStart(200, 300, y, 0);
+    p.frame(y, 0);
+    for (let i = 1; i <= 6; i++) {
+      y = p.touchMove(200, 300 + 40 * i, y, i * 16).scrollTo ?? y;
+      p.frame(y, i * 16);
+    }
+    expect(y).toBe(7500); // the follow stops at the edge
+    // the device-pixel grid leaves the page a fraction above it
+    p.touchEnd(7500.4, 120);
+    expect(run(p, 7500.4, 136, 1200)).toBe(7000);
+  });
+});
+
+describe('flow pager: a touch on a sideways scroller in the free part', () => {
+  it('is the browser own in every direction: never consumed, no follow, no glide', () => {
+    const p = make();
+    p.touchStart(200, 600, 9500, 0, { strip: true });
+    expect(p.touchMove(202, 598, 9500, 16).consumed).toBe(false);
+    const m = p.touchMove(200, 400, 9500, 32);
+    expect(m.consumed).toBe(false);
+    expect(m.scrollTo).toBeNull();
+    p.touchEnd(9500, 48);
+    expect(run(p, 9500, 64, 1000)).toBe(9500);
+  });
+});
+
 describe('flow pager: the wrap (plan 2.7)', () => {
   it("a flick across Last's top wraps once to the overshoot, then the 1.2 s lock eases to the row", () => {
     const p = make();
@@ -931,6 +980,61 @@ describe('flow pager: the wrap (plan 2.7)', () => {
     q.setTable(tableFor({ last: { top: 12950, height: 801 } }));
     expect(q.frame(12990, 16).scrollTo).toBeNull();
     expect(q.busy()).toBe(false);
+  });
+
+  it('a page left inside Last by a re-measure wraps on its next downward movement', () => {
+    const q = make();
+    q.frame(12990, 0);
+    q.setTable(
+      tableFor({
+        ret: { top: 12000, height: 950 },
+        last: { top: 12950, height: 801 },
+      }),
+    );
+    expect(q.frame(12990, 16).scrollTo).toBeNull();
+    const f = q.frame(13000, 32);
+    expect(f.wrap).toBe(0);
+    expect(f.scrollTo).toBe(10);
+  });
+
+  it('the wrap lands on R0 plus the overshoot when the row does not start at 0', () => {
+    const p = make({
+      top: 200,
+      telegram: { top: 11200, bottom: 12200 },
+      ret: { top: 12200, height: 1000 },
+      last: { top: 13200, height: 801 },
+    });
+    p.frame(13190, 0);
+    const f = p.frame(13230, 16);
+    expect(f.wrap).toBe(0);
+    expect(f.scrollTo).toBe(230);
+    expect(run(p, 230, 32, 32 + WRAP_GUARD_MS + 16)).toBe(200);
+  });
+
+  it('home(): from the lineup, the same lock eases to the row (Home and Escape at the lineup)', () => {
+    const p = make();
+    const f0 = p.home(7000, 0);
+    expect(f0).toBe('moved');
+    const f = p.frame(7000, 16);
+    expect(f.wrap).toBe(0);
+    expect(f.lock).toBe('home');
+    expect(p.busy()).toBe(true);
+    const mid = p.frame(7000, 16 + 600);
+    expect(mid.scrollTo).toBeCloseTo(7000 * 0.125, 6);
+    expect(mid.lock).toBe('home');
+    expect(run(p, mid.scrollTo!, 632, 16 + WRAP_GUARD_MS + 16)).toBe(0);
+    expect(p.busy()).toBe(false);
+    // only from a rest in the paged part, never mid-move or in the free part
+    const q = make();
+    expect(q.home(9500, 0)).toBe('free');
+    q.step(1, 0, 0);
+    expect(q.home(100, 50)).toBe('swallowed');
+  });
+
+  it('the wrap frame says it is the wrap', () => {
+    const p = make();
+    p.frame(12990, 0);
+    expect(p.frame(13030, 16).lock).toBe('wrap');
   });
 
   it('no Last in the table: no wrap', () => {

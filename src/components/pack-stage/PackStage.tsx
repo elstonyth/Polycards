@@ -47,7 +47,7 @@ const nounOf = (packs: readonly StagePack[]): 'pack' | 'capsule' =>
  * compact heading, the franchise tabs (driving the shared ShelfCategory pick,
  * so Just Pulled follows), one carousel per category (every category's tiles
  * are in the server HTML; the inactive ones are `hidden`), the centred pack's
- * info block, the live region and the first-visit loader.
+ * info block, the live region and the brand loader.
  */
 export default function PackStage({
   categories,

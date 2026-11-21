@@ -95,6 +95,32 @@
   visibility: hidden;
 }
 
+/* The lap (full-flow plan 2.6, 2.7: the rise, Return and Last): the panel
+   shows the chosen pack rising and the others coming back, with the row's
+   own UI out, so the frame at Last is the row's frame with its UI at 0. The
+   wrap brings the UI back over 0.35 s (data-flow-wrap, set for that while
+   by the spin chunk); Home or Escape at the lineup holds it out until the
+   lineup has unformed into the row (data-flow-home). */
+.flow[data-flow-lap] [data-stage-head],
+.flow[data-flow-lap] [data-stage-info],
+.flow[data-flow-lap] [data-stage-nav],
+.flow[data-flow-lap] .label,
+.flow[data-flow-home] [data-stage-head],
+.flow[data-flow-home] [data-stage-info],
+.flow[data-flow-home] [data-stage-nav],
+.flow[data-flow-home] .label {
+  opacity: 0;
+  pointer-events: none;
+  transition: none;
+}
+
+.flow[data-flow-wrap] .spinWrap [data-stage-head],
+.flow[data-flow-wrap] .spinWrap [data-stage-info],
+.flow[data-flow-wrap] .spinWrap [data-stage-nav],
+.flow[data-flow-wrap] .spinWrap .label {
+  transition: opacity 0.35s ease-out;
+}
+
 /* The site's floating chips (the free pack, Telegram) over the flow: hidden
    from Closing through the hand-off, the lineup and its exit (the address is
    the pack's at the stops, which keeps them off there already), and faded
@@ -106,9 +132,13 @@
   transition-timing-function: ease-out;
 }
 
-:global(body):has(.spinWrap[data-focus-on]):not(:has(.flow[data-flow-free]))
+:global(body):has(.spinWrap[data-focus-on]):not(
+    :has(.flow[data-flow-free])
+  ):not(:has(.flow[data-flow-lap]))
   :global([data-testid='free-pack-badge']),
-:global(body):has(.spinWrap[data-focus-on]):not(:has(.flow[data-flow-free]))
+:global(body):has(.spinWrap[data-focus-on]):not(
+    :has(.flow[data-flow-free])
+  ):not(:has(.flow[data-flow-lap]))
   :global([data-telegram-banner]) {
   opacity: 0;
   visibility: hidden;
@@ -537,7 +567,7 @@
 /* ---- Loader (plan section 6) --------------------------------------------- */
 
 /* The shell exists in every server render but shows only once the inline
-   pre-paint script has set html[data-stage-loader] (a first visit that
+   pre-paint script has set html[data-stage-loader] (a document load that
    predicts 3D). If JS never hydrates, it hides itself (--stage-failsafe). */
 .shell {
   display: none;

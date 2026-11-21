@@ -34,9 +34,10 @@
  * - Row: up at R0 does nothing; down at R0 enters stop 1 only while entry
  *   is allowed (a pack that cannot be focused swallows it).
  * - Wrap (plan 2.7): crossing Last's top going down, by any means, jumps to
- *   the overshoot and runs a locked 1.2 s ease-out scroll to R0; the pager
- *   owns it, so no glide or held finger writes an old position after it, and
- *   wheel, keys and touch are swallowed until it ends.
+ *   R0 plus the overshoot and runs a locked 1.2 s ease-out scroll to R0; the
+ *   pager owns it, so no glide or held finger writes an old position after
+ *   it, and wheel, keys and touch are swallowed until it ends. `home` runs
+ *   the same lock from a paged rest (Home and Escape at the lineup).
  * - A re-measure or a new pack mid-move keeps the move's target by role
  *   (row, a pack stop by its distance from the last one, lineup, exit end).
  */
@@ -133,7 +134,11 @@ export type FlowPagerFrame = {
    * `wrapUiOpacity`). Absent or null: no wrap running.
    */
   wrap?: number | null;
+  /** Which lock runs: the wrap from Last, or `home` from a paged rest; null: none. */
+  lock?: FlowLock | null;
 };
+
+export type FlowLock = 'wrap' | 'home';
 
 /**
  * What a key did: `moved` (a move started) and `swallowed` (nothing to do
@@ -160,6 +165,11 @@ export interface FlowPager {
   step(dir: 1 | -1, scrollY: number, now: number): FlowKeyResult;
   /** Keys and icons: straight to stop k (the exit end is stops.length). */
   goTo(k: number, scrollY: number, now: number, ms?: number): FlowKeyResult;
+  /**
+   * Back to the row by the wrap's own lock (1.2 s, ease-out, input
+   * swallowed): from a rest in the paged part only.
+   */
+  home(scrollY: number, now: number): FlowKeyResult;
   /** `strip`: the touch started on the Top Hits strip. */
   touchStart(
     x: number,
@@ -174,6 +184,8 @@ export interface FlowPager {
   touchCancel(): void;
   frame(scrollY: number, now: number): FlowPagerFrame;
   busy(): boolean;
+  /** The wrap's (or Home's) lock runs. */
+  locking(): boolean;
   /** The last gesture (wheel, key, release) was a down gesture at the row that entry refused. */
   refused(): boolean;
 }
@@ -193,7 +205,8 @@ type Touch = {
   prevFollow: number;
   v: number;
 };
-type Lock = { t0: number; from: number };
+/** `t0` null: starts on the next frame (that frame reports wrap 0). */
+type Lock = { t0: number | null; from: number; kind: FlowLock };
 
 /** The targets a move can have: the stops plus the exit end. */
 const targetsOf = (t: FlowPagerTable): number[] =>
@@ -357,13 +370,16 @@ export function createFlowPager(): FlowPager {
     wrap: number | null = null,
   ): FlowPagerFrame => {
     if (scrollTo !== null) prevY = scrollTo;
-    return { scrollTo, target, animating, idle, zone, wrap };
+    const kind = wrap === null ? null : (lock?.kind ?? null);
+    return { scrollTo, target, animating, idle, zone, wrap, lock: kind };
   };
-  /** The wrap: to the overshoot now, then the locked scroll to R0. */
+  /** The wrap: to R0 plus the overshoot now, then the locked scroll to R0. */
   const startWrap = (overshoot: number, now: number): FlowPagerFrame => {
     glide = null;
     move = null;
-    lock = { t0: now, from: overshoot };
+    const y = (table?.stops[0] ?? 0) + overshoot;
+    lock = { t0: now, from: y, kind: 'wrap' };
+    overshoot = y;
     const t = touch;
     if (t) {
       // a held finger belongs to the lock now: rebased, and it writes nothing
@@ -458,6 +474,15 @@ export function createFlowPager(): FlowPager {
         ext.length === 0 ? null : Math.max(0, Math.min(ext.length - 1, k));
       return key(scrollY, pick, now, ms);
     },
+    home(scrollY) {
+      refusedEntry = false;
+      if (!table) return 'free';
+      if (locked()) return 'swallowed';
+      if (zoneOf(scrollY) === 'free') return 'free';
+      glide = null;
+      lock = { t0: null, from: scrollY, kind: 'home' };
+      return 'moved';
+    },
     touchStart(x, y, scrollY, _now, o) {
       if (!table) {
         touch = null;
@@ -482,6 +507,10 @@ export function createFlowPager(): FlowPager {
       const t = touch;
       if (!t || !table) return { consumed: false, axis: null, scrollTo: null };
       t.y = y;
+      // a sideways scroller in the free part (the live ticker): the
+      // browser's own gesture, whichever way it goes
+      if (t.free && t.strip)
+        return { consumed: false, axis: t.axis, scrollTo: null };
       if (t.axis === null) {
         const dx = Math.abs(x - t.x0);
         const dy = Math.abs(y - t.y0);
@@ -503,6 +532,7 @@ export function createFlowPager(): FlowPager {
       const t = touch;
       touch = null;
       if (!t || !table || t.ignored || t.axis !== 'y' || locked()) return;
+      if (t.free && t.strip) return;
       if (!t.free) {
         const moved = t.y0 - t.y; // > 0: finger up, page down
         if (Math.abs(moved) <= TOUCH_PAGE_PX) return;
@@ -510,8 +540,16 @@ export function createFlowPager(): FlowPager {
         if (k !== null) begin(scrollY, k, now, PAGE_MS);
         return;
       }
+      // a last move no frame has sampled yet (it and the release landed in
+      // the same frame): its movement is the release speed
+      if (t.follow !== t.prevFollow) t.v = t.follow - t.prevFollow;
       const target = scrollY + glideDistance(t.v);
-      if (target <= table.edge) {
+      // held against the edge (the follow stops there; the device-pixel
+      // grid can leave the scroll a fraction past it): the lineup takes over
+      const held =
+        t.follow <= table.edge + SAME_PX &&
+        scrollY - table.edge <= GLIDE_HANDOFF_PX;
+      if (target <= table.edge || held) {
         if (scrollY - table.edge <= GLIDE_HANDOFF_PX) {
           const k = targetFrom(scrollY, -1);
           if (k !== null) begin(scrollY, k, now, SNAP_MS);
@@ -539,6 +577,7 @@ export function createFlowPager(): FlowPager {
       const r0 = table.stops[0] ?? 0;
       const lastTop = table.lastTop ?? null;
       if (lock) {
+        lock.t0 ??= now;
         const elapsed = now - lock.t0;
         if (elapsed >= WRAP_GUARD_MS) {
           lock = null;
@@ -606,6 +645,7 @@ export function createFlowPager(): FlowPager {
       return out(null, k, false, !off && !touch, zone);
     },
     busy: locked,
+    locking: () => lock !== null,
     refused: () => refusedEntry,
   };
 }

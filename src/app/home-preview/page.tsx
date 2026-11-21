@@ -43,7 +43,7 @@ const FEED_TTL_MS = 5_000;
  * `?stage=flat|3d|lite` forces the 3D mode; `?debug=1` shows the stage state;
  * `?soldout=<id>,<id>` shows those packs sold out (QA); `?jp=<id>,<id>` marks
  * those packs Japanese (the language control's preview). `?loader=always|never`
- * (forces the first-visit loader) is read by the layout's pre-paint script.
+ * (forces or skips the brand loader) is read by the layout's pre-paint script.
  */
 export default async function HomePreviewPage({
   searchParams,
@@ -113,7 +113,7 @@ export default async function HomePreviewPage({
     ),
   );
   const stageCategories = toStageCategories(categories, chaseByPack);
-  // The first-visit loader's pre-paint gate is in the root layout's <head>
+  // The brand loader's pre-paint gate is in the root layout's <head>
   // (stage-loader-script.ts, STAGE_LOADER_PATHS); it reads ?loader= itself.
   return (
     <div className="w-full">

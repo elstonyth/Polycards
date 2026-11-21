@@ -543,6 +543,20 @@ async function runSize(size, bodies) {
   await shot(page, 'rest', size);
 
   await check('scroll-no-change', async () => {
+    // The drawer's first rows are the server-rendered feed, which the frozen
+    // routes cannot reach; its first poll swaps them for the frozen body. Make
+    // that poll happen and land before sampling, so the stack already holds
+    // the frozen rows.
+    const polled = page
+      .waitForResponse((r) => /\/api\/recent-pulls(\?|$)/.test(r.url()), {
+        timeout: 15000,
+      })
+      .catch(() => null);
+    await page.evaluate(() =>
+      document.dispatchEvent(new Event('visibilitychange')),
+    );
+    await polled;
+    await page.waitForTimeout(1200);
     const g = await page.evaluate(
       ([sec]) => {
         const r = document.querySelector(sec).getBoundingClientRect();

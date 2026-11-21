@@ -50,12 +50,12 @@ type Loaded = { Loader: ComponentType<BrandLoaderProps>; maxMs: number };
  * The stage's brand loader (plan section 6). The shell is in every server
  * render, shown by CSS only under `html[data-stage-loader]`, and paints what
  * BrandLoader paints at clock 0: the ink cover. On hydration it unmounts at
- * once when that attribute is absent (a returning or reduced-motion visitor).
- * It never claims the first visit itself: the inline script already did.
+ * once when that attribute is absent (a reduced-motion or low-data visitor, a
+ * crash flag, ?loader=never). It never decides itself: the inline script did.
  *
  * BrandLoader itself (and the motion components it animates with) is loaded
- * only on a first visit, after hydration, so a returning visitor never
- * downloads it. It leaves when the 3D stage is ready (or settled flat, then at
+ * only on a document load that shows it (every full load since 2026-11-21),
+ * after hydration, so a visitor who never sees it never downloads it. It leaves when the 3D stage is ready (or settled flat, then at
  * its minimum), and at the latest HOME_LOADER_MAX_MS after navigation start:
  * `maxMs` is taken when it mounts, since it times from its own mount.
  * `onLeave` fires as its exit fade starts; finishing, failing to load or

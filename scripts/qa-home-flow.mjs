@@ -62,7 +62,7 @@ const BASE =
   process.env.PW_BASE ??
   'http://localhost:4300';
 const ONLY = (args.find((a) => a.startsWith('--only=')) ?? '=').split('=')[1];
-/** --part=pass,motion,nav,keys,reload,wp3c,lineup,wp4b,wp5: run only these groups. */
+/** --part=pass,motion,nav,keys,reload,wp3c,lineup,wp4b,wp5,wp67: run only these groups. */
 const PARTS = (args.find((a) => a.startsWith('--part=')) ?? '=')
   .split('=')[1]
   .split(',')
@@ -786,11 +786,19 @@ for (const size of sizes) {
     const y2 = r.y;
     r = await nativeKey(page, 'PageUp');
     check('free-PageUp-native', !r.cancelled && r.y < y2 - 100, r);
+    // End is the browser's: it lands past Last's top, so the page wraps to
+    // the row (plan 2.7: the wrap applies to End at Last; work package 7)
+    const endLog = await nativeKey(page, 'End');
+    await page.waitForTimeout(1500);
+    r = await rest(page);
+    check('free-End-native-wraps-to-row', !endLog.cancelled && atRow(r), r);
+    // Home is the browser's too: from the free part straight to the row
+    r = await key(page, 'ArrowDown');
+    r = await key(page, 'ArrowDown');
     r = await key(page, 'End');
-    const max = await page.evaluate(
-      () => document.documentElement.scrollHeight - innerHeight,
-    );
-    check('free-End-native', Math.abs(r.y - max) < 2, r);
+    await page.waitForTimeout(400);
+    await page.evaluate((v) => window.scrollTo(0, v), yFree);
+    await page.waitForTimeout(400);
     r = await key(page, 'Home');
     await page.waitForTimeout(800);
     r = await rest(page);
@@ -997,7 +1005,7 @@ for (const size of sizes) {
         running: window.__packStage.running(),
         gpu: window.__packStage.stats()?.gpuBytesEstimate ?? null,
         live: window.__packStage.live(),
-        shown: window.__packStage.flow().shown,
+        lap: window.__packStage.flow().lap,
       }));
     const e0 = await engineAt();
     const pts = await page.evaluate(() => {
@@ -1149,8 +1157,12 @@ for (const size of sizes) {
           : 'a tap lands on the hidden panel'),
     );
 
-    // the 3D sleeps in the free part, and wakes on the way back to the lineup
-    await page.evaluate((v) => window.scrollTo(0, v), t.exitEnd);
+    // the free part draws nothing and keeps only the chosen pack (full-flow
+    // plan 1.1a, work package 6: trimmed, not sent away), and the lineup's
+    // packs come back on the way up
+    const vh = page.viewportSize().height;
+    const trimY = t.rise ? (t.exitEnd + t.rise.start) / 2 : t.exitEnd + vh;
+    await page.evaluate((v) => window.scrollTo(0, v), trimY);
     await page.waitForTimeout(1500);
     const e1 = await engineAt();
     // back up: the scrollbar into the paged part, which snaps to the lineup
@@ -1161,10 +1173,13 @@ for (const size of sizes) {
     const e2 = await engineAt();
     const MB = (b) => (b === null ? null : Math.round((b / 1048576) * 10) / 10);
     report(
-      'engine-sleeps-in-the-free-part-' + size,
+      'engine-trims-in-the-free-part-' + size,
       e0.present === true &&
-        e1.present === false &&
-        !e1.running &&
+        e1.present === true &&
+        e1.live.length === 0 &&
+        e1.gpu !== null &&
+        e0.gpu !== null &&
+        e1.gpu < e0.gpu &&
         e2.present === true &&
         e2.running &&
         near(r.y, lineupY) &&
@@ -2119,6 +2134,336 @@ for (const size of sizes) {
       `no-page-errors-wp5-${size}`,
       page.errors.length === 0,
       page.errors.join(' | ') || 'none',
+    );
+    await s.ctx.close();
+  }
+
+  // ---- The rise, the return and the wrap (work packages 6 and 7) ----
+  if (part('wp67')) {
+    const s = await open(size);
+    const { page } = s;
+    await load(s);
+    const len0 = (await snap(page)).len;
+    const lapState = () =>
+      page.evaluate(() => {
+        const ps = window.__packStage;
+        const fl = ps.flow();
+        const flow = document.querySelector('[data-home-flow]');
+        const head = document.querySelector('[data-stage-head]');
+        const drawn = (ps.runtime?.()?.drawn ?? []).filter(
+          (d) => d.opacity > 0,
+        );
+        return {
+          y: scrollY,
+          t: fl.table,
+          lap: fl.lap,
+          busy: fl.busy,
+          on: !!ps.focus?.()?.on,
+          free: flow.hasAttribute('data-flow-free'),
+          lapAttr: flow.hasAttribute('data-flow-lap'),
+          headOp: head ? Number(getComputedStyle(head).opacity) : null,
+          drawn: drawn.map((d) => ({
+            id: d.id,
+            o: Math.round(d.opacity * 1000) / 1000,
+            x: Math.round(d.x * 1000) / 1000,
+            y: Math.round(d.y * 1000) / 1000,
+            z: Math.round(d.z * 1000) / 1000,
+            s: Math.round(d.scale * 1000) / 1000,
+          })),
+          gpu: ps.stats?.()?.gpuBytesEstimate ?? 0,
+          track: ps.state.track,
+          index: ps.state.focusOn?.ctx?.index ?? null,
+          id: ps.state.focusOn?.id ?? null,
+          path: location.pathname,
+          len: history.length,
+        };
+      });
+    const MB = (b) => Math.round((b / 1e6) * 100) / 100;
+    const to = async (y, wait = 500) => {
+      await page.evaluate((v) => window.scrollTo(0, v), y);
+      await page.waitForTimeout(wait);
+      return lapState();
+    };
+    /** Waits until the flow is not busy and the scroll is still. */
+    const settle = async () => {
+      await rest(page, 8000);
+      await page.waitForTimeout(500);
+      return lapState();
+    };
+    // to the lineup, and its exit to the free part
+    await page.keyboard.press('End');
+    await page.waitForTimeout(200);
+    await rest(page);
+    await page.waitForTimeout(800);
+    const atLineup = await lapState();
+    const chosen = atLineup.id;
+    const chosenIndex = atLineup.index;
+    const t = atLineup.t;
+    const exitEnd = t.exitEnd;
+    // the trimmed middle of the free span (a quarter viewport past the exit
+    // end to a quarter viewport before the rise)
+    const free = await to((exitEnd + t.rise.start) / 2, 1500);
+    report(
+      'wp67-free-nothing-drawn-' + size,
+      free.free && !free.lapAttr && free.drawn.length === 0 && free.lap?.free,
+      `at ${Math.round(free.y)}: drawn ${free.drawn.length}, lap ${JSON.stringify(free.lap)}, GPU ${MB(free.gpu)} MB (lineup ${MB(atLineup.gpu)} MB)`,
+    );
+    report(
+      'wp67-free-keeps-only-the-chosen-pack-' + size,
+      free.lap?.trim === true && free.gpu > 0 && free.gpu < atLineup.gpu,
+      `GPU estimate ${MB(free.gpu)} MB in the free span, ${MB(atLineup.gpu)} MB at the lineup`,
+    );
+    // the rise: one pack, the chosen one, the panel shown, the row UI out
+    const rs = t.rise;
+    const mid = await to(rs.start + (rs.end - rs.start) * 0.5, 800);
+    report(
+      'wp67-rise-one-pack-' + size,
+      mid.lapAttr &&
+        !mid.free &&
+        mid.drawn.length === 1 &&
+        mid.drawn[0].id === chosen &&
+        mid.lap &&
+        mid.lap.rise > 0.2 &&
+        mid.lap.rise < 0.8 &&
+        mid.headOp === 0,
+      `rise ${mid.lap?.rise?.toFixed(3)}; drawn ${mid.drawn.map((d) => d.id).join(',')} (chosen ${chosen}); row heading opacity ${mid.headOp}; GPU ${MB(mid.gpu)} MB`,
+    );
+    // Just Pulled grows by 300 px: the rise stays keyed to the Telegram section
+    await page.evaluate(() => {
+      const jp = document.querySelector("[data-flow-section='just-pulled']");
+      const d = document.createElement('div');
+      d.id = 'qa-grow';
+      d.style.height = '300px';
+      jp.appendChild(d);
+    });
+    await page.waitForTimeout(400);
+    const grown = await to(mid.y + 300, 800);
+    report(
+      'wp67-just-pulled-height-does-not-move-the-rise-' + size,
+      Math.abs(grown.lap.rise - mid.lap.rise) < 0.01 &&
+        Math.abs(grown.t.rise.end - rs.end - 300) < 1.5 &&
+        Math.abs(grown.t.lastTop - t.lastTop - 300) < 1.5,
+      `rise ${mid.lap.rise.toFixed(4)} before, ${grown.lap.rise.toFixed(4)} after +300 px of Just Pulled (scroll +300); rise end ${rs.end} to ${grown.t.rise.end}; Last top ${t.lastTop} to ${grown.t.lastTop}`,
+    );
+    await page.evaluate(() => document.getElementById('qa-grow')?.remove());
+    await page.waitForTimeout(400);
+    const t2 = (await lapState()).t;
+    // Return: everyone back
+    const ret = await to(t2.ret.start + (t2.ret.end - t2.ret.start) * 0.6, 900);
+    report(
+      'wp67-return-all-back-' + size,
+      ret.drawn.length >= 2 &&
+        ret.drawn.some((d) => d.id === chosen) &&
+        ret.lap?.ret > 0.5 &&
+        ret.lap?.ret < 0.7,
+      `return ${ret.lap?.ret?.toFixed(3)}; drawn ${ret.drawn.length}: ${ret.drawn.map((d) => d.id + '@' + d.o).join(', ')}; GPU ${MB(ret.gpu)} MB`,
+    );
+    // the seam: just above Last's top, then across it
+    const before = await to(t2.lastTop - 2, 1500);
+    const clip = await page.evaluate(() => {
+      const r = document
+        .querySelector('[data-stage-canvas]')
+        ?.getBoundingClientRect();
+      return r
+        ? { x: r.x, y: Math.max(0, r.y), width: r.width, height: r.height }
+        : null;
+    });
+    // the canvas alone: the row's own UI (which fades in from the wrap, by
+    // design) and the site chips are hidden for both pictures
+    const hideUi = () =>
+      page.evaluate(() => {
+        const st = document.createElement('style');
+        st.id = 'qa-hide-ui';
+        st.textContent =
+          '[data-stage-head],[data-stage-info],[data-stage-nav],[data-stage-label],[data-testid="free-pack-badge"],[data-telegram-banner]{visibility:hidden!important}';
+        document.head.appendChild(st);
+      });
+    await hideUi();
+    await page.waitForTimeout(100);
+    const pngA = await page.screenshot({ clip });
+    await page.evaluate((v) => window.scrollTo(0, v), t2.lastTop + 20);
+    await page.waitForTimeout(40);
+    const after = await lapState();
+    // the row at R0 once the lock has landed
+    await page.waitForTimeout(1500);
+    const pngB = await page.screenshot({ clip });
+    await page.evaluate(() => document.getElementById('qa-hide-ui')?.remove());
+    let diff = null;
+    try {
+      const { default: sharp } = await import('sharp');
+      const raw = async (b) =>
+        await sharp(b)
+          .removeAlpha()
+          .raw()
+          .toBuffer({ resolveWithObject: true });
+      const a = await raw(pngA);
+      const b = await raw(pngB);
+      let sum = 0;
+      let big = 0;
+      for (let i = 0; i < a.data.length; i++) {
+        const d = Math.abs(a.data[i] - b.data[i]);
+        sum += d;
+        if (d > 48) big++;
+      }
+      diff = { mean: sum / a.data.length, bigShare: big / a.data.length };
+    } catch (e) {
+      diff = { error: String(e) };
+    }
+    const fs = await import('node:fs');
+    fs.writeFileSync(`${OUT}/${size}-seam-before.png`, pngA);
+    fs.writeFileSync(`${OUT}/${size}-seam-after.png`, pngB);
+    /** The same packs, each within 2% of its offset and 0.01 in height and scale (idle bob, a 2 px scroll). */
+    const samePoses = (a, b) => {
+      if (a.drawn.length === 0 || a.drawn.length !== b.drawn.length)
+        return false;
+      return a.drawn.every((p) => {
+        const q = b.drawn.find((d) => d.id === p.id);
+        return (
+          !!q &&
+          Math.abs(p.x - q.x) <= 0.02 * Math.abs(p.x) + 0.005 &&
+          Math.abs(p.y - q.y) <= 0.01 &&
+          Math.abs(p.z - q.z) <= 0.01 &&
+          Math.abs(p.s - q.s) <= 0.01
+        );
+      });
+    };
+    const poses = (st) =>
+      st.drawn
+        .map((d) => [d.id, d.x, d.y, d.z, d.s].join(':'))
+        .sort()
+        .join(' ');
+    report(
+      'wp67-seam-no-jump-' + size,
+      before.lap?.ret >= 0.99 && !after.on && samePoses(before, after),
+      // the pixel figures compare the frame at Last with the row 1.5 s later
+      // (the idle bob and the foil move in between): kept for the record
+      `canvas Last vs the landed row: mean |d| ${diff?.mean?.toFixed?.(3)}, share > 48: ${diff?.bigShare?.toFixed?.(5)} ${diff?.error ?? ''}; drawn before [${poses(before)}] after [${poses(after)}]; scroll ${Math.round(before.y)} -> ${Math.round(after.y)}`,
+    );
+    const landed = await settle();
+    report(
+      'wp67-wrap-lands-on-the-row-' + size,
+      Math.abs(landed.y - t2.r0) < 1 &&
+        !landed.on &&
+        landed.path === PREVIEW &&
+        landed.len === len0 &&
+        Math.round(landed.track) === chosenIndex &&
+        landed.headOp === 1 &&
+        !landed.lapAttr,
+      `y ${Math.round(landed.y)} (R0 ${t2.r0}); focus ${landed.on}; address ${landed.path}; history ${landed.len} (start ${len0}); track ${landed.track} (chosen ${chosenIndex}); heading opacity ${landed.headOp}; GPU ${MB(landed.gpu)} MB`,
+    );
+    // the wheel is swallowed during the guard; after it one notch pages to Front
+    await to(t2.lastTop - 2, 900);
+    await page.evaluate((v) => window.scrollTo(0, v), t2.lastTop + 10);
+    await page.waitForTimeout(250);
+    if (s.cdp) await gesture(s, 1);
+    else {
+      await page.mouse.move(720, 450);
+      await page.mouse.wheel(0, 120);
+    }
+    const guard = await settle();
+    await gesture(s, 1);
+    await page.waitForTimeout(200);
+    const front = await settle();
+    report(
+      'wp67-guard-swallows-then-pages-to-front-' + size,
+      Math.abs(guard.y - t2.r0) < 1 &&
+        !guard.on &&
+        front.on &&
+        Math.abs(front.y - (front.t.rests[0] ?? -1)) < 1,
+      `a gesture 250 ms into the lock: y ${Math.round(guard.y)}, focus ${guard.on}; the next one: y ${Math.round(front.y)}, focus ${front.on} (Front ${front.t.rests[0]})`,
+    );
+    // lap two, with a different pick at the lineup
+    await page.keyboard.press('End');
+    await page.waitForTimeout(200);
+    await rest(page);
+    await page.waitForTimeout(700);
+    await page.keyboard.press('ArrowRight');
+    await page.waitForTimeout(1500);
+    const picked = await lapState();
+    await to(picked.t.exitEnd + 40, 600);
+    const t3 = (await lapState()).t;
+    await to(t3.lastTop - 2, 1200);
+    await to(t3.lastTop + 15, 100);
+    const lap2 = await settle();
+    report(
+      'wp67-two-laps-with-a-pick-' + size,
+      picked.index !== chosenIndex &&
+        Math.round(lap2.track) === picked.index &&
+        !lap2.on &&
+        Math.abs(lap2.y - t3.r0) < 1 &&
+        lap2.len === len0,
+      `picked ${picked.id} (index ${picked.index}, first lap ${chosenIndex}); after the second wrap: track ${lap2.track}, y ${Math.round(lap2.y)}, history ${lap2.len} (start ${len0})`,
+    );
+    // nothing happens on an upward gesture at the top
+    if (s.cdp) await swipe(s, 200, 300, 200, 650);
+    else {
+      await page.mouse.move(720, 450);
+      await page.mouse.wheel(0, -240);
+    }
+    await page.waitForTimeout(400);
+    const top = await settle();
+    report(
+      'wp67-up-at-the-top-does-nothing-' + size,
+      Math.abs(top.y - t3.r0) < 1 && !top.on && !top.busy,
+      `y ${Math.round(top.y)}, focus ${top.on}`,
+    );
+    // Home and Escape at the lineup: back to the row with the chosen pack
+    const homes = [];
+    for (const k of ['Home', 'Escape']) {
+      await page.keyboard.press('End');
+      await page.waitForTimeout(200);
+      await rest(page);
+      await page.waitForTimeout(600);
+      const at = await lapState();
+      await page.keyboard.press(k);
+      await page.waitForTimeout(200);
+      const back = await settle();
+      homes.push({ k, at, back });
+    }
+    report(
+      'wp67-home-and-escape-at-the-lineup-' + size,
+      homes.every(
+        (h) =>
+          Math.abs(h.back.y - h.at.t.r0) < 1 &&
+          !h.back.on &&
+          Math.round(h.back.track) === h.at.index &&
+          h.back.len === len0,
+      ),
+      homes
+        .map(
+          (h) =>
+            `${h.k}: from ${Math.round(h.at.y)} to ${Math.round(h.back.y)}, focus ${h.back.on}, track ${h.back.track} (chosen ${h.at.index}), history ${h.back.len}`,
+        )
+        .join('; '),
+    );
+    // free touch (phone): follow, glide, a tap during the glide, a diagonal
+    if (s.cdp) {
+      await page.keyboard.press('End');
+      await page.waitForTimeout(200);
+      await rest(page);
+      const tt = (await lapState()).t;
+      await to(tt.exitEnd + 200, 600);
+      const y0 = (await lapState()).y;
+      await swipe(s, 200, 650, 200, 350);
+      await page.waitForTimeout(80);
+      await tap(s, 200, 500);
+      await page.waitForTimeout(100);
+      const yA = (await lapState()).y;
+      await page.waitForTimeout(1200);
+      const yB = (await lapState()).y;
+      await swipe(s, 120, 650, 300, 400); // about 36 degrees from vertical
+      await page.waitForTimeout(1500);
+      const yC = (await lapState()).y;
+      report(
+        'wp67-free-touch-follows-and-a-tap-stops-the-glide-phone',
+        yA > y0 + 250 && Math.abs(yB - yA) < 2 && yC > yB + 100,
+        `start ${Math.round(y0)}; after a 300 px swipe and a tap 80 ms later ${Math.round(yA)}, 1.2 s on ${Math.round(yB)}; a diagonal swipe then ${Math.round(yC)}`,
+      );
+    }
+    report(
+      'errors-wp67-' + size,
+      page.errors.length === 0,
+      page.errors.join(' | '),
     );
     await s.ctx.close();
   }

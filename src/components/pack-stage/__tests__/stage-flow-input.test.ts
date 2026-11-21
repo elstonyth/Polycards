@@ -110,10 +110,32 @@ describe('flow input: touch', () => {
     expect(p.input.touchMove(200, 402, 0, 16)).toBe(false);
   });
 
-  it("a touch that starts in the free part is the browser's own", () => {
+  it("a vertical touch in the free part is the flow's: the page follows the finger 1:1; a sideways one stays the browser's", () => {
     const p = page();
     p.input.touchStart(200, 600, 9000, 0);
-    expect(p.input.touchMove(200, 500, 9000, 16)).toBe(false);
+    expect(p.input.touchMove(200, 500, 9000, 16)).toBe(true);
+    expect(p.input.follow()).toBe(9100);
+    expect(p.input.follow()).toBeNull(); // read once
+    p.input.touchEnd(9100, 32);
+    p.input.touchStart(200, 600, 9100, 100);
+    expect(p.input.touchMove(100, 598, 9100, 116)).toBe(false);
+    expect(p.input.follow()).toBeNull();
+  });
+
+  it('a free flick glides on after the release (sign * |v|^1.7)', () => {
+    const p = page();
+    let y = 9000;
+    p.input.touchStart(200, 600, y, 0);
+    p.input.frame(y, 0);
+    for (let i = 1; i <= 3; i++) {
+      p.input.touchMove(200, 600 - 32 * i, y, i * 16);
+      y = p.input.follow() ?? y;
+      p.input.frame(y, i * 16);
+    }
+    expect(y).toBe(9096);
+    p.input.touchEnd(y, 50);
+    const end = run(p.input, y, 64, 3000);
+    expect(end).toBeGreaterThan(9096 + 300);
   });
 });
 
@@ -227,6 +249,51 @@ describe('flow input: Closing to the free part', () => {
   });
 });
 
+describe('flow input: the wrap (plan 2.7)', () => {
+  const FULL = {
+    ...GEO,
+    telegram: { top: 11000, bottom: 12000 },
+    ret: { top: 12000, height: 1000 },
+    last: { top: 13000, height: 801 },
+  };
+
+  it('the geometry carries the rise, Return and Last into the table', () => {
+    const p = page();
+    p.input.measure(FULL, 0);
+    const t = p.input.table()!;
+    expect(t.rise).toEqual({ start: 11000 - 0.35 * 800, end: 12000 });
+    expect(t.ret).toEqual({ start: 12000, end: 13000 });
+    expect(t.lastTop).toBe(13000);
+  });
+
+  it('a scroll across Last wraps; the wrap frame says so; nothing is focused during the lock, however far it overshot', () => {
+    const p = page();
+    p.input.measure(FULL, 0);
+    p.input.frame(12990, 0);
+    const f = p.input.frame(13700, 16);
+    expect(f.wrap).toBe(0);
+    expect(f.lock).toBe('wrap');
+    expect(f.scrollTo).toBe(700);
+    expect(run(p.input, 700, 32, 1300)).toBe(0);
+    expect(p.calls).toEqual([]);
+  });
+
+  it('a gesture during the lock is swallowed and focuses nothing', () => {
+    const p = page();
+    p.input.measure(FULL, 0);
+    p.input.frame(12990, 0);
+    let y = p.input.frame(13030, 16).scrollTo!;
+    expect(p.input.wheel(100, 0, false, y, 100)).toBe(true);
+    p.input.touchStart(200, 600, y, 120);
+    p.input.touchMove(200, 400, y, 136);
+    p.input.touchEnd(y, 150);
+    expect(p.input.key('next', y, 160)).toBe('swallowed');
+    y = run(p.input, y, 32, 1400);
+    expect(y).toBe(0);
+    expect(p.calls).toEqual([]);
+  });
+});
+
 describe('flow input: a re-measure keeps P', () => {
   it('a page resting on a stop stays on that stop with a new panel height', () => {
     const p = page();
@@ -234,6 +301,75 @@ describe('flow input: a re-measure keeps P', () => {
     const y = run(p.input, 0, 16, 1600);
     expect(y).toBe(1000);
     expect(p.input.measure({ ...GEO, panel: 400 }, y)).toBe(500);
+  });
+
+  // the browser lays the shorter page out and clamps the scroll before the
+  // resize listener runs: the place comes from the last frame, not from it
+  const geoAt = (panel: number, k: number) => ({
+    ...GEO,
+    panel,
+    viewport: panel,
+    telegram: { top: 11000 * k, bottom: 12000 * k },
+    ret: { top: 12000 * k, height: 1000 * k },
+    last: { top: 13000 * k, height: 801 },
+    sections: [
+      { top: 9000 * k, height: 400 * k },
+      { top: 9400 * k, height: 1600 * k },
+      { top: 11000 * k, height: 1000 * k },
+      { top: 12000 * k, height: 1000 * k },
+      { top: 13000 * k, height: 801 },
+    ],
+  });
+
+  it('keeps the place of the last frame when the scroll handed in is already clamped (lineup, Closing)', () => {
+    for (const [stop, want] of [
+      [7000, 3500],
+      [6000, 3000],
+    ] as const) {
+      const p = page();
+      p.input.measure(geoAt(800, 1), 0);
+      p.input.goTo(stop / 1000, 0, 0);
+      const y = run(p.input, 0, 16, 1700);
+      expect(y).toBe(stop);
+      // rotated: half the panel; the browser already clamped the scroll
+      expect(p.input.measure(geoAt(400, 0.5), 2900)).toBe(want);
+    }
+  });
+
+  it('keeps the section under the middle in the free part, even when clamped, and writes it', () => {
+    const p = page();
+    p.input.measure(geoAt(800, 1), 0);
+    p.input.frame(9800, 0); // Just Pulled under the middle, at (10200 - 9400) / 1600
+    const y = p.input.measure(geoAt(400, 0.5), 4100);
+    expect(y).not.toBeNull();
+    expect(y! + 200).toBeCloseTo(4700 + 800 * 0.5, 6);
+  });
+
+  it('a content-only change (Just Pulled grows, same viewport and panel) leaves the free part where it is', () => {
+    const p = page();
+    p.input.measure(geoAt(800, 1), 0);
+    p.input.frame(9800, 0);
+    const grown = geoAt(800, 1);
+    grown.sections = grown.sections.map((s, i) =>
+      i === 1
+        ? { ...s, height: s.height + 300 }
+        : i > 1
+          ? { ...s, top: s.top + 300 }
+          : s,
+    );
+    expect(p.input.measure(grown, 9800)).toBeNull();
+  });
+
+  it('P makes the round trip across a re-measure in every zone (plan WP8)', () => {
+    for (const y0 of [0, 3000, 6000, 7000, 8000, 9800, 10900, 11500, 12500]) {
+      const p = page();
+      p.input.measure(geoAt(800, 1), 0);
+      p.input.frame(y0, 0);
+      const y1 = p.input.measure(geoAt(400, 0.5), y0 / 2) ?? y0 / 2;
+      p.input.frame(y1, 16);
+      const y2 = p.input.measure(geoAt(800, 1), y1) ?? y1;
+      expect(y2, String(y0)).toBeCloseTo(y0, 3);
+    }
   });
 });
 
@@ -357,6 +493,17 @@ describe('flow input: keys (plan 2.10)', () => {
     for (const k of ['next', 'prev', 'first', 'last', 'escape'] as const)
       expect(p.input.key(k, y, 2420)).toBe('swallowed');
     expect(run(p.input, y, 2416, 3600)).toBe(3000);
+  });
+
+  it("home and escape at the lineup go back to the row by the wrap's lock (1.2 s), no history of their own", () => {
+    for (const k of ['first', 'escape'] as const) {
+      const p = atStop(7);
+      expect(p.input.key(k, p.y, 2000)).toBe('moved');
+      const f = p.input.frame(p.y, 2016);
+      expect(f.lock).toBe('home');
+      expect(f.wrap).toBe(0);
+      expect(run(p.input, p.y, 2032, 2016 + 1216)).toBe(0);
+    }
   });
 
   it("in the free part every key is the browser's own", () => {

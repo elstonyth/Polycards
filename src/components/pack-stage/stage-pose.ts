@@ -188,7 +188,7 @@ export function poseAt(
   ctx: Readonly<ComposeCtx> = {},
 ): Pose {
   // the composed pose only while something composes (it checks the rest)
-  return ctx.compose && (st.spin > 0 || st.exit > 0 || st.focus > 0)
+  return ctx.compose && (st.spin > 0 || st.exit > 0 || st.focus > 0 || !!st.lap)
     ? ctx.compose(st, i, l, desktop, soldOut, ctx)
     : poseStep1(st, i, l, desktop, soldOut);
 }

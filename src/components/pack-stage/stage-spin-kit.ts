@@ -22,6 +22,7 @@ import type {
   FocusKey,
   SpinPanel,
   StageSpinKit,
+  StageLap,
   StageSpinSource,
   StageState,
 } from './contract';
@@ -41,6 +42,14 @@ import {
   flowLoadStart,
   type FlowInputFrame,
 } from './stage-flow-input';
+import {
+  LAP_END,
+  WRAP_UI_FADE_MS,
+  lapAt,
+  lapTrim,
+  returnProgress,
+  riseProgress,
+} from './stage-flow';
 import {
   HOLD_MAX_MS,
   createFocusLoad,
@@ -227,6 +236,22 @@ export type SpinControl = {
   stop(): void;
 };
 
+/** The element, or one above it in the page's sections, scrolls sideways. */
+function sideScroller(el: Element | null): boolean {
+  // only the page's own sections (the row under the spacers is not one)
+  if (!el?.closest('[data-flow-section]')) return false;
+  for (
+    let e: Element | null = el;
+    e && !e.hasAttribute('data-home-flow');
+    e = e.parentElement
+  ) {
+    if (e.scrollWidth <= e.clientWidth + 1) continue;
+    const o = getComputedStyle(e).overflowX;
+    if (o === 'auto' || o === 'scroll') return true;
+  }
+  return false;
+}
+
 /** A wheel delta in px, whatever unit the device reports. */
 function wheelPx(e: WheelEvent): number {
   if (e.deltaMode === 1) return e.deltaY * 16;
@@ -315,6 +340,9 @@ export function startSpin(host: SpinHost): SpinControl {
     });
     if (on !== was) {
       src.flow.toggleAttribute('data-flow-on', on);
+      // Return and Last take their height with the flow (plan 2.6, 2.7)
+      src.flow.toggleAttribute('data-flow-return', on);
+      src.flow.toggleAttribute('data-flow-last', on);
       if (!on) clearPast(src);
       restore(on);
     }
@@ -328,8 +356,39 @@ export function startSpin(host: SpinHost): SpinControl {
       ex && ex.height > 0
         ? { top: ex.top + window.scrollY - top, height: ex.height }
         : null;
+    // the rise, Return and Last, in the same origin (scroll under the header)
+    const rectOf = (el: HTMLElement | null) => {
+      const r = on && el ? el.getBoundingClientRect() : null;
+      return r ? { top: r.top + window.scrollY - top, height: r.height } : null;
+    };
+    tgEl = src.flow.querySelector<HTMLElement>(
+      "[data-flow-section='telegram']",
+    );
+    retEl = src.flow.querySelector<HTMLElement>("[data-flow-spacer='return']");
+    const tg = rectOf(tgEl);
     const keep = input.measure(
-      on ? { top: r0, panel, viewport: window.innerHeight, exit } : null,
+      on
+        ? {
+            top: r0,
+            panel,
+            viewport: window.innerHeight,
+            exit,
+            telegram: tg ? { top: tg.top, bottom: tg.top + tg.height } : null,
+            ret: rectOf(retEl),
+            last: rectOf(
+              src.flow.querySelector<HTMLElement>("[data-flow-spacer='last']"),
+            ),
+            // the free part's sections, in page order (a re-measure keeps
+            // the one under the viewport's middle)
+            sections: Array.from(
+              src.flow.querySelectorAll<HTMLElement>(
+                "[data-flow-section],[data-flow-spacer='return'],[data-flow-spacer='last']",
+              ),
+            )
+              .map(rectOf)
+              .filter((r): r is { top: number; height: number } => r !== null),
+          }
+        : null,
       window.scrollY,
     );
     if (keep !== null) window.scrollTo(0, keep);
@@ -348,14 +407,73 @@ export function startSpin(host: SpinHost): SpinControl {
   let shownPast = false;
   let hidden = false;
   let inert = false;
-  let shown = true;
+  let lapOn = false;
+  /** The Telegram section and the Return spacer: the lap reads their live rects. */
+  let tgEl: HTMLElement | null = null;
+  let retEl: HTMLElement | null = null;
+  /** The rise and the return from the live rects (viewport under the header). */
+  const liveLap = () => {
+    const top = headerHeight();
+    const vh = window.innerHeight;
+    const a = tgEl?.getBoundingClientRect();
+    const b = retEl?.getBoundingClientRect();
+    return {
+      rise: a ? riseProgress(a.top - top, a.bottom - top, vh) : 0,
+      ret: b ? returnProgress(b.top - top, b.height) : 0,
+    };
+  };
+  /** The lap's state in the stage (the runtime and the tiles redraw on it). */
+  const setLap = (next: StageLap | null) => {
+    const cur = stage.state.lap ?? null;
+    if (
+      cur === next ||
+      (cur &&
+        next &&
+        cur.rise === next.rise &&
+        cur.ret === next.ret &&
+        cur.free === next.free)
+    )
+      return;
+    stage.state.lap = next;
+    stage.wake();
+    if (focus) paintRow();
+  };
+  /** The Home lock from the lineup: the lineup unforms into the row with the scroll. */
+  const homeSpin = (y: number): number => {
+    const t = input.table();
+    if (!t || !(t.rl > t.r0)) return 0;
+    return Math.min(1, Math.max(0, (y - t.r0) / (t.rl - t.r0)));
+  };
   const setPanel = (f: FlowInputFrame, y: number) => {
     const s = src;
     const t = input.table();
     if (!s || !t) return;
     const on = !!focus?.active();
-    const sp = on ? f.handoff : 0;
-    const ex = on ? f.exit : 0;
+    const p = panelState(
+      on ? f.handoff : 0,
+      y,
+      t.exitEnd,
+      t.rise?.start ?? null,
+    );
+    // the wrap's lock holds the end of Return (the row at rest exactly), so
+    // packs that come back during it fade in rather than cut in
+    const lap =
+      f.lock === 'wrap'
+        ? LAP_END
+        : p.free || p.lap
+          ? lapAt(f.at, liveLap(), p.free && lapTrim(y, t, window.innerHeight))
+          : null;
+    setLap(lap);
+    if (p.lap !== lapOn) {
+      lapOn = p.lap;
+      s.flow.toggleAttribute('data-flow-lap', p.lap);
+    }
+    // the free span keeps the lineup's values (its residency, no focused
+    // back); the rise, Return and Last are the row's
+    const rowValues = !lap || lap.free;
+    const sp =
+      f.lock === 'home' ? homeSpin(y) : on && rowValues ? f.handoff : 0;
+    const ex = on && rowValues ? f.exit : 0;
     if (sp !== shownSpin) {
       shownSpin = sp;
       stage.values.spin.set(sp);
@@ -369,24 +487,65 @@ export function startSpin(host: SpinHost): SpinControl {
       shownPast = past;
       s.flow.toggleAttribute('data-flow-past', past);
     }
-    const p = panelState(sp, y, t.exitEnd);
     if (p.free !== hidden) {
       hidden = p.free;
       s.flow.toggleAttribute('data-flow-free', p.free);
     }
-    if (p.inert !== inert) {
-      inert = p.inert;
-      s.wrap.inert = p.inert;
+    // nothing in the panel takes a tap while a lock runs
+    const isInert = p.inert || sp > 0 || !!f.lock;
+    if (isInert !== inert) {
+      inert = isInert;
+      s.wrap.inert = isInert;
     }
-    if (p.shown !== shown) {
-      shown = p.shown;
-      stage.show?.(p.shown);
+  };
+  /**
+   * The lap ends (plan 2.7): on the wrap frame, or Home or Escape at the
+   * lineup. The row shows the chosen pack, the focus ends where it is (no
+   * move, no history: past the details the address is the base path
+   * already), and the row's UI fades back in over 0.35 s.
+   */
+  let wrapFade: number | null = null;
+  /** The row UI fades back in over 0.35 s (data-flow-wrap, for that while). */
+  const fadeUiIn = (s: StageSpinSource) => {
+    s.flow.removeAttribute('data-flow-home');
+    s.flow.setAttribute('data-flow-wrap', '');
+    if (wrapFade !== null) window.clearTimeout(wrapFade);
+    wrapFade = window.setTimeout(() => {
+      wrapFade = null;
+      s.flow.removeAttribute('data-flow-wrap');
+    }, WRAP_UI_FADE_MS + 50);
+  };
+  /** The lock the last frame ran (its end brings Home's row UI back). */
+  let lockWas: FlowInputFrame['lock'] = null;
+  const endLap = (kind: FlowInputFrame['lock']) => {
+    const s = src;
+    if (!s) return;
+    // the pack the lap drew (round(track)), the chosen one
+    const index = centre();
+    setLap(kind === 'wrap' ? LAP_END : null);
+    if (lapOn) {
+      lapOn = false;
+      s.flow.removeAttribute('data-flow-lap');
     }
+    const r = host.row?.();
+    if (r && index >= 0 && index < r.packs.length) {
+      if (r.track.get() !== index) r.track.set(index);
+      r.go(index);
+    }
+    focus?.release();
+    // the wrap: the row UI fades in from the wrap; Home: once the lineup
+    // has unformed into the row (the lock's end)
+    if (kind === 'home') s.flow.setAttribute('data-flow-home', '');
+    else fadeUiIn(s);
   };
   /** Back to the panel as the row shows it (the flow off or unbound). */
   const clearPast = (s: StageSpinSource) => {
     s.flow.removeAttribute('data-flow-free');
     s.flow.removeAttribute('data-flow-past');
+    s.flow.removeAttribute('data-flow-lap');
+    s.flow.removeAttribute('data-flow-home');
+    lapOn = false;
+    setLap(null);
     s.wrap.inert = false;
     shownPast = false;
     if (shownSpin !== 0) stage.values.spin.set(0);
@@ -395,10 +554,6 @@ export function startSpin(host: SpinHost): SpinControl {
     shownExit = 0;
     hidden = false;
     inert = false;
-    if (!shown) {
-      shown = true;
-      stage.show?.(true);
-    }
   };
 
   // Only gestures inside the flow (or on the bare page or the site header)
@@ -428,6 +583,10 @@ export function startSpin(host: SpinHost): SpinControl {
     if (f.line) moveRow(f.line.track, f.line.moving ? null : f.line.index);
     if (f.scrollTo !== null && Math.abs(f.scrollTo - window.scrollY) >= 0.5)
       window.scrollTo(0, f.scrollTo);
+    // the wrap's (or Home's) first frame: the row comes back before it paints
+    if (f.wrap === 0) endLap(f.lock);
+    if (lockWas === 'home' && !f.lock && src) fadeUiIn(src);
+    lockWas = f.lock ?? null;
     const y = window.scrollY;
     const p =
       f.at === null
@@ -530,10 +689,13 @@ export function startSpin(host: SpinHost): SpinControl {
     const ours = flowOn() && !!p && armed(e.target);
     if (ours && !focus) void loadFocus();
     const el = e.target instanceof Element ? e.target : null;
-    // a sideways touch on the Top Hits strip, or on the row at rest, is theirs
+    // a sideways touch on the Top Hits strip, or on the row at rest, is
+    // theirs; a touch on a sideways scroller in the page below (the live
+    // ticker) is the browser's whichever way it goes
     const strip =
       !!el?.closest('[data-focus-strip]') ||
-      (!focus?.active() && !!el?.closest('[data-stage-viewport]'));
+      (!focus?.active() && !!el?.closest('[data-stage-viewport]')) ||
+      sideScroller(el);
     const x = p?.clientX ?? 0;
     const y = p?.clientY ?? 0;
     if (
@@ -552,6 +714,12 @@ export function startSpin(host: SpinHost): SpinControl {
       e.cancelable
     )
       e.preventDefault();
+    // the free part: the page follows the finger
+    const to = input.follow();
+    if (to !== null) {
+      window.scrollTo(0, to);
+      wake();
+    }
   };
   const onTouchEnd = () => {
     if (touch.end(window.scrollY, now())) {
@@ -869,6 +1037,9 @@ export function startSpin(host: SpinHost): SpinControl {
     if (!next) restore(false);
     if (src) {
       src.flow.removeAttribute('data-flow-on');
+      src.flow.removeAttribute('data-flow-return');
+      src.flow.removeAttribute('data-flow-last');
+      src.flow.removeAttribute('data-flow-wrap');
       clearPast(src);
     }
     src = next;
@@ -923,7 +1094,7 @@ export function startSpin(host: SpinHost): SpinControl {
       busy: input.busy(),
       focusFailed: fload.failed(),
       inert,
-      shown,
+      lap: stage.state.lap ?? null,
       line: input.lineState(),
     });
   }
@@ -933,6 +1104,7 @@ export function startSpin(host: SpinHost): SpinControl {
     wake,
     stop() {
       clearTimeout(idleLoad);
+      if (wrapFade !== null) window.clearTimeout(wrapFade);
       fload.stop();
       focus?.stop();
       window.removeEventListener('keydown', onKey);

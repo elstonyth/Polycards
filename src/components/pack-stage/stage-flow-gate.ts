@@ -207,17 +207,21 @@ export function createFocusLoad<T>(d: {
 
 /**
  * The panel past Closing, from the hand-off's progress (0 at Closing, 1 at
- * the lineup) and the scroll: from the hand-off's first frame the panel
- * takes no taps (Closing's controls are leaving with their text); the
- * lineup and its exit are drawn; the free part hides the panel, and the 3D
- * is not drawn there (it sleeps and, after a while, lets its packs go).
+ * the lineup), the scroll and where the rise starts (null: not measured):
+ * from the hand-off's first frame the panel takes no taps (Closing's
+ * controls are leaving with their text); the lineup and its exit are drawn;
+ * the free span hides the panel (nothing is drawn there; the 3D keeps the
+ * chosen pack, full-flow plan 1.1a); from the rise on (`lap`: the rise,
+ * Return and Last) it shows again, still taking no taps.
  */
 export function panelState(
   handoff: number,
   scrollY: number,
   exitEnd: number,
-): { inert: boolean; free: boolean; shown: boolean } {
+  riseStart: number | null = null,
+): { inert: boolean; free: boolean; lap: boolean } {
   const h = Math.round(handoff * 1000) / 1000;
-  const free = scrollY >= exitEnd - 0.5;
-  return { inert: free || h > 0, free, shown: !free };
+  const below = scrollY >= exitEnd - 0.5;
+  const lap = below && riseStart !== null && scrollY >= riseStart;
+  return { inert: below || h > 0, free: below && !lap, lap };
 }

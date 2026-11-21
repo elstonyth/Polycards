@@ -1157,18 +1157,27 @@ async function checkLoader(label, profile) {
     q.goneAt !== null && q.goneAt < 3700,
     `attribute removed ${q.goneAt?.toFixed(0)} ms from navigation (cap 3000 + 400 exit + 300 margin), ${(q.goneAt - (ttfb ?? 0)).toFixed(0)} ms after the server answered${softwareGpu ? ' (software renderer: the main thread is far slower than a real device)' : ''}`,
   );
-  await page.goto(stageUrl(forced()), { waitUntil: 'load' });
+  // every full document load shows it (owner, 2026-11-21): a reload in the
+  // same tab too; under reduced motion never
+  await page.reload({ waitUntil: 'commit' });
   await sleep(300);
   const again = await page.evaluate(() =>
     document.documentElement.hasAttribute('data-stage-loader'),
   );
-  const overlay = await page.locator('[data-brand-loader]').count();
-  pass(
-    `loader-second-${label}`,
-    !again && overlay === 0,
-    `second visit: attribute ${again}, loader overlay ${overlay}`,
-  );
+  const overlay = await page.locator('[data-stage-loader-shell]').count();
   await ctx.close();
+  const rm = await newPage(profile, { reducedMotion: 'reduce' });
+  await rm.page.goto(stageUrl(forced()), { waitUntil: 'load' });
+  await sleep(300);
+  const reduced = await rm.page.evaluate(() =>
+    document.documentElement.hasAttribute('data-stage-loader'),
+  );
+  await rm.ctx.close();
+  pass(
+    `loader-every-load-${label}`,
+    again && overlay > 0 && !reduced,
+    `reload in the same tab: attribute ${again}, loader shell ${overlay}; reduced motion: attribute ${reduced}`,
+  );
 }
 
 /** Every Pokemon pack, centred in turn, is drawn live by the canvas. */

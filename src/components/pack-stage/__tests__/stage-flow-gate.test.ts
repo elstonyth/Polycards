@@ -301,13 +301,13 @@ describe('panel state past Closing (review findings 4 and 5; work package 4)', (
     expect(panelState(0, 6000, 9000)).toEqual({
       inert: false,
       free: false,
-      shown: true,
+      lap: false,
     });
     // a sub-pixel scroll off the rest is still the rest
     expect(panelState(0.0002, 6000.4, 9000)).toEqual({
       inert: false,
       free: false,
-      shown: true,
+      lap: false,
     });
   });
 
@@ -315,23 +315,42 @@ describe('panel state past Closing (review findings 4 and 5; work package 4)', (
     expect(panelState(0.4, 6800, 9000)).toEqual({
       inert: true,
       free: false,
-      shown: true,
+      lap: false,
     });
     // the lineup at rest, and its exit
     expect(panelState(1, 7000, 9000)).toEqual({
       inert: true,
       free: false,
-      shown: true,
+      lap: false,
     });
     expect(panelState(1, 8900, 9000)).toEqual({
       inert: true,
       free: false,
-      shown: true,
+      lap: false,
     });
     expect(panelState(1, 9000, 9000)).toEqual({
       inert: true,
       free: true,
-      shown: false,
+      lap: false,
+    });
+  });
+
+  it('the panel shows again from the rise on (the lap), still taking no taps; the 3D is never sent away (plan 1.1a: trimmed, not freed)', () => {
+    // free span: 9000 to the rise start at 10720
+    expect(panelState(1, 10000, 9000, 10720)).toEqual({
+      inert: true,
+      free: true,
+      lap: false,
+    });
+    expect(panelState(1, 10720, 9000, 10720)).toEqual({
+      inert: true,
+      free: false,
+      lap: true,
+    });
+    expect(panelState(0, 13500, 9000, 10720)).toEqual({
+      inert: true,
+      free: false,
+      lap: true,
     });
   });
 
@@ -339,7 +358,7 @@ describe('panel state past Closing (review findings 4 and 5; work package 4)', (
     expect(panelState(0, 9000, 9000)).toEqual({
       inert: true,
       free: true,
-      shown: false,
+      lap: false,
     });
   });
 });

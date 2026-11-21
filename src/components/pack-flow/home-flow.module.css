@@ -34,6 +34,12 @@
   height: calc(100lvh + 1px);
 }
 
+/* While the flow runs the page has no rubber band and no pull-to-refresh at
+   its top: touch in the free part is the flow's own (full-flow plan 2.5). */
+:global(html):has(:global([data-home-flow][data-flow-on]) .spacer) {
+  overscroll-behavior-y: none;
+}
+
 /* ---- One footer: the copy inside the Telegram section ------------------ */
 
 /* The layout renders the site footer as a child of <body>; on this page the

@@ -53,6 +53,17 @@ export function residencyConfig(desktop: boolean): Readonly<ResidencyConfig> {
   return desktop ? RESIDENCY_DESKTOP : RESIDENCY_PHONE;
 }
 
+/**
+ * The free span (full-flow plan 1.1a): nothing is drawn, and only the chosen
+ * pack (the track) is kept, so Just Pulled's pictures have the room; the
+ * others are staged again with the rise.
+ */
+export function lapResidency(
+  c: Readonly<ResidencyConfig>,
+): Readonly<ResidencyConfig> {
+  return { ...c, reach: 0, disposeAt: 0, maxResident: 1 };
+}
+
 /** Whole-page GPU caps from the plan's table (decimal MB, so on the safe side). */
 export const GPU_CAP_PHONE_BYTES = 40e6;
 export const GPU_CAP_DESKTOP_BYTES = 96e6;

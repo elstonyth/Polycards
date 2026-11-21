@@ -99,6 +99,23 @@ export type StageState = {
    * otherwise). The runtime and the tiles read the same declaration.
    */
   focusOn?: StageFocusOn | null;
+  /**
+   * The end of the lap (full-flow plan 2.6), written by the spin chunk below
+   * the lineup's exit. Absent: none.
+   */
+  lap?: StageLap | null;
+};
+/**
+ * `rise` 0..1: the chosen pack (`round(track)`) from one panel below to its
+ * rest; `ret` 0..1: the others back from 5 row steps to 1, fading in;
+ * `free`: nothing drawn; `trim`: only the chosen pack is kept resident (the
+ * free span away from its ends, full-flow plan 1.1a).
+ */
+export type StageLap = {
+  rise: number;
+  ret: number;
+  free: boolean;
+  trim: boolean;
 };
 export type StageLayout = {
   cx: number;

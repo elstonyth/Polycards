@@ -63,6 +63,7 @@ import {
   nextPromotion,
   planResidency,
   promotionPending,
+  lapResidency,
   residencyConfig,
   textureBudgetBytes,
   textureBytes,
@@ -319,7 +320,7 @@ export function createStageRuntime(
   let inflight = 0;
   let uploadedBytes = 0;
   let needsDraw = true;
-  const STATE_KEYS = 10;
+  const STATE_KEYS = 13;
   const lastState = new Float64Array(STATE_KEYS).fill(Number.NaN);
   let lastLive: string[] = [];
   const seenShared = new Set<THREE.Texture>();
@@ -641,6 +642,7 @@ export function createStageRuntime(
     now: number,
     spinRow = false,
     promote = !spinRow,
+    only = false,
   ) => {
     if (slots.length === 0) return;
     const n = Math.max(rowCount, slots.length);
@@ -656,15 +658,17 @@ export function createStageRuntime(
     const plan = planResidency({
       indices: slots.filter((s) => !s.halfFailed).map((s) => wrapped(s.index)),
       track,
-      direction: spinRow ? 0 : (direction?.dir ?? 0),
-      config: spinRow
-        ? {
-            ...config,
-            reach,
-            disposeAt: reach + 1,
-            maxResident: Math.max(config.maxResident, slots.length),
-          }
-        : config,
+      direction: spinRow || only ? 0 : (direction?.dir ?? 0),
+      config: only
+        ? lapResidency(config)
+        : spinRow
+          ? {
+              ...config,
+              reach,
+              disposeAt: reach + 1,
+              maxResident: Math.max(config.maxResident, slots.length),
+            }
+          : config,
       promote: promote ? promotion.index : null,
       // A prefetch for the coming list holds its share of the budget.
       budgetBytes: Math.max(0, budget() - stagedBytes() - focusBackBytes()),
@@ -1047,6 +1051,9 @@ export function createStageRuntime(
       s.turn,
       s.spin,
       s.exit,
+      s.lap ? s.lap.rise : -1,
+      s.lap ? s.lap.ret : -1,
+      (s.lap?.free ? 1 : 0) + (s.lap?.trim ? 2 : 0),
     ];
     let changed = false;
     for (let i = 0; i < STATE_KEYS; i++) {
@@ -1070,20 +1077,29 @@ export function createStageRuntime(
       direction = direction
         ? nextDirection(direction, track)
         : initialDirection(track);
-      const fo = s.focus > 0 ? (s.focusOn ?? null) : null;
+      // the end of the lap (full-flow plan 2.6): the row at rest, no focus
+      // and no lineup (rise, Return, Last, the wrap's lock); the free span
+      // draws nothing
+      // and keeps the lineup's own residency, trimmed to the chosen pack
+      // away from its ends (lap.trim)
+      const lap = s.lap ?? null;
+      const rowLap = lap !== null && !lap.free;
+      const fo = !rowLap && s.focus > 0 ? (s.focusOn ?? null) : null;
       // the row (Ciao's packshot), or the focused pack's hand-off into the
       // lineup and its exit (full-flow plan 2.4): the row's residency and
       // repeats. Up to Closing + 0.5 the focused pack keeps its back and its
       // promoted front; past it both are let go for the lineup's fronts.
-      const spinRow = s.spin > 0 || s.exit > 0;
+      const spinRow = !rowLap && (s.spin > 0 || s.exit > 0);
       // the row's residency from the rest on Closing on, so no lineup front
       // is uploaded mid-move (it would pop in at the fade it had reached)
-      const rowPlan = lineupResident({
-        focus: s.focus,
-        stops: fo?.ctx.keys.length ?? 0,
-        spin: s.spin,
-        exit: s.exit,
-      });
+      const rowPlan =
+        !rowLap &&
+        lineupResident({
+          focus: s.focus,
+          stops: fo?.ctx.keys.length ?? 0,
+          spin: s.spin,
+          exit: s.exit,
+        });
       const keepFocus = fo !== null && focusBackWanted(s.spin) && !(s.exit > 0);
       // the focused pack's stops reach the whole panel too
       const wide = spinRow || fo !== null;
@@ -1096,9 +1112,17 @@ export function createStageRuntime(
         tier === 'full' &&
         pixelRatio >= PROMOTE_MIN_DPR &&
         !switching &&
+        !lap?.trim &&
         (!rowPlan || keepFocus);
       promotion = nextPromotion(promotion, track, now, promoteOn);
-      if (!booting) applyPlan(track, now, rowPlan, !rowPlan || keepFocus);
+      if (!booting)
+        applyPlan(
+          track,
+          now,
+          rowPlan,
+          (!rowPlan || keepFocus) && !lap?.trim,
+          !!lap?.trim,
+        );
       const next = booting ? null : nextUpload(track, rowPlan);
       if (next) upload(next);
 
@@ -1168,8 +1192,11 @@ export function createStageRuntime(
             since = now;
             firstShown.set(shown, since);
           }
+          // and in the lap (the rise, Return, the wrap's lock), a pack staged
+          // again after the free span fades in beside the chosen one
           const appear =
-            spinRow && fo !== null && slot.index !== fo.ctx.index
+            (spinRow && fo !== null && slot.index !== fo.ctx.index) ||
+            (rowLap && slot.index !== Math.round(track))
               ? lineupAppear(now - since)
               : 1;
           if (appear < 1) appearing = true;

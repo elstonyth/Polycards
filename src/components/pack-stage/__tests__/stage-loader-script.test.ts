@@ -117,10 +117,10 @@ describe('stage loader pre-paint script', () => {
     );
   });
 
-  it('shows it once per session', () => {
+  it('shows it on every document load: a refresh or a second open in the same session too (owner, 2026-11-21)', () => {
     const r = run(script, { store: { [BRAND_LOADER_SESSION_KEY]: '1' } });
-    expect(r.shown).toBe(false);
-    expect(r.styles).toEqual([]);
+    expect(r.shown).toBe(true);
+    expect(r.styles).toHaveLength(1);
   });
 
   it('skips when 3D is not predicted, without spending the session', () => {
@@ -159,10 +159,11 @@ describe('stage loader pre-paint script', () => {
     expect(
       run(script, { search: '?loader=always', store: 'throws' }).shown,
     ).toBe(false);
+    // an unknown value is no override: the usual checks decide
     expect(
       run(script, {
         search: '?loader=alwaysx',
-        store: { [BRAND_LOADER_SESSION_KEY]: '1' },
+        reducedMotion: true,
       }).shown,
     ).toBe(false);
   });

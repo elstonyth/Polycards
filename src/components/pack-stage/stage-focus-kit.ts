@@ -165,6 +165,12 @@ export type FocusRun = {
   pick(index: number): boolean;
   /** "All packs" (and Escape, Home, browser Back); nothing past the details. */
   leave(fromHistory?: boolean): void;
+  /**
+   * The lap ends (the wrap, or Home and Escape at the lineup): the focus ends
+   * where it is, with no move and no history step (past the details the
+   * address already shows the base path).
+   */
+  release(): void;
   /** One frame; true when at rest. */
   frame(now: number, f: FocusFrame): boolean;
   /** The page shows a focus entry of ours (Back from the reel, Forward): focus that pack. */
@@ -497,6 +503,9 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
         d.loop();
       };
       setTimeout(home, LEAVE_FADE_MS);
+    },
+    release() {
+      if (on) end();
     },
     frame(t, f) {
       if (!on) return true;

@@ -12,6 +12,10 @@ import {
   flowStops,
   flowTable,
   flowTerms,
+  freeAnchor,
+  freeAnchorY,
+  lapAt,
+  lapTrim,
   returnProgress,
   riseProgress,
   spreadAt,
@@ -418,7 +422,10 @@ describe('stage flow: the wrap', () => {
     expect(wrapTarget(12990, 13030, 13000)).toBe(30);
     expect(wrapTarget(12990, 13000, 13000)).toBe(0);
     expect(wrapTarget(13030, 12990, 13000)).toBeNull(); // up
-    expect(wrapTarget(13010, 13050, 13000)).toBeNull(); // already below
+    // already inside Last (a re-measure moved its top above a resting
+    // page): the next downward movement wraps, keeping only this movement
+    expect(wrapTarget(13010, 13050, 13000)).toBe(40);
+    expect(wrapTarget(13300, 13310, 13000)).toBe(10);
     expect(wrapTarget(12000, 12500, 13000)).toBeNull(); // not reached
     expect(wrapTarget(13000, 13000, 13000)).toBeNull(); // no movement
     expect(wrapTarget(12990, 13030, null)).toBeNull(); // no Last yet
@@ -438,5 +445,98 @@ describe('stage flow: the wrap', () => {
     expect(wrapUiOpacity(175)).toBeCloseTo(0.5, 9);
     expect(wrapUiOpacity(350)).toBe(1);
     expect(wrapUiOpacity(-10)).toBe(0);
+  });
+});
+
+describe('stage flow: the lap at a flow position (plan 2.6)', () => {
+  const live = { rise: 0.4, ret: 0.7 };
+  it('nothing in the paged part or the exit; nothing drawn in free; then the live rise and return; Last holds the end', () => {
+    expect(lapAt(null, live, false)).toBeNull();
+    expect(lapAt({ zone: 'paged', p: 7 }, live, false)).toBeNull();
+    expect(
+      lapAt({ zone: 'free', span: 'exit', t: 0.5 }, live, false),
+    ).toBeNull();
+    expect(lapAt({ zone: 'free', span: 'free', t: 0.5 }, live, true)).toEqual({
+      rise: 0,
+      ret: 0,
+      free: true,
+      trim: true,
+    });
+    expect(lapAt({ zone: 'free', span: 'free', t: 0.9 }, live, false)).toEqual({
+      rise: 0,
+      ret: 0,
+      free: true,
+      trim: false,
+    });
+    expect(lapAt({ zone: 'free', span: 'rise', t: 0.1 }, live, true)).toEqual({
+      rise: 0.4,
+      ret: 0,
+      free: false,
+      trim: false,
+    });
+    expect(lapAt({ zone: 'free', span: 'ret', t: 0.1 }, live, false)).toEqual({
+      rise: 1,
+      ret: 0.7,
+      free: false,
+      trim: false,
+    });
+    expect(lapAt({ zone: 'free', span: 'last', t: 0 }, live, false)).toEqual({
+      rise: 1,
+      ret: 1,
+      free: false,
+      trim: false,
+    });
+  });
+
+  it('only the chosen pack is kept from a quarter viewport past the exit end to a quarter viewport before the rise, so both ends find the packs loaded', () => {
+    const t = table(); // exit end 9000, rise start 10720, viewport 800
+    expect(lapTrim(9199, t, 800)).toBe(false);
+    expect(lapTrim(9200, t, 800)).toBe(true);
+    expect(lapTrim(10519, t, 800)).toBe(true);
+    expect(lapTrim(10520, t, 800)).toBe(false);
+    expect(lapTrim(12500, t, 800)).toBe(false);
+    // no measured rise: trimmed on from a quarter viewport past the exit end
+    expect(lapTrim(20000, table({ telegram: null }), 800)).toBe(true);
+    // a free span shorter than both margins: never trimmed
+    expect(
+      lapTrim(9150, table({ telegram: { top: 9600, bottom: 10600 } }), 800),
+    ).toBe(false);
+  });
+});
+
+describe('stage flow: the free part kept across a re-measure (rotation, plan 2.9 fault 3)', () => {
+  // sections in document scroll px: opening, Just Pulled, Telegram, Return, Last
+  const tall = [
+    { top: 9000, height: 400 },
+    { top: 9400, height: 1600 },
+    { top: 11000, height: 1000 },
+    { top: 12000, height: 1000 },
+    { top: 13000, height: 801 },
+  ];
+  it('finds the section under the viewport middle and the share of it there', () => {
+    expect(freeAnchor(9800, tall, 800)).toEqual({
+      i: 1,
+      frac: (10200 - 9400) / 1600,
+    });
+    expect(freeAnchor(8000, tall, 800)).toBeNull(); // above the first
+    expect(freeAnchor(14000, tall, 800)).toEqual({ i: 4, frac: 1 });
+  });
+  it('puts the same share of the same section under the middle of the new viewport', () => {
+    // turned: the sections reflow shorter and the viewport is lower
+    const wide = [
+      { top: 5000, height: 300 },
+      { top: 5300, height: 900 },
+      { top: 6200, height: 700 },
+      { top: 6900, height: 500 },
+      { top: 7400, height: 391 },
+    ];
+    const a = freeAnchor(9800, tall, 800)!;
+    const y = freeAnchorY(a, wide, 390);
+    expect(y + 195).toBeCloseTo(5300 + 900 * a.frac, 6);
+    // and back
+    expect(freeAnchorY(freeAnchor(y, wide, 390)!, tall, 800)).toBeCloseTo(
+      9800,
+      6,
+    );
   });
 });

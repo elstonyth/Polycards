@@ -17,6 +17,7 @@
  * from a page height); a caller keeps P across a re-measure with
  * `flowAt` on the old table and `flowPosition` on the new one.
  */
+import type { StageLap } from './contract';
 import { power1InOut } from './stage-focus';
 import { easeOutCubic } from './stage-spin-driver';
 import { clamp01 } from './stage-spin-math';
@@ -394,22 +395,108 @@ export function lineupAppear(elapsed: number): number {
   return clamp01(elapsed / LINEUP_APPEAR_MS);
 }
 
+/** A section of the free part, in document scroll pixels. */
+export type FlowSection = { top: number; height: number };
+
+/**
+ * The free part's place for a re-measure (plan 2.9, fault 3): the section
+ * under the viewport's middle and the share of it there. Null above the
+ * first section; past the last, its end.
+ */
+export function freeAnchor(
+  y: number,
+  sections: readonly FlowSection[],
+  viewport: number,
+): { i: number; frac: number } | null {
+  const mid = y + Math.max(0, viewport) / 2;
+  const n = sections.length;
+  if (n === 0 || mid < sections[0]!.top) return null;
+  for (let i = 0; i < n; i++) {
+    const s = sections[i]!;
+    if (mid < s.top + s.height || i === n - 1)
+      return { i, frac: s.height > 0 ? clamp01((mid - s.top) / s.height) : 0 };
+  }
+  return null;
+}
+
+/** The scroll that puts the same share of the same section under the middle. */
+export function freeAnchorY(
+  a: { i: number; frac: number },
+  sections: readonly FlowSection[],
+  viewport: number,
+): number {
+  const s = sections[Math.min(a.i, sections.length - 1)];
+  if (!s) return 0;
+  return s.top + s.height * a.frac - Math.max(0, viewport) / 2;
+}
+
 /** The others' row spacing at progress x: 5 row steps falling to 1. */
 export function spreadAt(x: number): number {
   return FLOW_SPREAD_FROM + (FLOW_SPREAD_TO - FLOW_SPREAD_FROM) * clamp01(x);
 }
 
 /**
- * The wrap: only when the scroll crosses Last's top going down (by any
- * means); the target keeps the overshoot. Null: no wrap.
+ * The wrap: a downward movement (by any means) that ends at or below Last's
+ * top; the result is the overshoot past the line, never more than this
+ * movement (a page a re-measure left inside Last wraps on its next movement
+ * down, keeping only that movement). Null: no wrap.
  */
 export function wrapTarget(
   prevY: number,
   scrollY: number,
   lastTop: number | null,
 ): number | null {
-  if (lastTop === null) return null;
-  return prevY < lastTop && scrollY >= lastTop ? scrollY - lastTop : null;
+  if (lastTop === null || !(scrollY > prevY) || scrollY < lastTop) return null;
+  return Math.min(scrollY - lastTop, scrollY - prevY);
+}
+
+/**
+ * The lap's state at a flow position (plan 2.6): none in the paged part and
+ * the exit; nothing drawn in the free span (`trim`: only the chosen pack
+ * kept, see `lapTrim`); the rise and the return as read from their live
+ * rects; Last holds the end.
+ */
+export function lapAt(
+  at: FlowAt | null,
+  live: { rise: number; ret: number },
+  trim: boolean,
+): StageLap | null {
+  if (!at || at.zone === 'paged') return null;
+  switch (at.span) {
+    case 'exit':
+      return null;
+    case 'free':
+      return { rise: 0, ret: 0, free: true, trim };
+    case 'rise':
+      return { rise: clamp01(live.rise), ret: 0, free: false, trim: false };
+    case 'ret':
+      return { rise: 1, ret: clamp01(live.ret), free: false, trim: false };
+    case 'last':
+      return LAP_END;
+  }
+}
+
+/** The end of Return (Last, and the wrap's lock): the row at rest exactly. */
+export const LAP_END: Readonly<StageLap> = Object.freeze({
+  rise: 1,
+  ret: 1,
+  free: false,
+  trim: false,
+});
+
+/** The free span's ends where every pack stays resident, in viewports [ours]. */
+export const LAP_TRIM_MARGIN = 0.25;
+
+/**
+ * Whether only the chosen pack is kept (plan 1.1a): from a quarter viewport
+ * past the exit end to a quarter viewport before the rise, so the way back up
+ * to the lineup and the way on to the rise find their packs loaded (the
+ * others are drawn only from Return on, and fade in if they come late).
+ */
+export function lapTrim(y: number, t: FlowTable, viewport: number): boolean {
+  const m = LAP_TRIM_MARGIN * viewport;
+  if (y < t.exitEnd + m) return false;
+  return !t.rise || y < t.rise.start - m;
 }
 
 /** The locked scroll back to R0 after the wrap, ease-out cubic over 1.2 s. */

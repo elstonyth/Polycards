@@ -6,10 +6,11 @@
  * `html[data-stage-loader]`, which is the only thing that makes the loader
  * shell visible (pack-stage.module.css).
  *
- * The loader shows only when ALL hold: the session has not seen it
- * (`BRAND_LOADER_SESSION_KEY`), the cheap gate predicts 3D (no reduced motion,
- * no save-data, no crash flag, not `deviceMemory <= 2`), and storage is
- * readable. Any throw skips the loader: a pre-hydration overlay must never risk
+ * The loader shows on every full document load (a first visit, a refresh, a
+ * cold open from the home-screen icon; owner, 2026-11-21) when ALL hold: the
+ * cheap gate predicts 3D (no reduced motion, no save-data, no crash flag, not
+ * `deviceMemory <= 2`), and storage is readable and writable. The session
+ * mark (`BRAND_LOADER_SESSION_KEY`) is still written, and no longer read. Any throw skips the loader: a pre-hydration overlay must never risk
  * sticking (the opposite default of `claimFirstVisitThisSession`).
  *
  * Server-safe: builds a string, runs nothing.
@@ -61,8 +62,8 @@ const PRE_COVER_CSS =
  * document load shows the brand loader; if so it marks the session, sets
  * `html[data-stage-loader]` and adds the pre-cover style. The preview's
  * `?loader=never|always` is read here, from the URL, never on the server:
- * `always` (QA only) skips the seen-this-session and device checks but still
- * needs storage, like every real first visit.
+ * `always` (QA only) skips the device checks but still needs storage, like
+ * every real load.
  */
 export function stageLoaderScript(
   paths: readonly string[] = STAGE_LOADER_PATHS,
@@ -81,7 +82,6 @@ export function stageLoaderScript(
     `if(f==='never')return;` +
     `var s=window.sessionStorage;` +
     `if(f!=='always'){` +
-    `if(s.getItem(${session})==='1')return;` +
     `if(s.getItem(${crash})!==null)return;` +
     `var m=window.matchMedia;` +
     `if(m&&m('(prefers-reduced-motion: reduce)').matches)return;` +

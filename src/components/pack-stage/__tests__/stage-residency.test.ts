@@ -6,6 +6,7 @@ import {
   RESIDENCY_DESKTOP,
   RESIDENCY_PHONE,
   initialDirection,
+  lapResidency,
   nextDirection,
   nextPromotion,
   planResidency,
@@ -294,4 +295,25 @@ describe('nextPromotion', () => {
     };
     expect(run()).toEqual(run());
   });
+});
+
+describe('residency in the free span (full-flow plan 1.1a)', () => {
+  for (const config of [RESIDENCY_PHONE, RESIDENCY_DESKTOP])
+    it(`only the chosen pack stays resident, whatever was resident before (reach ${config.reach})`, () => {
+      const resident = new Map<number, ResidentInfo>();
+      for (const i of [2, 3, 4, 5, 6, 7]) resident.set(i, { lastNeeded: 9990 });
+      const plan = planResidency({
+        indices: ELEVEN,
+        track: 4,
+        direction: 1,
+        config: lapResidency(config),
+        promote: null,
+        budgetBytes: 1e9,
+        bytes,
+        resident,
+        now: 10000,
+      });
+      expect([...plan.want.keys()]).toEqual([4]);
+      expect(plan.want.get(4)).toEqual({ full: false });
+    });
 });

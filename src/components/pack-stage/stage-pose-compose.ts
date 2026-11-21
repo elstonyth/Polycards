@@ -28,6 +28,34 @@ import { SPIN_GATHER, clamp01, smoothstep } from './stage-spin-math';
 /** Idle bob phase offset per pack in the spin row (10.9: "idle bob phase += 0.9 * i * g"). */
 const SPIN_BOB_PHASE = 0.9;
 
+/** The row at rest under a lap: no focus, no lineup, no lap. */
+function plainOf(st: Readonly<StageState>): StageState {
+  return { ...st, focus: 0, spin: 0, exit: 0, focusOn: null, lap: null };
+}
+
+/**
+ * The lap's pose (full-flow plan 2.6): the row's own rest pose (live idle
+ * and pointer included, so the end of Return is the row exactly); the chosen
+ * pack offset from one panel below (power1InOut of the rise), the others at
+ * their row offsets widened by the spread (5 to 1 over Return).
+ */
+function lapPose(
+  st: Readonly<StageState>,
+  i: number,
+  l: StageLayout,
+  desktop: boolean,
+  soldOut: boolean,
+): Pose {
+  const lap = st.lap!;
+  const p = poseStep1(plainOf(st), i, l, desktop, soldOut);
+  if (i === Math.round(st.track))
+    return { ...p, fy: p.fy + 1 - power1InOut(clamp01(lap.rise)) + 0 };
+  const k = spreadAt(lap.ret) - 1;
+  if (k === 0) return p;
+  const slot = (i - st.track) * l.step;
+  return { ...p, dx: p.dx + k * (p.dx + slot) + 0 };
+}
+
 function clean(st: Readonly<StageState>): StageState {
   return { ...st, intro: 1, swap: 0, pointerX: 0, pointerY: 0, idle: 0 };
 }
@@ -88,6 +116,14 @@ export function composeOpacity(
   ctx: Readonly<ComposeCtx> = {},
   copy = 0,
 ): number {
+  const lap = st.lap;
+  if (lap) {
+    // the lap draws the row alone: no repeats; nothing in the free span;
+    // the others fade in with Return
+    if (copy !== 0 || lap.free) return 0;
+    const base = stageOpacity(plainOf(st), i, desktop, count, ctx);
+    return i === Math.round(st.track) ? base : base * clamp01(lap.ret);
+  }
   const ho = ctx.spinOpacity ? handoffOf(st, ctx) : null;
   if (!ho) {
     if (copy !== 0)
@@ -117,6 +153,7 @@ export function composePose(
   soldOut: boolean,
   ctx: Readonly<ComposeCtx> = {},
 ): Pose {
+  if (st.lap) return lapPose(st, i, l, desktop, soldOut);
   const s = clamp01(st.spin ?? 0);
   const exit = clamp01(st.exit ?? 0);
   const spin = ctx.spin;
