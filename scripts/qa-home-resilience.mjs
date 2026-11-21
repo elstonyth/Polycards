@@ -59,7 +59,7 @@ const spanText = (t, vh) =>
   ' px (trim ' +
   (trimFits(t, vh) ? 'expected in the middle' : 'must stay off') +
   ')';
-/** The GPU estimate's cap in the free span (trim-gpu-free-span-phone). */
+/** The phone's GPU estimate cap in the free span (trim-gpu-free-span-phone). */
 const FREE_GPU_CAP = 40 * 1048576;
 
 const args = process.argv.slice(2);

@@ -79,7 +79,7 @@ const spanText = (t, vh) =>
   ' px (trim ' +
   (trimFits(t, vh) ? 'expected in the middle' : 'must stay off') +
   ')';
-/** The GPU estimate's cap in the free span (trim-gpu-free-span-phone). */
+/** The phone's GPU estimate cap in the free span (trim-gpu-free-span-phone). */
 const FREE_GPU_CAP = 40 * 1048576;
 
 const args = process.argv.slice(2);
@@ -1221,7 +1221,9 @@ for (const size of sizes) {
         e1.lap?.free === true &&
         (fits
           ? e1.lap.trim === true && e1.gpu < e0.gpu
-          : e1.lap.trim === false && e1.gpu <= FREE_GPU_CAP) &&
+          : e1.lap.trim === false &&
+            e1.gpu <= e0.gpu &&
+            (size !== 'phone' || e1.gpu <= FREE_GPU_CAP)) &&
         e2.present === true &&
         e2.running &&
         near(r.y, lineupY) &&
@@ -2259,7 +2261,8 @@ for (const size of sizes) {
           ? free.lap?.trim === true && free.gpu < atLineup.gpu
           : free.lap?.trim === false &&
             free.drawn.every((d) => d.id === chosen) &&
-            free.gpu <= FREE_GPU_CAP),
+            free.gpu <= atLineup.gpu &&
+            (size !== 'phone' || free.gpu <= FREE_GPU_CAP)),
       `${spanText(t, vh)}; trim ${free.lap?.trim}; drawn [${free.drawn.map((d) => d.id).join(',')}] (chosen ${chosen}); GPU estimate ${MB(free.gpu)} MB in the free span, ${MB(atLineup.gpu)} MB at the lineup`,
     );
     // the rise: one pack, the chosen one, the panel shown, the row UI out
@@ -2903,7 +2906,8 @@ for (const size of sizes) {
     );
     // (2) the free span draws only the chosen capsule, and holds only it
     // where the span is longer than its two trim margins (shorter, the trim
-    // stays off: every capsule stays held, under the GPU cap)
+    // stays off: every capsule stays held, no more GPU than at the lineup,
+    // and on the phone under its cap)
     report(
       'poly-free-span-only-the-chosen-capsule-' + size,
       laps.every(
@@ -2915,7 +2919,9 @@ for (const size of sizes) {
             ? l.free.held.length === 1 &&
               l.free.held[0] === l.id &&
               l.free.gpu < l.free.gpuLineup
-            : l.free.held.includes(l.id) && l.free.gpu <= FREE_GPU_CAP),
+            : l.free.held.includes(l.id) &&
+              l.free.gpu <= l.free.gpuLineup &&
+              (size !== 'phone' || l.free.gpu <= FREE_GPU_CAP)),
       ),
       (laps[0]?.free.span ?? '') +
         '; ' +
