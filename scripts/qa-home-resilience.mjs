@@ -1094,7 +1094,9 @@ async function driveStep(s, p, dir) {
     await drag(s, 195, a, b, { steps: 10, delay: 30, hold: paged ? 0 : 120 });
   } else {
     await page.mouse.move(720, 450);
-    await page.mouse.wheel(0, dir * (paged ? 120 : 300));
+    // small notches in the free part: its trimmed middle is about a third of
+    // a viewport long
+    await page.mouse.wheel(0, dir * (paged ? 120 : 100));
     await page.waitForTimeout(paged ? 1600 : 250);
   }
   return rest(page);
@@ -1228,8 +1230,9 @@ async function trimPart(size) {
   }
   await page.waitForTimeout(1200);
   p = await rest(page);
-  // at the exit's end the trim is off; one more gesture up pages back into
-  // the lineup, where the other packs are drawn again
+  // at the exit's end the trim is off (on the exit's own last pixel there is
+  // no lap at all and the packs are drawn); one more gesture up goes back
+  // towards the lineup, where the other packs are drawn again
   const atEnd = await trimProbe(page);
   p = await driveStep(s, p, -1);
   await page.waitForTimeout(1800);
@@ -1237,8 +1240,7 @@ async function trimPart(size) {
   const u = await trimProbe(page);
   report(
     'trim-restored-' + size,
-    !!atEnd.lap &&
-      atEnd.lap.trim === false &&
+    (atEnd.lap === null ? atEnd.drawn > 1 : atEnd.lap.trim === false) &&
       (u.lap === null || u.lap.trim !== true) &&
       u.drawn > 1,
     'at the exit end: lap ' +
