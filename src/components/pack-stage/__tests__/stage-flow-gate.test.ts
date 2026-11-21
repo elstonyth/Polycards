@@ -41,6 +41,50 @@ function run(i: FlowInput, y0: number, from: number, to: number): number {
   return y;
 }
 
+describe('touch gate: the touch events carry their own time', () => {
+  it("passes each event's own time to the flow beside the handling time", () => {
+    const seen: string[] = [];
+    const gate = createTouchGate(
+      {
+        touchStart: (_x, _y, _s, now, o) =>
+          void seen.push(`start ${now} ${o?.at}`),
+        touchMove: (_x, _y, _s, now, at) => {
+          seen.push(`move ${now} ${at}`);
+          return true;
+        },
+        touchEnd: (_s, now, at) => void seen.push(`end ${now} ${at}`),
+        touchCancel: () => void seen.push('cancel'),
+      },
+      () => false,
+    );
+    gate.start(1, true, 200, 600, 9000, 100, { at: 90 });
+    gate.move(1, 200, 560, 9000, 120, 106);
+    gate.end(9000, 300, 112);
+    expect(seen).toEqual(['start 100 90', 'move 120 106', 'end 300 112']);
+  });
+
+  it('a touch whose start time is not on the frame clock (an old epoch time) is timed by its handling throughout', () => {
+    const seen: string[] = [];
+    const gate = createTouchGate(
+      {
+        touchStart: (_x, _y, _s, _now, o) => void seen.push(`start ${o?.at}`),
+        touchMove: (_x, _y, _s, _now, at) => {
+          seen.push(`move ${at}`);
+          return true;
+        },
+        touchEnd: (_s, _now, at) => void seen.push(`end ${at}`),
+        touchCancel: () => void seen.push('cancel'),
+      },
+      () => false,
+    );
+    const epoch = 1.7e12;
+    gate.start(1, true, 200, 600, 9000, 100, { at: epoch });
+    gate.move(1, 200, 560, 9000, 120, 106);
+    gate.end(9000, 300, epoch + 200);
+    expect(seen).toEqual(['start 100', 'move 120', 'end 300']);
+  });
+});
+
 describe('touch gate: a second finger (review finding 2)', () => {
   it('a pinch drops the touch: the page it left off a rest snaps back and the loop may sleep', () => {
     const p = atFront();

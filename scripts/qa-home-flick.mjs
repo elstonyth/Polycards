@@ -2,7 +2,9 @@
 // Replaces the old "flick-across-last-wraps-once" check, which released in the
 // same task as the last move and so never saw a frame between them.
 //   Claim 1: released one frame after the last move, the page glides on, as
-//            far as the finger's speed over its last two moves says.
+//            far as the finger's speed says: first to last over the moves made
+//            in the 100 ms before the lift, timed by the touch events' own
+//            times (not when the page handled them).
 //   Claim 2: started close above Last's top, the glide crosses it and the page
 //            wraps once, ending at the row.
 //   Claim 3: a finger held still 200 ms before lifting does not glide.
@@ -22,21 +24,26 @@ const STEP = 150;
 const X = 200;
 const Y0 = 700;
 
-/** Logs each touchmove (time, scroll after the flow's handler), the touchend, and every frame's scroll. */
+/**
+ * Logs the touchstart and each touchmove as [event time, handling time, scroll
+ * after the flow's handler], the touchend as [event time, handling time,
+ * scroll], and every frame's scroll.
+ */
 const arm = (s) =>
   s.page.evaluate(() => {
     const w = window;
     w.__fl = { moves: [], end: null, ys: [] };
     if (!w.__flOn) {
       w.__flOn = true;
-      // the flow's own clock: performance.now() when its handler runs
-      addEventListener('touchmove', () => {
+      const log = (e) => {
         const t = performance.now();
         // the flow writes the follow in its own handler: read it after
-        queueMicrotask(() => w.__fl.moves.push([t, scrollY]));
-      });
-      addEventListener('touchend', () => {
-        w.__fl.end = [performance.now(), scrollY];
+        queueMicrotask(() => w.__fl.moves.push([e.timeStamp, t, scrollY]));
+      };
+      addEventListener('touchstart', log);
+      addEventListener('touchmove', log);
+      addEventListener('touchend', (e) => {
+        w.__fl.end = [e.timeStamp, performance.now(), scrollY];
       });
     }
     const f = () => {
@@ -62,17 +69,26 @@ async function flick(s, holdMs = 0) {
   await send(s, 'touchEnd', []);
 }
 
-/** The glide the finger asked for: its last two moves, from their own times. */
+/**
+ * The glide the finger asked for, from the touch events' own times: none when
+ * the last move was made more than 100 ms before the lift; else first to last
+ * over the moves within 100 ms of the last one (the last two when they are
+ * sparser). `late`: how long after its own time the lift was handled.
+ */
 function expected(log) {
   const m = log.moves;
-  const a = m.at(-2);
+  const at = log.end[0];
+  const late = log.end[1] - at;
   const b = m.at(-1);
-  const gap = log.end[0] - b[0];
-  if (!a || !b) return { glide: null, gap, span: null, v: null };
+  const gap = b ? at - b[0] : null;
+  const recent = b ? m.filter((s) => b[0] - s[0] <= HOLD_MS) : [];
+  const a = recent.length >= 2 ? recent[0] : m.at(-2);
+  if (!a || !b || b[0] <= a[0] || gap > HOLD_MS)
+    return { glide: 0, gap, span: null, v: null, late, n: recent.length };
   const span = b[0] - a[0];
-  const v = ((b[1] - a[1]) * FRAME_MS) / span;
-  const glide = gap > HOLD_MS ? 0 : Math.sign(v) * Math.abs(v) ** POWER;
-  return { glide, gap, span, v };
+  const v = ((b[2] - a[2]) * FRAME_MS) / span;
+  const glide = Math.sign(v) * Math.abs(v) ** POWER;
+  return { glide, gap, span, v, late, n: recent.length };
 }
 const r1 = (n) => (n === null ? 'null' : Math.round(n * 10) / 10);
 
@@ -106,9 +122,11 @@ try {
     let log = await read(s);
     let e = expected(log);
     let end = await s.page.evaluate(() => scrollY);
-    let glide = end - log.end[1];
+    let glide = end - log.end[2];
     await s.capture('flick from ' + mid + ': glide ' + Math.round(glide));
-    const valid1 = e.gap < HOLD_MS && e.glide !== null;
+    // the page falls back to its handling clock for event times that do not fit it
+    const valid1 =
+      e.gap !== null && e.gap < HOLD_MS && e.late >= -1 && e.late < 1000;
     check(
       'flick-glides-after-a-frame [phone]',
       valid1 &&
@@ -118,15 +136,21 @@ try {
         ? ''
         : 'INVALID SAMPLE (release ' +
           r1(e.gap) +
-          ' ms after the last move); ') +
+          ' ms after the last move, handled ' +
+          r1(e.late) +
+          ' ms after it was made); ') +
         log.moves.length +
-        ' moves, last two ' +
+        ' touch events, ' +
+        e.n +
+        ' in the last 100 ms spanning ' +
         r1(e.span) +
-        ' ms apart (' +
+        ' ms by their own times (' +
         r1(e.v) +
         ' px per 60 Hz frame); release ' +
         r1(e.gap) +
-        ' ms after the last move; glide ' +
+        ' ms after the last move, handled ' +
+        r1(e.late) +
+        ' ms after it was made; glide ' +
         r1(glide) +
         ' px, the finger asked for ' +
         r1(e.glide),
@@ -147,11 +171,21 @@ try {
     for (let i = 1; i < log.ys.length; i++)
       if (log.ys[i - 1] - log.ys[i] > 1000) wraps++;
     await s.capture('flick across Last: rests at ' + Math.round(end));
+    info(
+      'touch times [phone]',
+      log.moves
+        .map((s) => 'made ' + r1(s[0]) + ' handled +' + r1(s[1] - s[0]))
+        .join(', ') +
+        '; lift made ' +
+        r1(log.end[0]) +
+        ' handled +' +
+        r1(e.late),
+    );
     const valid2 = e.gap < HOLD_MS;
     check(
       'flick-across-last-wraps-once [phone]',
       valid2 &&
-        log.end[1] < t.lastTop &&
+        log.end[2] < t.lastTop &&
         wraps === 1 &&
         Math.abs(end - t.r0) < 1,
       (valid2
@@ -162,7 +196,7 @@ try {
         'from ' +
         near +
         ', released at ' +
-        r1(log.end[1]) +
+        r1(log.end[2]) +
         ' (Last top ' +
         r1(t.lastTop) +
         ', ' +
@@ -186,15 +220,15 @@ try {
     log = await read(s);
     e = expected(log);
     end = await s.page.evaluate(() => scrollY);
-    glide = end - log.end[1];
+    glide = end - log.end[2];
     await s.capture('hold 200 ms then lift: glide ' + Math.round(glide));
     check(
       'hold-then-lift-no-glide [phone]',
-      e.gap > HOLD_MS && Math.abs(glide) < 1 && log.end[1] > mid + 100,
+      e.gap > HOLD_MS && Math.abs(glide) < 1 && log.end[2] > mid + 100,
       'released ' +
         r1(e.gap) +
         ' ms after the last move at ' +
-        r1(log.end[1]) +
+        r1(log.end[2]) +
         ' (from ' +
         mid +
         '); then ' +

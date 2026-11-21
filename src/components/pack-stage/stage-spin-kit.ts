@@ -678,9 +678,11 @@ export function startSpin(host: SpinHost): SpinControl {
       sideScroller(el);
     const x = p?.clientX ?? 0;
     const y = p?.clientY ?? 0;
+    const t = now();
     if (
-      touch.start(e.touches.length, ours, x, y, window.scrollY, now(), {
+      touch.start(e.touches.length, ours, x, y, window.scrollY, t, {
         strip,
+        at: e.timeStamp,
       })
     )
       wake();
@@ -690,7 +692,14 @@ export function startSpin(host: SpinHost): SpinControl {
     if (!p) return;
     const t = now();
     if (
-      touch.move(e.touches.length, p.clientX, p.clientY, window.scrollY, t) &&
+      touch.move(
+        e.touches.length,
+        p.clientX,
+        p.clientY,
+        window.scrollY,
+        t,
+        e.timeStamp,
+      ) &&
       e.cancelable
     )
       e.preventDefault();
@@ -701,8 +710,9 @@ export function startSpin(host: SpinHost): SpinControl {
       wake();
     }
   };
-  const onTouchEnd = () => {
-    if (touch.end(window.scrollY, now())) {
+  const onTouchEnd = (e: TouchEvent) => {
+    const t = now();
+    if (touch.end(window.scrollY, t, e.timeStamp)) {
       gestures?.push(now());
       downHeld();
     }

@@ -926,24 +926,19 @@ describe('flow pager: the release speed comes from the moves, not the frames', (
     }
   });
 
-  it('two moves handled back to back (a busy page) count as one: no runaway glide', () => {
+  it('moves handled back to back (a busy page) are timed by their own event times: the true glide', () => {
     const p = make();
     let y = 9000;
     p.touchStart(200, 700, y, 0);
     p.frame(y, 0);
-    let now = 0;
-    for (let i = 1; i <= 4; i++) {
-      now = i * 16;
-      y = p.touchMove(200, 700 - 32 * i, y, now).scrollTo ?? y;
-      p.frame(y, now);
-    }
-    // the fifth move's handler runs half a millisecond after the fourth's
-    y = p.touchMove(200, 700 - 32 * 5, y, now + 0.5).scrollTo ?? y;
-    p.touchEnd(y, now + 18);
-    const end = run(p, y, now + 32, 6000);
-    // 64 px over the two moves' 16 ms: 66.7 px per 60 Hz frame, about 1260 px
-    expect(end - y).toBeGreaterThan(1200);
-    expect(end - y).toBeLessThan(1320);
+    // a long task: five moves made 16 ms apart, all handled at 90 ms, within 0.5 ms
+    for (let i = 1; i <= 5; i++)
+      y = p.touchMove(200, 700 - 32 * i, y, 90 + i * 0.1, i * 16).scrollTo ?? y;
+    p.touchEnd(y, 90.6, 82);
+    const end = run(p, y, 96, 6000);
+    // 32 px per 16 ms is 33.3 px per 60 Hz frame: about 388 px of glide
+    expect(end - y).toBeGreaterThan(378);
+    expect(end - y).toBeLessThan(398);
   });
 
   it('a finger held still for 150 ms before lifting does not glide', () => {
@@ -957,6 +952,141 @@ describe('flow pager: the release speed comes from the moves, not the frames', (
     expect(r.release).toBe(12800);
     expect(r.wraps).toBe(1);
     expect(r.end).toBe(0);
+  });
+});
+
+/**
+ * A free flick with its own touch clock: moves every `moveMs` (event time)
+ * at `speed` px/s, frames every `frameMs`, each move handled at its own
+ * time; the release `gap` ms after the last move. Returns the glide.
+ */
+function timedFlick(
+  frameMs: number,
+  moveMs: number,
+  speed: number,
+  gap = 2,
+): number {
+  const p = make();
+  let y = 9000;
+  let frameAt = 0;
+  p.touchStart(200, 700, y, 0);
+  p.frame(y, 0);
+  let t = 0;
+  for (let i = 1; i <= 12; i++) {
+    t = i * moveMs;
+    while (frameAt + frameMs <= t) {
+      frameAt += frameMs;
+      p.frame(y, frameAt);
+    }
+    y = p.touchMove(200, 700 - (speed * t) / 1000, y, t, t).scrollTo ?? y;
+  }
+  p.touchEnd(y, t + gap, t + gap);
+  const release = y;
+  for (let f = frameAt + frameMs; f <= frameAt + 6000; f += frameMs) {
+    const r = p.frame(y, f);
+    if (r.scrollTo !== null) y = r.scrollTo;
+  }
+  return y - release;
+}
+
+describe('flow pager: the release speed is timed by the touch events themselves', () => {
+  it('a touchend handled 150 ms late, made 10 ms after the last move, still glides', () => {
+    const p = make();
+    let y = 9000;
+    p.touchStart(200, 700, y, 0, { at: 0 });
+    p.frame(y, 0);
+    for (let i = 1; i <= 5; i++) {
+      y = p.touchMove(200, 700 - 32 * i, y, i * 16, i * 16).scrollTo ?? y;
+      p.frame(y, i * 16);
+    }
+    p.touchEnd(y, 80 + 150, 90);
+    const end = run(p, y, 240, 6000);
+    expect(end - y).toBeGreaterThan(378);
+    expect(end - y).toBeLessThan(398);
+  });
+
+  it('a 300 ms press, then a flick, glides: the moves before the axis lock keep the speed current', () => {
+    const p = make();
+    let y = 9000;
+    p.touchStart(200, 700, y, 0);
+    p.frame(y, 0);
+    // the finger creeps up 1 px at a time while pressing (under the 6 px lock)
+    for (let i = 1; i <= 3; i++) {
+      p.touchMove(200, 700 - i, y, i * 100, i * 100);
+      p.frame(y, i * 100);
+    }
+    // then one 40 px flick and the lift
+    y = p.touchMove(200, 657, y, 316, 316).scrollTo ?? y;
+    expect(y).toBe(9043);
+    p.touchEnd(y, 320, 320);
+    // 40 px over 16 ms is 41.7 px per 60 Hz frame: about 570 px of glide
+    const glide = run(p, y, 336, 6000) - y;
+    expect(glide).toBeGreaterThan(540);
+    expect(glide).toBeLessThan(600);
+  });
+
+  it('a last move that is sideways only, or rolls back 1 px at the lift, still glides forward', () => {
+    for (const last of ['sideways', 'rollback'] as const) {
+      const p = make();
+      let y = 9000;
+      p.touchStart(200, 700, y, 0);
+      p.frame(y, 0);
+      for (let i = 1; i <= 5; i++) {
+        y = p.touchMove(200, 700 - 32 * i, y, i * 16, i * 16).scrollTo ?? y;
+        p.frame(y, i * 16);
+      }
+      const fy = last === 'sideways' ? 700 - 32 * 5 : 700 - 32 * 5 + 1;
+      y = p.touchMove(210, fy, y, 96, 96).scrollTo ?? y;
+      p.touchEnd(y, 98, 98);
+      const glide = run(p, y, 112, 6000) - y;
+      expect(glide, last).toBeGreaterThan(250);
+      expect(glide, last).toBeLessThan(420);
+    }
+  });
+
+  it('moves 80 ms apart (a slow touch rate) still glide, timed over the last two', () => {
+    const p = make();
+    let y = 9000;
+    p.touchStart(200, 700, y, 0);
+    p.frame(y, 0);
+    for (let i = 1; i <= 3; i++) {
+      y = p.touchMove(200, 700 - 150 * i, y, i * 80, i * 80).scrollTo ?? y;
+      p.frame(y, i * 80);
+    }
+    p.touchEnd(y, 270, 270);
+    // 150 px per 80 ms is 31.25 px per 60 Hz frame: about 347 px of glide
+    const glide = run(p, y, 272, 6000) - y;
+    expect(glide).toBeGreaterThan(337);
+    expect(glide).toBeLessThan(357);
+  });
+
+  it('a finger resting 150 ms before the lift gets no glide, whenever the lift is handled', () => {
+    const p = make();
+    let y = 9000;
+    p.touchStart(200, 700, y, 0);
+    p.frame(y, 0);
+    for (let i = 1; i <= 5; i++) {
+      y = p.touchMove(200, 700 - 32 * i, y, i * 16, i * 16).scrollTo ?? y;
+      p.frame(y, i * 16);
+    }
+    for (let now = 96; now <= 224; now += 16) p.frame(y, now);
+    // made 150 ms after the last move, handled at once
+    p.touchEnd(y, 230, 230);
+    expect(run(p, y, 240, 2000)).toBe(y);
+  });
+
+  it('the same finger speed gives the same glide at 60 and 120 Hz frames with 60 and 120 Hz touch', () => {
+    const glides = [
+      timedFlick(1000 / 60, 1000 / 60, 1920),
+      timedFlick(1000 / 120, 1000 / 60, 1920),
+      timedFlick(1000 / 60, 1000 / 120, 1920),
+      timedFlick(1000 / 120, 1000 / 120, 1920),
+    ];
+    // 1920 px/s is 32 px per 60 Hz frame: about 361 px
+    for (const g of glides) {
+      expect(g).toBeGreaterThan(350);
+      expect(g).toBeLessThan(372);
+    }
   });
 });
 

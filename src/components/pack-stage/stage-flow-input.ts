@@ -215,22 +215,32 @@ export interface FlowInput {
     now: number,
     repeat?: boolean,
   ): FlowKeyOutcome;
-  /** `strip`: a sideways touch here belongs to what it started on. */
+  /**
+   * `strip`: a sideways touch here belongs to what it started on. `at`
+   * (here and on the move and the end): the event's own time, for the free
+   * part's release speed; `now`: when it was handled.
+   */
   touchStart(
     x: number,
     y: number,
     scrollY: number,
     now: number,
-    o?: { strip?: boolean },
+    o?: { strip?: boolean; at?: number },
   ): void;
   /** True: the caller cancels the touchmove. */
-  touchMove(x: number, y: number, scrollY: number, now: number): boolean;
+  touchMove(
+    x: number,
+    y: number,
+    scrollY: number,
+    now: number,
+    at?: number,
+  ): boolean;
   /**
    * The scroll the last free-part touchmove asks for (the page follows the
    * finger): the caller writes it at once. Read once; null: nothing to write.
    */
   follow(): number | null;
-  touchEnd(scrollY: number, now: number): void;
+  touchEnd(scrollY: number, now: number, at?: number): void;
   /** The touch's tracking is dropped: nothing pages, the snap and the idle report come back. */
   touchCancel(): void;
   /** A mouse press (desktop); true: the lineup's drag may follow (the caller cancels it). */
@@ -482,8 +492,8 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
       lineTouch = lineLive(scrollY) ? { x0: x } : null;
       pager.touchStart(x, y, scrollY, now, o);
     },
-    touchMove(x, y, scrollY, now) {
-      const r = pager.touchMove(x, y, scrollY, now);
+    touchMove(x, y, scrollY, now, at) {
+      const r = pager.touchMove(x, y, scrollY, now, at);
       followTo = r.scrollTo;
       if (r.axis === 'x' && lineTouch) {
         // the lineup follows the finger (from where it landed); the page stays
@@ -501,7 +511,7 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
       followTo = null;
       return y;
     },
-    touchEnd(scrollY, now) {
+    touchEnd(scrollY, now, at) {
       lineTouch = null;
       followTo = null;
       if (line.held()) {
@@ -511,7 +521,7 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
       }
       flush();
       arm();
-      pager.touchEnd(scrollY, now);
+      pager.touchEnd(scrollY, now, at);
       entered();
     },
     touchCancel() {

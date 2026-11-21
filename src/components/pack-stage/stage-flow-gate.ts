@@ -11,7 +11,12 @@ export type FlowTouchInput = Pick<
 >;
 
 export type TouchGate = {
-  /** A touchstart: `fingers` on the screen, `ours`: the flow's (armed, on). True: tracked. */
+  /**
+   * A touchstart: `fingers` on the screen, `ours`: the flow's (armed, on).
+   * True: tracked. `at` (here and on the move and the end): the event's own
+   * time (its timeStamp), which times the release speed when its clock fits;
+   * `now`: when it was handled.
+   */
   start(
     fingers: number,
     ours: boolean,
@@ -19,7 +24,7 @@ export type TouchGate = {
     y: number,
     scrollY: number,
     now: number,
-    o?: { strip?: boolean },
+    o?: { strip?: boolean; at?: number },
   ): boolean;
   /** A touchmove; true: the caller cancels it. */
   move(
@@ -28,12 +33,23 @@ export type TouchGate = {
     y: number,
     scrollY: number,
     now: number,
+    at?: number,
   ): boolean;
   /** A touchend; true: a release that may page (wake the loop). */
-  end(scrollY: number, now: number): boolean;
+  end(scrollY: number, now: number, at?: number): boolean;
   /** A touchcancel: the system took the touch; never a release, nothing pages. */
   cancel(): void;
 };
+
+/**
+ * Whether a touch event's own time can time the release speed: on
+ * performance.now()'s clock, which the frame loop and `now` use (every
+ * current browser), so never in the future. An old browser's epoch time is
+ * not: that touch is timed by when it was handled instead.
+ */
+export function eventClockFits(at: number | undefined, now: number): boolean {
+  return at !== undefined && at > 0 && at <= now + 1;
+}
 
 /**
  * One finger at a time, while the flow owns the gesture. `held`: the focused
@@ -44,6 +60,10 @@ export function createTouchGate(
   held: () => boolean,
 ): TouchGate {
   let touching = false;
+  /** This touch's events carry times on the frame loop's clock (decided at its start). */
+  let eventClock = false;
+  const timeOf = (at: number | undefined, now: number): number =>
+    eventClock && at !== undefined ? Math.min(at, now) : now;
   return {
     start(fingers, ours, x, y, scrollY, now, o) {
       if (fingers !== 1 || !ours) {
@@ -54,21 +74,22 @@ export function createTouchGate(
         return false;
       }
       touching = true;
-      input.touchStart(x, y, scrollY, now, o);
+      eventClock = eventClockFits(o?.at, now);
+      input.touchStart(x, y, scrollY, now, { ...o, at: timeOf(o?.at, now) });
       return true;
     },
-    move(fingers, x, y, scrollY, now) {
+    move(fingers, x, y, scrollY, now, at) {
       if (!touching || fingers !== 1) return false;
-      return held() || input.touchMove(x, y, scrollY, now);
+      return held() || input.touchMove(x, y, scrollY, now, timeOf(at, now));
     },
-    end(scrollY, now) {
+    end(scrollY, now, at) {
       if (!touching) return false;
       touching = false;
       if (held()) {
         input.touchCancel();
         return false;
       }
-      input.touchEnd(scrollY, now);
+      input.touchEnd(scrollY, now, timeOf(at, now));
       return true;
     },
     cancel() {
