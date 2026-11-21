@@ -11,6 +11,7 @@ import {
   ENTRY_LEAVE_LIFT_MS,
   ENTRY_LOADER_MAX_MS,
   FLOW_ENTRY_ATTR,
+  FLOW_HELD_ATTR,
   FLOW_LEAVE_ATTR,
   HOME_LOADER_MAX_MS,
   LOADER_LATE_AT_MS,
@@ -70,7 +71,8 @@ type Plan = { at: number; timings: LoaderTimings; readyAt: number | null };
  * runs only while the tab shows: a hidden tab paints no frames, so the pack
  * cannot be placed there, and the tab coming forward gets the full limit
  * again. A leave whose pack page never comes lifts the cover
- * ENTRY_LEAVE_LIFT_MS later.
+ * ENTRY_LEAVE_LIFT_MS later. Those two end the cover, so once hydrated it
+ * turns the CSS failsafe off (`html[data-flow-held]`).
  */
 export default function StageLoader({ onLeave }: { onLeave?: () => void }) {
   const up = useStageLoaderUp(true);
@@ -109,6 +111,9 @@ export default function StageLoader({ onLeave }: { onLeave?: () => void }) {
   useEffect(() => {
     if (!up) return;
     if (entryLoad) {
+      // the limit below ends the cover: the CSS failsafe, which runs on in a
+      // hidden tab, would lift it before the pack is placed
+      document.documentElement.setAttribute(FLOW_HELD_ATTR, '');
       let limit: number | undefined;
       let lift: number | undefined;
       let fired = false;
@@ -146,6 +151,7 @@ export default function StageLoader({ onLeave }: { onLeave?: () => void }) {
         window.clearTimeout(limit);
         window.clearTimeout(lift);
         document.removeEventListener('visibilitychange', onVisibility);
+        document.documentElement.removeAttribute(FLOW_HELD_ATTR);
       };
     }
     // Hydrated too late for an exit (a slow device or network; the CSS

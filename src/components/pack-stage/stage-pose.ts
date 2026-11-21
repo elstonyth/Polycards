@@ -188,7 +188,7 @@ export function poseAt(
   ctx: Readonly<ComposeCtx> = {},
 ): Pose {
   // the composed pose only while something composes (it checks the rest)
-  return ctx.compose && (st.spin > 0 || st.exit > 0 || st.focus > 0 || !!st.lap)
+  return ctx.compose && rowPosedByKit(st)
     ? ctx.compose(st, i, l, desktop, soldOut, ctx)
     : poseStep1(st, i, l, desktop, soldOut);
 }
@@ -292,14 +292,10 @@ export function restState(track = 0): StageState {
 }
 
 /** The shared values the row reads each frame (the provider's motion values). */
-export type RowValues = {
-  intro: number;
-  swap: number;
-  pointerX: number;
-  pointerY: number;
-  spin: number;
-  exit: number;
-};
+export type RowValues = Pick<
+  StageState,
+  'intro' | 'swap' | 'pointerX' | 'pointerY' | 'spin' | 'exit'
+>;
 
 /**
  * The state the row paints its tiles with on a frame of its own (its track

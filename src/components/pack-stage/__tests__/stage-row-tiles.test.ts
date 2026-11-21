@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import type { FocusCtx, Pose, StageLayout, StageState } from '../contract';
 import { CAPSULE_LIMITS, SLEEVE_TILE } from '../stage-capsule-lean';
 import { FOCUS_TERM } from '../stage-compose';
+import { power1InOut } from '../stage-focus';
 import { focusKeys } from '../stage-focus-keys';
 import { rowTilePacks, tilePose, tileSpinCtx } from '../stage-row-tiles';
 import { composeOpacity } from '../stage-pose-compose';
@@ -242,8 +243,10 @@ describe('a row repaint under the lap', () => {
     ctx.focusTerm = FOCUS_TERM;
     // the focused pack (2) is not the one the lap raises (round(track) = 4)
     expect(composeOpacity(s, 2, desktop, N, ctx)).toBe(0);
-    expect(tilePose(s, 4, l, desktop, sleeve, ctx)).toEqual(
-      tilePose({ ...live, track: 3.996 }, 4, l, desktop, sleeve, ctx),
+    // the pack the lap raises (4) is offset down by the rise, not at rest
+    expect(tilePose(s, 4, l, desktop, sleeve, ctx).fy).toBeCloseTo(
+      1 - power1InOut(0.166),
+      9,
     );
   });
 

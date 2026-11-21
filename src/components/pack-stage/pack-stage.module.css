@@ -653,6 +653,13 @@
   animation: stage-loader-failsafe 0s linear var(--stage-failsafe) forwards;
 }
 
+/* A hydrated load onto a pack's address: its own limit ends the cover, so no
+   failsafe (it runs on in a hidden tab and would lift the cover before the
+   pack is placed). After the rule above: same specificity. */
+:global(html[data-flow-held]) .shell {
+  animation: none;
+}
+
 @keyframes stage-loader-failsafe {
   to {
     visibility: hidden;

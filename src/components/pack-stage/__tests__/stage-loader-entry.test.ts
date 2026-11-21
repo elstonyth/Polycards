@@ -20,9 +20,11 @@ const {
   ENTRY_LEAVE_LIFT_MS,
   ENTRY_LOADER_MAX_MS,
   FLOW_ENTRY_ATTR,
+  FLOW_HELD_ATTR,
   FLOW_LEAVE_ATTR,
   HOME_LOADER_MAX_MS,
   STAGE_LOADER_ATTR,
+  flowEntryScript,
 } = await import('../stage-loader-script');
 
 const html = document.documentElement;
@@ -72,6 +74,7 @@ afterEach(() => {
   html.removeAttribute(STAGE_LOADER_ATTR);
   html.removeAttribute(FLOW_ENTRY_ATTR);
   html.removeAttribute(FLOW_LEAVE_ATTR);
+  html.removeAttribute(FLOW_HELD_ATTR);
   delete (document as { hidden?: boolean }).hidden;
   vi.useRealTimers();
 });
@@ -82,6 +85,12 @@ describe('the stage loader on a plain load', () => {
     await advance(HOME_LOADER_MAX_MS + 2000);
     expect(coverUp()).toBe(false);
     expect(goToPackPage).not.toHaveBeenCalled();
+  });
+
+  it('keeps the CSS failsafe on', async () => {
+    mount();
+    await advance(500);
+    expect(html.hasAttribute(FLOW_HELD_ATTR)).toBe(false);
   });
 });
 
@@ -196,6 +205,21 @@ describe("a load onto a pack's address in a background tab", () => {
     await advance(600);
     expect(goToPackPage).toHaveBeenCalledWith('151');
   });
+
+  it('once hydrated, turns the CSS failsafe off, so a tab brought forward after it is still covered', async () => {
+    await setHidden(true, false);
+    mount();
+    expect(html.hasAttribute(FLOW_HELD_ATTR)).toBe(true);
+    await advance(20_000);
+    await setHidden(false);
+    expect(coverUp()).toBe(true);
+    expect(html.hasAttribute(FLOW_HELD_ATTR)).toBe(true);
+    // the cover's end drops the mark with it
+    await act(async () => html.removeAttribute(FLOW_ENTRY_ATTR));
+    await advance(2000);
+    expect(coverUp()).toBe(false);
+    expect(html.hasAttribute(FLOW_HELD_ATTR)).toBe(false);
+  });
 });
 
 describe('the failsafe on such a load', () => {
@@ -212,6 +236,20 @@ describe('the failsafe on such a load', () => {
       );
     expect(Number(rule?.[1]) * 1000).toBe(ENTRY_LOADER_MAX_MS + 1000);
     expect(css()).not.toContain('html[data-flow-entry])');
+  });
+
+  it('is off once the page has hydrated: the rule comes after the shell rule that starts it', () => {
+    const c = css();
+    const held = c.search(
+      /:global\(html\[data-flow-held\]\) \.shell \{\s*animation: none;/,
+    );
+    const shell = c.indexOf(':global(html[data-stage-loader]) .shell {');
+    expect(shell).toBeGreaterThan(-1);
+    expect(held).toBeGreaterThan(shell);
+  });
+
+  it('stays on with no script: only the hydrated page sets the mark', () => {
+    expect(flowEntryScript('151', '/slots/151')).not.toContain(FLOW_HELD_ATTR);
   });
 
   it("never hides the cover while it goes to today's pack page", () => {

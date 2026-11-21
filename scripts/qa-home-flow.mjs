@@ -793,6 +793,11 @@ for (const size of sizes) {
     // a PageUp this close to the exit's end reaches the hand-over to the
     // lineup: step into the free part again before End
     if (r.y < yFree - 1) r = await key(page, 'ArrowDown');
+    check(
+      'free-before-End',
+      r.past && r.exitEnd !== null && r.y > r.exitEnd - 1,
+      r,
+    );
     // End is the browser's: it lands past Last's top, so the page wraps to
     // the row (the wrap applies to End at Last)
     const endLog = await nativeKey(page, 'End');

@@ -404,7 +404,9 @@ export function startSpin(host: SpinHost): SpinControl {
     if (sameLap(stage.state.lap ?? null, next)) return;
     stage.state.lap = next;
     stage.wake();
-    if (focus) paintRow();
+    // with or without the focused view: a repaint before its chunk came may
+    // have posed the tiles for a lap that has now ended
+    paintRow();
   };
   /** The Home lock from the lineup: the lineup unforms into the row with the scroll. */
   const homeSpin = (y: number): number => {

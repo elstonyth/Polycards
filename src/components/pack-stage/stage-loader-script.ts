@@ -56,6 +56,13 @@ export const FLOW_COVER_ATTR = 'data-flow-cover';
  */
 export const FLOW_LEAVE_ATTR = 'data-flow-leave';
 
+/**
+ * Set by the hydrated page on such a load and kept while its cover is up: the
+ * cover's CSS failsafe is off, since the page's own limit (and the lift after
+ * a leave) ends the cover. With no script the failsafe stays.
+ */
+export const FLOW_HELD_ATTR = 'data-flow-held';
+
 /** Never cut the loader's exit shorter than this after it mounts. */
 const MIN_HOLD_MS = 800;
 

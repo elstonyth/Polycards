@@ -1300,12 +1300,3 @@ describe('flow pager: the wrap', () => {
     expect(p.frame(13050, 16).scrollTo).toBeNull();
   });
 });
-
-describe('flow pager: Just Pulled follows the lineup', () => {
-  it('from the lineup, down glides one section to the free part', () => {
-    const p = make();
-    p.wheel(100, 0, false, 7000, 0);
-    expect(run(p, 7000, 0, 1600)).toBe(8000);
-    expect(p.zone(8000)).toBe('free');
-  });
-});

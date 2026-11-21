@@ -1230,6 +1230,8 @@ async function trimPart(size) {
   }
   await page.waitForTimeout(1200);
   p = await rest(page);
+  // read before the probe's own gesture moves on
+  const exitEnd = p.exitEnd;
   // at the exit's end the trim is off (on the exit's own last pixel there is
   // no lap at all and the packs are drawn); one more gesture up goes back
   // towards the lineup, where the other packs are drawn again
@@ -1240,10 +1242,15 @@ async function trimPart(size) {
   const u = await trimProbe(page);
   report(
     'trim-restored-' + size,
-    (atEnd.lap === null ? atEnd.drawn > 1 : atEnd.lap.trim === false) &&
+    Math.abs(atEnd.y - exitEnd) <= 2 &&
+      (atEnd.lap === null ? atEnd.drawn > 1 : atEnd.lap.trim === false) &&
       (u.lap === null || u.lap.trim !== true) &&
       u.drawn > 1,
-    'at the exit end: lap ' +
+    'at scrollY ' +
+      atEnd.y +
+      ' (exit end ' +
+      exitEnd +
+      '): lap ' +
       JSON.stringify(atEnd.lap) +
       ', drawn ' +
       atEnd.drawn +
