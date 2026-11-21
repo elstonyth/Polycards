@@ -187,6 +187,25 @@ describe('planResidency', () => {
     expect(fitPixelRatio(1, 8000, 8000, 4, 1e6)).toBe(0.5);
   });
 
+  it("the owner's window (2500x1288 at ratio 1.5) holds the focused pack and its printed back", () => {
+    // measured at the stops: whole host 2500x1219 CSS px, no MSAA, ~4 MB environment. At ratio 1.5 the
+    // 10 MB left could not hold a half front plus the back's charge (a full front while it prints), so the
+    // plan dropped the focused pack, which cancelled the print, which freed the charge: a 3-frame reload loop
+    const r = fitPixelRatio(1.5, 2500, 1219, 0, GPU_CAP_DESKTOP_BYTES / 2);
+    const at = (ratio: number) =>
+      textureBudgetBytes(
+        true,
+        drawingBufferBytes(
+          Math.round(2500 * ratio),
+          Math.round(1219 * ratio),
+          0,
+        ) + 4e6,
+      );
+    expect(at(1.5) - FULL).toBeLessThan(HALF);
+    expect(r).toBeLessThan(1.5);
+    expect(at(r) - FULL).toBeGreaterThanOrEqual(HALF);
+  });
+
   it('a tight budget keeps the centre first', () => {
     const sim = simulator(RESIDENCY_DESKTOP, { budget: HALF });
     expect([...sim.step(6, 0).want.keys()]).toEqual([6]);
