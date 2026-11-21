@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { easeOutCubic } from '../stage-spin-driver';
+import { easeOutCubic } from '../stage-spin-math';
 
 describe('easeOutCubic', () => {
   it('runs 0 to 1, clamped, decelerating', () => {

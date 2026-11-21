@@ -1,5 +1,5 @@
 /**
- * Pack stage, step 2: the one-shot arrival flag (plan-step2.md 10.10).
+ * Pack stage: the one-shot arrival flag.
  *
  * "All packs" on a cold-loaded pack page marks an arrival right before its
  * `router.push('/')`; the stage that mounts next reads it and plays the

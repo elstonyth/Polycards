@@ -449,7 +449,7 @@ describe('stage flow: the wrap', () => {
   });
 });
 
-describe('stage flow: the lap at a flow position (plan 2.6)', () => {
+describe('stage flow: the lap at a flow position', () => {
   const live = { rise: 0.4, ret: 0.7 };
   it('nothing in the paged part or the exit; nothing drawn in free; then the live rise and return; Last holds the end', () => {
     expect(lapAt(null, live, false)).toBeNull();
@@ -505,7 +505,7 @@ describe('stage flow: the lap at a flow position (plan 2.6)', () => {
   });
 });
 
-describe('stage flow: the free part kept across a re-measure (rotation, plan 2.9 fault 3)', () => {
+describe('stage flow: the free part kept across a re-measure (rotation)', () => {
   // sections in document scroll px: opening, Just Pulled, Telegram, Return, Last
   const tall = [
     { top: 9000, height: 400 },

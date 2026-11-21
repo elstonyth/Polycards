@@ -4,7 +4,8 @@ import type { StageLayout } from '../contract';
 import type { SpinCtx, StageState } from '../contract';
 import { restBlock } from '../stage-compose';
 import { restState, slotOpacity } from '../stage-pose';
-import { CAPSULE_LEAN, LEAN } from '../stage-spin-math';
+import { CAPSULE_LIMITS } from '../stage-capsule-lean';
+import { LEAN } from '../stage-spin-math';
 import {
   CIAO_PACKSHOT,
   CIAO_ROW,
@@ -189,7 +190,7 @@ describe('spinPose: continuity', () => {
 
 describe('spinPose: the row', () => {
   for (const { name, desktop, l } of SIZES)
-    it(`${name}: gathered row matches 10.3 (scale, step, roll rising right)`, () => {
+    it(`${name}: gathered row matches the gathered pose (scale, step, roll rising right)`, () => {
       const c = spinConfig(desktop);
       const w = spinRowStep(l, desktop);
       expect(w).toBeCloseTo(c.GAP * c.S * (l.artW ?? 0), 9);
@@ -278,14 +279,14 @@ describe('spinPose: the row', () => {
 
 describe('lean mode (capsules, the tip variant, packs without a back)', () => {
   for (const { name, desktop, l } of SIZES)
-    it(`${name}: capsules stay within +-CAPSULE_LEAN plus the rest yaw`, () => {
+    it(`${name}: capsules stay within +-CAPSULE_LIMITS.yaw plus the rest yaw`, () => {
       for (const n of [5, 11])
         for (const s of grid(300))
           for (let i = 0; i < n; i++) {
             const rest = restBlock(st(s), i, l, desktop, false);
-            const p = pose(s, i, l, desktop, ctx(n, 0, CAPSULE_LEAN));
+            const p = pose(s, i, l, desktop, ctx(n, 0, CAPSULE_LIMITS.yaw));
             expect(Math.abs(p.rotY)).toBeLessThanOrEqual(
-              CAPSULE_LEAN + Math.abs(rest.rotY) + 1e-9,
+              CAPSULE_LIMITS.yaw + Math.abs(rest.rotY) + 1e-9,
             );
           }
     });
@@ -299,7 +300,7 @@ describe('lean mode (capsules, the tip variant, packs without a back)', () => {
   });
 });
 
-describe('passBand (glare, 10.7)', () => {
+describe('passBand (glare)', () => {
   it('keeps the ends of the spin and is odd, periodic and monotone', () => {
     expect(passBand(0)).toBe(0);
     expect(passBand(2 * Math.PI)).toBeCloseTo(2 * Math.PI, 12);
@@ -415,7 +416,7 @@ describe('switches', () => {
   });
 });
 
-describe('tip: Ciao packshot look (motion sheet 7.2)', () => {
+describe('tip: the packshot look', () => {
   const panelOf = (desktop: boolean) =>
     desktop
       ? { w: 1440, h: 828, anchorY: 400 / 828 }
@@ -515,8 +516,8 @@ describe('tip: Ciao packshot look (motion sheet 7.2)', () => {
     expect(b.dim).toBeCloseTo(CIAO_ROW.restLight * CIAO_ROW.exitLight, 9);
   });
 
-  it('packs stand as tall as Ciao cans: about 340 px on desktop, 300 on phones', () => {
-    // centre pack at rest, viewport-height projection as Ciao's
+  it('packs stand as tall as the reference cans: about 340 px on desktop, 300 on phones', () => {
+    // centre pack at rest, viewport-height projection as the viewport's
     const h = (desktop: boolean) => {
       const l = desktop ? DESKTOP : PHONE;
       const p = ciaoPose(

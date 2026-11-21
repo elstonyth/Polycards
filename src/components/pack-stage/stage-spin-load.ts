@@ -1,5 +1,5 @@
 /**
- * Pack stage, step 2: the one door to the scroll spin's chunk
+ * Pack stage: the one door to the scroll spin's chunk
  * (`stage-spin-kit.ts`), shared by the page (which starts the driver) and the
  * CSS tiles (which pose the row with it). Tiny: the first load carries only
  * this; the chunk loads after hydration, never under reduced motion.

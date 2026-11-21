@@ -57,7 +57,7 @@ export type PackSpot = {
 };
 
 /**
- * Ciao's dark room around the lit window (plan-focus-ciao section 4). The
+ * The dark room around the lit window. The
  * shadow multiplies linear light: 0.05 shows as about 26% on screen (sRGB),
  * dark enough for the lit window, light enough that the foil and the
  * crimped ends still read as a pack.

@@ -1,5 +1,5 @@
 /**
- * Pack stage: the focused pack's poses (plan-focus-ciao sections 2 to 5).
+ * Pack stage: the focused pack's poses.
  * Pure: no DOM, no three.js, no clock, no React. Loaded with the focus chunk
  * and the runtime, never in the first load.
  *
@@ -7,7 +7,7 @@
  * page scroll gives. 0 is the row (the rest carousel); k >= 1 rests on
  * `keys[k - 1]` (Front, Top Hits, Pull Odds, Buyback, Recent Pulls, Closing,
  * fewer for a capsule or a pack with no pull odds). Between two stops the pose
- * moves by power1InOut of the local progress, as Ciao's scene follows its
+ * moves by power1InOut of the local progress, the scene follows the
  * scroll through `power1.inOut` per section; the paging writes the scroll
  * with an ease-out cubic, so the pose in time is power1InOut(outCubic(t)).
  */
@@ -75,7 +75,7 @@ function clamp01(v: number): number {
 }
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
-/** Ciao's section ease: power1.inOut. */
+/** The section ease: power1.inOut. */
 export function power1InOut(q: number): number {
   const x = clamp01(q);
   return x < 0.5 ? 2 * x * x : 1 - 2 * (1 - x) * (1 - x);
@@ -237,7 +237,7 @@ export function spotAt(
   };
 }
 
-/** The text block shown at F: switches 20% into a move, either way (Ciao). */
+/** The text block shown at F: switches 20% into a move, either way. */
 export function blockAt(focus: number, n: number): number {
   return Math.min(n, Math.max(0, Math.floor(focus + 0.8)));
 }

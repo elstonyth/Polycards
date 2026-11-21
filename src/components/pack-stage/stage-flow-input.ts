@@ -1,6 +1,5 @@
 /**
- * Pack stage: the full-page flow's input, as pure code (full-flow plan 2.2,
- * 2.3; work package 3a). No DOM and no clock: the spin chunk passes the
+ * Pack stage: the full-page flow's input, as pure code. No DOM and no clock: the spin chunk passes the
  * scroll and the time, and writes `scrollTo` back to the window each frame.
  *
  * It joins the one flow pager to the focused view:
@@ -11,7 +10,7 @@
  * - a page that reaches the band by other means (the scrollbar, a key's
  *   native scroll) focuses the centred pack as well, or goes back to the row
  *   when it cannot be focused;
- * - the stop list ends at the lineup rest RL (work package 4): a down
+ * - the stop list ends at the lineup rest RL: a down
  *   gesture at Closing pages to RL while the focused pack hands over to the
  *   tilted lineup (`handoff`, the local progress, a function of the
  *   scroll); a down gesture at RL pages through the lineup's exit
@@ -22,10 +21,10 @@
  * - a re-measure keeps the flow position P (a rotation never leaves the page
  *   off its section).
  * In the free part a vertical touch is the flow's (the page follows the
- * finger, then glides; plan 2.5) and a sideways one the browser's; the wheel
+ * finger, then glides) and a sideways one the browser's; the wheel
  * there is native except an up notch that crosses the paged edge, which
- * pages back to the lineup. Crossing Last's top going down wraps to the row
- * (plan 2.7); Home and Escape at the lineup take the same way back.
+ * pages back to the lineup. Crossing Last's top going down wraps to the row;
+ * Home and Escape at the lineup take the same way back.
  */
 import {
   flowAt,
@@ -49,7 +48,7 @@ import { blockAt } from './stage-focus';
 import { AXIS_LOCK_PX } from './stage-pager';
 import { clamp01 } from './stage-spin-math';
 
-/** The pick is carried this long after the lineup comes to rest [code: debounced 150 ms]. */
+/** The pick is carried this long after the lineup comes to rest (debounced 150 ms). */
 export const LINE_PICK_MS = 150;
 
 /** What the flow reads of the page. */
@@ -101,7 +100,7 @@ export type FlowInputFrame = FlowPagerFrame & {
   /** The focus value F: P in the band, held at the last stop past it. */
   focus: number;
   /**
-   * The hand-off from Closing to the lineup rest (plan 2.4): the local
+   * The hand-off from Closing to the lineup rest: the local
    * progress, 0 at Closing and above, 1 at RL and below (the pose eases it).
    */
   handoff: number;
@@ -110,7 +109,7 @@ export type FlowInputFrame = FlowPagerFrame & {
   /**
    * The page has left the details downwards: the free part, or past the
    * last stop by the text's own line (20% into the move below it, either
-   * way, as `blockAt`). The address follows it (plan 2.8).
+   * way, as `blockAt`). The address follows it.
    */
   past: boolean;
   /**
@@ -120,7 +119,7 @@ export type FlowInputFrame = FlowPagerFrame & {
   line: FlowLineFrame | null;
 };
 
-/** What a key asks for (plan 2.10). */
+/** What a key asks for. */
 export type FlowKeyIntent =
   'next' | 'prev' | 'first' | 'last' | 'escape' | 'left' | 'right';
 
@@ -173,8 +172,8 @@ export function flowKeyIntent(e: KeyLike): FlowKeyIntent | null {
 }
 
 /**
- * Where a page starts once the flow binds (plan 2.8: a reload starts at the
- * row, as the reference always does). A reload or a history load that left
+ * Where a page starts once the flow binds (a reload starts at the
+ * row). A reload or a history load that left
  * the page elsewhere goes to R0; a plain load is the visitor's own.
  */
 export function flowLoadStart(
@@ -277,7 +276,7 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
    * (a rotation lays out the shorter page before the resize listener runs).
    */
   let lastY: number | null = null;
-  /** The lineup's endless pick (plan 2.4). */
+  /** The lineup's endless pick. */
   const line = createFlowLine({ canPick: (i) => d.canPick?.(i) ?? true });
   /** A touch that may drag the lineup: where it landed. */
   let lineTouch: { x0: number } | null = null;
@@ -457,7 +456,7 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
       const inDetails = d.focused() && k >= 1;
       // at the lineup Home and Escape go back to the row the way the wrap
       // does: the lineup unforms into the row with the chosen pack, no move
-      // back through the stops (plan 2.10; the details' leave is for stops)
+      // back through the stops
       const atLineup =
         inDetails && table.rests.length > 0 && k === s.length - 1;
       if (atLineup && (intent === 'first' || intent === 'escape'))

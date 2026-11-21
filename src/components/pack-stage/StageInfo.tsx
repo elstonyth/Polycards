@@ -9,7 +9,7 @@ import { packHref } from '@/lib/packs-data';
 import { cn } from '@/lib/utils';
 import type { StagePack } from './contract';
 
-/** Owner decision 5 (plan section 11): the quantity stepper shows on desktop
+/** Owner decision 5: the quantity stepper shows on desktop
  *  only; phones open one pack and pick the count on the pack page. */
 export const STAGE_STEPPER_DESKTOP_ONLY = true;
 
@@ -31,7 +31,7 @@ function StatusBadge({ pack }: { pack: StagePack }) {
 }
 
 /**
- * The centred pack's facts and action, under the carousel (plan section 1).
+ * The centred pack's facts and action, under the carousel.
  * Phone: name, price, top chase, Open. Desktop adds the category and buyback
  * line and the quantity stepper, as the /slots catalogue's lead card. Sold out
  * keeps the name and price at half strength and puts a full-contrast "Sold

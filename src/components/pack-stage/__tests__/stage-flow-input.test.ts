@@ -249,7 +249,7 @@ describe('flow input: Closing to the free part', () => {
   });
 });
 
-describe('flow input: the wrap (plan 2.7)', () => {
+describe('flow input: the wrap', () => {
   const FULL = {
     ...GEO,
     telegram: { top: 11000, bottom: 12000 },
@@ -360,7 +360,7 @@ describe('flow input: a re-measure keeps P', () => {
     expect(p.input.measure(grown, 9800)).toBeNull();
   });
 
-  it('P makes the round trip across a re-measure in every zone (plan WP8)', () => {
+  it('P makes the round trip across a re-measure in every zone', () => {
     for (const y0 of [0, 3000, 6000, 7000, 8000, 9800, 10900, 11500, 12500]) {
       const p = page();
       p.input.measure(geoAt(800, 1), 0);
@@ -373,7 +373,7 @@ describe('flow input: a re-measure keeps P', () => {
   });
 });
 
-describe('flow input: keys (plan 2.10)', () => {
+describe('flow input: keys', () => {
   const ev = (
     key: string,
     o: Partial<
@@ -398,7 +398,7 @@ describe('flow input: keys (plan 2.10)', () => {
     expect(flowKeyIntent(ev('Home'))).toBe('first');
     expect(flowKeyIntent(ev('End'))).toBe('last');
     expect(flowKeyIntent(ev('Escape'))).toBe('escape');
-    // the lineup's pick (work package 5); elsewhere the flow returns them
+    // the lineup's pick; elsewhere the flow returns them
     expect(flowKeyIntent(ev('ArrowLeft'))).toBe('left');
     expect(flowKeyIntent(ev('ArrowRight'))).toBe('right');
     expect(flowKeyIntent(ev('Tab'))).toBeNull();
@@ -441,7 +441,7 @@ describe('flow input: keys (plan 2.10)', () => {
     expect(run(p.input, 0, 16, 2000)).toBe(0);
   });
 
-  it('end at the row focuses the centred pack and pages to the lineup (plan 2.10)', () => {
+  it('end at the row focuses the centred pack and pages to the lineup', () => {
     const p = page();
     expect(p.input.key('last', 0, 0)).toBe('moved');
     expect(p.calls).toEqual(['enter']);
@@ -495,7 +495,7 @@ describe('flow input: keys (plan 2.10)', () => {
     expect(run(p.input, y, 2416, 3600)).toBe(3000);
   });
 
-  it("home and escape at the lineup go back to the row by the wrap's lock (1.2 s), no history of their own", () => {
+  it("home and escape at the lineup go back to the row by the wrap's lock (1.2 s), entering nothing", () => {
     for (const k of ['first', 'escape'] as const) {
       const p = atStop(7);
       expect(p.input.key(k, p.y, 2000)).toBe('moved');
@@ -503,6 +503,7 @@ describe('flow input: keys (plan 2.10)', () => {
       expect(f.lock).toBe('home');
       expect(f.wrap).toBe(0);
       expect(run(p.input, p.y, 2032, 2016 + 1216)).toBe(0);
+      expect(p.calls).toEqual(['enter']);
     }
   });
 
@@ -523,7 +524,7 @@ describe('flow input: End at the row with a pack that cannot be focused', () => 
   });
 });
 
-describe('flow input: a held key (review finding 7: one page per press)', () => {
+describe('flow input: a held key', () => {
   /** Focused and resting on Closing (6000). */
   function atClosing() {
     const p = page();
@@ -581,7 +582,7 @@ describe('flow input: past the details (the address threshold)', () => {
   });
 });
 
-describe('flow load start (plan 2.8: a reload starts at the row)', () => {
+describe('flow load start', () => {
   it('a reload or a history load starts at R0', () => {
     expect(flowLoadStart('reload', 9300, 0)).toBe(0);
     expect(flowLoadStart('back_forward', 2000, 0)).toBe(0);
@@ -595,7 +596,7 @@ describe('flow load start (plan 2.8: a reload starts at the row)', () => {
   });
 });
 
-describe('flow input: a touch during a move across the paged edge (review finding 3)', () => {
+describe('flow input: a touch during a move across the paged edge', () => {
   /** Focused and resting on the lineup (7000). */
   function lineup() {
     const p = page();
@@ -640,7 +641,7 @@ describe('flow input: a touch during a move across the paged edge (review findin
   });
 });
 
-describe('flow input: a touch that is dropped (review finding 2)', () => {
+describe('flow input: a touch that is dropped', () => {
   it('a cancelled touch leaves the snap and the idle report as they were', () => {
     const p = page();
     p.input.wheel(100, 0, false, 0, 0);
@@ -665,7 +666,7 @@ describe('flow input: a touch that is dropped (review finding 2)', () => {
   });
 });
 
-describe('flow input: a down gesture refused at the row (review finding 1)', () => {
+describe('flow input: a down gesture refused at the row', () => {
   it('says so after a down notch, a swipe or a next key with no focusable pack yet', () => {
     const p = page(null);
     expect(p.input.wheel(100, 0, false, 0, 0)).toBe(true);
@@ -691,7 +692,7 @@ describe('flow input: a down gesture refused at the row (review finding 1)', () 
   });
 });
 
-describe('flow input: the endless pick at the lineup (work package 5)', () => {
+describe('flow input: the endless pick at the lineup', () => {
   const CAPSULE = focusStops('capsule');
   /**
    * Focused on pack 2 of 5 and resting on the lineup (7000). `kindsOf`

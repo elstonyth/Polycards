@@ -13,7 +13,7 @@ import { composeOpacity, composePose } from '../stage-pose-compose';
 import { ciaoCopies, ciaoOpacity, ciaoPose } from '../stage-spin';
 import { LEAN } from '../stage-spin-math';
 
-// The endless pick (work package 5) moves the row's track while the focused
+// The endless pick moves the row's track while the focused
 // pack's lineup is at rest. The track is handed to the row kept inside
 // [-0.5, n - 0.5), so whenever it wraps by n the picture must not change.
 

@@ -1,5 +1,5 @@
 /*
- * The Just Pulled drawer (full-flow plan 1.1, work package 11). The base is
+ * The Just Pulled drawer. The base is
  * the drawer at rest: the front card shows one pull in full, the next pulls
  * show only their tabs above it (2 on a phone, 3 on desktop), the rest are not
  * drawn. Scrolling never moves it. The live feed does: a new pull drops in at

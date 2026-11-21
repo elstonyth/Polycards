@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
 import styles from './home-flow.module.css';
 
 /**
- * The Telegram section of the preview (full-flow plan 1, row 7, and 1.2): the
+ * The Telegram section of the preview: the
  * Telegram link with the footer's own label, the trust points, then the site
  * footer itself. The layout's copy of the footer is hidden on this page by
  * home-flow.module.css, so the page shows one footer, here.

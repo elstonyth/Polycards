@@ -1,5 +1,5 @@
 /**
- * Pack stage 3D gate (plan section 5): decides `'3d' | 'lite' | 'flat'`.
+ * Pack stage 3D gate: decides `'3d' | 'lite' | 'flat'`.
  *
  * Split for testing: `decideStageMode` is a pure decision over plain signals;
  * `readCheapSignals` and `probeWebGL2` are thin probes over injected
@@ -10,7 +10,7 @@
  * reads the URL, cookies or headers.
  *
  * Also home of the frame-time watchdog maths (pure) and the pre-paint
- * predicate the loader's inline script inlines (plan section 6).
+ * predicate the loader's inline script inlines.
  */
 import { STAGE_CRASH_KEY } from './crash-guard';
 
@@ -189,7 +189,7 @@ export function browserGateEnv(): GateEnv {
 }
 
 // ---------------------------------------------------------------------------
-// Pre-paint predicate (plan section 6): the same cheap rules, as plain data
+// Pre-paint predicate: the same cheap rules, as plain data
 // plus one self-contained JS expression the inline loader script can embed.
 
 export const STAGE_PREPAINT_RULES = Object.freeze({
@@ -219,7 +219,7 @@ export function stagePrepaintExpression(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Frame-time watchdog (plan section 4): p90 of rAF intervals over a window.
+// Frame-time watchdog: p90 of rAF intervals over a window.
 
 export const WATCHDOG_WINDOW = 90;
 export const WATCHDOG_P90_LIMIT_MS = 34;

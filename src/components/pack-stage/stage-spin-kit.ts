@@ -1,20 +1,19 @@
 /**
- * Pack stage, step 2: the scroll spin's lazily loaded chunk (plan-step2.md
- * 10.9 "First-load JS"). The provider imports it at idle after hydration
+ * Pack stage: the scroll spin's lazily loaded chunk. The provider imports it at idle after hydration
  * (never under reduced motion) and shares it with the CSS tiles, so the first
  * load carries only the observables, the markup and the composition shell.
  *
- * The page is one flow (full-flow plan 2.1 to 2.3): the panel sticks for the
+ * The page is one flow: the panel sticks for the
  * whole flow root and everything after it scrolls over it. One pager pages
  * the row, the focused pack's stops and the move from Closing into the free
  * part: one wheel notch or swipe plays one 1.5 s ease-out cubic move, input
  * locked meanwhile, the page never following a held finger. A down gesture
  * at the row focuses the centred pack.
  *
- * Keys (plan 2.10) go through the same pager in the paged part; in the free
+ * Keys go through the same pager in the paged part; in the free
  * part they are the browser's. Focus landing in the row's own UI while the
  * page is off the row pages back to it. While bound, the page's scroll
- * restoration is manual and a reload starts at the row (plan 2.8).
+ * restoration is manual and a reload starts at the row.
  */
 import type { ReactNode } from 'react';
 import type {
@@ -30,6 +29,7 @@ import type { StageTrackHandle } from './StageTrack';
 import { STAGE_DESKTOP_QUERY } from './stage-gate';
 import { stageAnnouncement } from './stage-filter';
 import { tileVars } from './StageTile';
+import { SLEEVE_TILE } from './stage-capsule-lean';
 import { rowTilePacks, tilePose, tileSpinCtx } from './stage-row-tiles';
 import { cancelFrame, frame, type FrameData } from './stage-motion';
 import { composeOpacity, composePose } from './stage-pose-compose';
@@ -123,8 +123,6 @@ function frontKeys(keys: readonly FocusKey[]): FocusKey[] {
   }
   return out;
 }
-
-const SLEEVE_TILE = { soldOut: false, ticket: false } as const;
 
 const fmt = (v: number) => String(Math.round(v * 10000) / 10000);
 
@@ -274,7 +272,7 @@ export function startSpin(host: SpinHost): SpinControl {
     focused: () => !!focus?.active(),
     kinds: () => focus?.kinds() ?? [],
     enter: () => !!focus?.enter(centre(), { how: 'scroll', page: false }),
-    // the lineup's endless pick (plan 2.4): the shown row, while focused
+    // the lineup's endless pick: the shown row, while focused
     line: () => {
       const r = host.row?.();
       const fo = stage.state.focusOn;
@@ -329,7 +327,7 @@ export function startSpin(host: SpinHost): SpinControl {
     });
     if (on !== was) {
       src.flow.toggleAttribute('data-flow-on', on);
-      // Return and Last take their height with the flow (plan 2.6, 2.7)
+      // Return and Last take their height with the flow
       src.flow.toggleAttribute('data-flow-return', on);
       src.flow.toggleAttribute('data-flow-last', on);
       if (!on) clearPast(src);
@@ -385,7 +383,7 @@ export function startSpin(host: SpinHost): SpinControl {
   };
 
   /**
-   * The panel past Closing (work package 4): the focused pack hands over to
+   * The panel past Closing: the focused pack hands over to
    * the tilted lineup and its exit (the stage's spin and exit, read from the
    * scroll while a pack is focused); the stop text leaves on its own line
    * (data-flow-past); the panel takes no taps from the hand-off's first
@@ -479,7 +477,7 @@ export function startSpin(host: SpinHost): SpinControl {
     }
   };
   /**
-   * The lap ends (plan 2.7): on the wrap frame, or Home or Escape at the
+   * The lap ends: on the wrap frame, or Home or Escape at the
    * lineup. The row shows the chosen pack, the focus ends where it is (no
    * move, no history: past the details the address is the base path
    * already), and the row's UI fades back in over 0.35 s.
@@ -904,7 +902,7 @@ export function startSpin(host: SpinHost): SpinControl {
   };
   let tapping = false;
   const preload = () => void loadFocus();
-  // The flow's keys (plan 2.10): never while a field, the Top Hits strip
+  // The flow's keys: never while a field, the Top Hits strip
   // or a dialog has focus, never Space on a control, never a key a part of
   // the page already took (the row's own arrows, the sort panel).
   const onKey = (e: KeyboardEvent) => {

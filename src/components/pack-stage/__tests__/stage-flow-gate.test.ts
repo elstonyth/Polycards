@@ -85,7 +85,7 @@ describe('touch gate: the touch events carry their own time', () => {
   });
 });
 
-describe('touch gate: a second finger (review finding 2)', () => {
+describe('touch gate: a second finger', () => {
   it('a pinch drops the touch: the page it left off a rest snaps back and the loop may sleep', () => {
     const p = atFront();
     expect(p.y).toBe(1000);
@@ -200,7 +200,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-describe("focus load: the focused view's chunk (review finding 1)", () => {
+describe("focus load: the focused view's chunk", () => {
   function loader() {
     const loads: ReturnType<typeof deferred<string | null>>[] = [];
     const events: string[] = [];
@@ -350,7 +350,7 @@ describe("focus load: the focused view's chunk (review finding 1)", () => {
   });
 });
 
-describe('a held down gesture (review finding 7)', () => {
+describe('a held down gesture', () => {
   it('stands only at the same place, and never later than 3 s after it was made', () => {
     expect(HOLD_MAX_MS).toBe(3000);
     const hold = { at: 1000, where: 'tab:poly|151' };
@@ -363,7 +363,7 @@ describe('a held down gesture (review finding 7)', () => {
   });
 });
 
-describe('panel state past Closing (review findings 4 and 5; work package 4)', () => {
+describe('panel state past Closing', () => {
   it('at a stop the panel takes taps and the 3D is shown', () => {
     expect(panelState(0, 6000, 9000)).toEqual({
       inert: false,
@@ -402,7 +402,7 @@ describe('panel state past Closing (review findings 4 and 5; work package 4)', (
     });
   });
 
-  it('the panel shows again from the rise on (the lap), still taking no taps; the 3D is never sent away (plan 1.1a: trimmed, not freed)', () => {
+  it('the panel shows again from the rise on (the lap), still taking no taps; the 3D is never sent away', () => {
     // free span: 9000 to the rise start at 10720
     expect(panelState(1, 10000, 9000, 10720)).toEqual({
       inert: true,

@@ -132,7 +132,7 @@ function DrawerCard({
 }
 
 /**
- * The Just Pulled section's own part (full-flow plan 1.1, work package 11):
+ * The Just Pulled section's own part:
  * the heading with LIVE, the "packs without" counters, the tier filter, and
  * the drawer of pulls (or the Stats chart in its place). No hooks: the server
  * renders it once from the page's feed (the drawer at rest, and the plain

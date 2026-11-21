@@ -83,7 +83,7 @@ export type Pack = {
   buybackPercent?: number;
   /** false → render a greyed "Out of Stock" / "Sold out" tile. Default in-stock. */
   inStock?: boolean;
-  /** §2.4.8 pool composition, auto-detected by the backend from the pack's
+  /** Pool composition, auto-detected by the backend from the pack's
    *  prize pool — never operator-set. GRADED = every card graded (the catalog's
    *  "Guaranteed PSA 10" section), RAW = none graded, MIX = both, null/absent =
    *  empty pool or an older backend. Anything but GRADED lists under Raw:

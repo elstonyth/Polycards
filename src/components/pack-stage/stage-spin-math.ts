@@ -1,26 +1,25 @@
 /**
- * Pack stage, step 2: small constants and helpers the spin, focus and the
- * composed pose share (plan-step2.md 10.6, 10.9). Kept out of `stage-pose.ts`
+ * Pack stage: small constants and helpers the spin, focus and the
+ * composed pose share. Kept out of `stage-pose.ts`
  * so the first load, which imports that module, never carries them: only the
  * lazily loaded chunks (spin, runtime, focus) reach this one. Pure.
  */
 import { slotIntroLinear } from './stage-pose';
-import { CAPSULE_LIMITS } from './stage-capsule-lean';
 
-/** Packs' lean mode amplitude, radians (10.9, the planner's default). */
+/** Packs' lean mode amplitude, radians. */
 export const LEAN = 0.61;
 
-/**
- * Capsules' lean, radians: 25 degrees each way (owner, 2026-11-20). Used by
- * focus and spin alike; tests assert "within +-CAPSULE_LEAN", never a number.
- */
-export const CAPSULE_LEAN = CAPSULE_LIMITS.yaw;
-
-/** End of the full-turn row's gather (10.9); the composed pose weighs its idle terms by it. */
+/** End of the full-turn row's gather; the composed pose weighs its idle terms by it. */
 export const SPIN_GATHER = 0.15;
 
 export function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
+}
+
+/** Ease-out cubic: 0 to 1, clamped, decelerating. */
+export function easeOutCubic(t: number): number {
+  const u = 1 - clamp01(t);
+  return 1 - u * u * u;
 }
 
 export function smoothstep(e0: number, e1: number, x: number): number {
@@ -42,7 +41,7 @@ export function dampedFollow(
 }
 
 /**
- * Float-in visibility (10.10 item 5, the "All packs" arrival; wired with
+ * Float-in visibility (the "All packs" arrival; wired with
  * focus): each pack fades in over the first third of its rise, like the CSS
  * `stage-in` fade, so an arrival at `intro` 0 draws nothing.
  */

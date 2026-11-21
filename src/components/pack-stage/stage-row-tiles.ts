@@ -12,23 +12,30 @@ import type {
   StageLayout,
   StageState,
 } from './contract';
-import { capsulePose } from './stage-capsule-lean';
+import { CAPSULE_LIMITS, SLEEVE_TILE, capsulePose } from './stage-capsule-lean';
 import { poseAt } from './stage-pose';
 import { composePose } from './stage-pose-compose';
-import { CAPSULE_LEAN, LEAN } from './stage-spin-math';
+import { LEAN } from './stage-spin-math';
 import { ciaoOpacity, ciaoPose } from './stage-spin';
 
 export type TilePack = { soldOut: boolean; ticket: boolean };
 
-/** The tiles' packs; a tile with no row entry poses as a sleeve. */
+/**
+ * The tiles' packs, from the row on show; a tile with no row entry poses as
+ * `SLEEVE_TILE`, except that its name still says whether it is sold out.
+ */
 export function rowTilePacks(
   labels: readonly (string | null)[],
-  packs: readonly { ticket: boolean }[] | undefined,
+  packs: readonly TilePack[] | undefined,
 ): TilePack[] {
-  return labels.map((label, i) => ({
-    soldOut: !!label?.endsWith(', sold out'),
-    ticket: packs?.[i]?.ticket ?? false,
-  }));
+  return labels.map((label, i) => {
+    const entry = packs?.[i];
+    if (entry) return { soldOut: entry.soldOut, ticket: entry.ticket };
+    return {
+      soldOut: !!label?.endsWith(', sold out'),
+      ticket: SLEEVE_TILE.ticket,
+    };
+  });
 }
 
 /** The spin context a tile is posed with (a capsule leans as a capsule). */
@@ -42,7 +49,7 @@ export function tileSpinCtx(
     spin: {
       count,
       turn: 0,
-      lean: pack.ticket ? CAPSULE_LEAN : LEAN,
+      lean: pack.ticket ? CAPSULE_LIMITS.yaw : LEAN,
       spinPose: ciaoPose,
       soldOut: pack.soldOut,
       exit,

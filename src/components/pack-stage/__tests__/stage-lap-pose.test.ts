@@ -15,7 +15,7 @@ import { composeOpacity, composePose } from '../stage-pose-compose';
 import { ciaoOpacity, ciaoPose } from '../stage-spin';
 import { LEAN } from '../stage-spin-math';
 
-// The end of the lap (full-flow plan 2.6, 2.7): the chosen pack rises from
+// The end of the lap: the chosen pack rises from
 // one panel below to the row's rest, the others slide back from 5 to 1 row
 // steps and fade in, and the end of Return is the row at rest exactly, so
 // the wrap to R0 shows no seam.

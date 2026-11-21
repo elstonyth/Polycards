@@ -1,5 +1,5 @@
 /**
- * Pack stage: the focused pack view's lazily loaded chunk (plan-focus-ciao).
+ * Pack stage: the focused pack view's lazily loaded chunk.
  * The spin chunk imports it at idle after itself, or at the first tap on a
  * pack; the first load never carries it.
  *
@@ -12,7 +12,7 @@
  *   it the focus value read from the scroll (a tap or a down gesture at the
  *   row pages to Front; paging back past Front, "All packs", Escape, Home or
  *   browser Back pages from Front to the row, which ends the focus).
- * - The address follows full-flow plan 2.8 (`stage-focus-address`): a tap
+ * - The address follows `stage-focus-address`: a tap
  *   pushes `/slots/<id>`, a scroll replaces it, and leaving the details
  *   downwards or ending the focus puts the base path back without a new
  *   entry.
@@ -48,8 +48,6 @@ export { FOCUS_DURATIONS, FOCUS_WINDOW } from './stage-focus-keys';
 export { blockAt, power1InOut } from './stage-focus';
 export { focusStops };
 
-/** Each stop is this many panels of scroll (Ciao's section). */
-export const STOP_PANELS = 1.25;
 /** The active block fades this long before "All packs" returns to the row. */
 export const LEAVE_FADE_MS = 250;
 
@@ -540,7 +538,7 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       }
       // past Closing + 0.5 the back is let go (the lineup's fronts take its
       // room); back at a stop it is printed again once the pack rests there,
-      // never mid-move (full-flow plan 2.12, risk 4)
+      // never mid-move
       const handoff = f.handoff ?? 0;
       if (settled && !focusBackWanted(handoff)) {
         settled = false;

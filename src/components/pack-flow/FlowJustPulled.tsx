@@ -18,8 +18,7 @@ const NO_SCRIPT_CSS = `
 `;
 
 /**
- * The Just Pulled section of the preview (full-flow plan 1.1, work package
- * 11): one root with the section's data attribute, holding the drawer (the
+ * The Just Pulled section of the preview : one root with the section's data attribute, holding the drawer (the
  * heading with LIVE, the counters, the tier filter and the pulls), then the
  * live ticker and Top Collectors. The server renders the whole drawer at rest
  * from the page's feed; only a small shell is first-load code, and it swaps

@@ -1,6 +1,6 @@
 /**
  * Pack stage data: the server's catalogue projected into the stage's own
- * `StagePack` shape (plan sections 2 and 3). Pure and server-safe.
+ * `StagePack` shape. Pure and server-safe.
  *
  * This is the ONLY pack-stage file that imports the 3D catalogue and the 3D
  * capsule set, and only their sync lookups (data, no three.js). No client file may import this module: the
@@ -35,7 +35,7 @@ import type {
 import { ALL_SHELF } from './stage-filter';
 
 /**
- * Owner decision 2 (plan section 11, revised 2026-11-19): which order the
+ * Owner decision 2: which order the
  * carousel walks a category in. 'price' = cheapest first, ties in catalogue
  * order; 'slots' = the /slots catalogue's order (`shelvePacks`: pack type
  * shelves, cheapest first on each); 'ladder' = the old home ladder's order

@@ -1,5 +1,5 @@
 /**
- * Types of the homepage flow's groundwork (plan-step2 sections 1 to 4 and 8).
+ * Types of the homepage flow's groundwork.
  * Types that already exist are imported; these are the ones that did not.
  *
  * The stage's own contract (`src/components/pack-stage/contract.ts`, WP-D)
@@ -60,6 +60,6 @@ export type FlowData = {
   turns: boolean;
 };
 
-/** Where the address says the flow is (section 3, flow-address). */
+/** Where the address says the flow is (see flow-address). */
 export type FlowLocation =
   { kind: 'stage' } | { kind: 'focus'; id: string } | { kind: 'other' };

@@ -3,7 +3,7 @@
  * stage poses (the row at rest with the pointer at its extremes and the idle
  * sway, the paged spin, its exit, the row's repeats, every focus stop and
  * every move between them, on both sizes), the lean the runtime hands the
- * capsule stays within +-CAPSULE_LEAN of yaw and tips away at most
+ * capsule stays within +-CAPSULE_LIMITS.yaw of yaw and tips away at most
  * `capsuleTipAway`, toward at most `capsuleTipToward`. Limits, never values.
  */
 import { describe, expect, it } from 'vitest';
@@ -24,7 +24,6 @@ import { FOCUS_TERM } from '../stage-compose';
 import { focusKeys } from '../stage-focus-keys';
 import { poseAt, restState } from '../stage-pose';
 import { composePose } from '../stage-pose-compose';
-import { CAPSULE_LEAN } from '../stage-spin-math';
 import { CIAO_ROW, ciaoCopies, ciaoOpacity, ciaoPose } from '../stage-spin';
 
 const SIZES = [
@@ -57,10 +56,10 @@ function within(p: { rotX: number; rotY: number }, what: string) {
 
 describe('capsule lean limits', () => {
   it('the limits are the owner rulings', () => {
-    expect(CAPSULE_LIMITS.yaw).toBe(CAPSULE_LEAN);
+    expect(CAPSULE_LIMITS.yaw).toBeCloseTo((25 * Math.PI) / 180, 12);
     expect(CAPSULE_LIMITS.tipAway).toBe(CIAO_ROW.capsuleTipAway);
     expect(CAPSULE_LIMITS.tipToward).toBe(CIAO_ROW.capsuleTipToward);
-    expect(CAPSULE_LIMITS.tipAway).toBeLessThanOrEqual(CAPSULE_LEAN);
+    expect(CAPSULE_LIMITS.tipAway).toBeLessThanOrEqual(CAPSULE_LIMITS.yaw);
   });
 
   it('clamps any pose, and leaves a lean inside the limits as it is', () => {
@@ -70,7 +69,7 @@ describe('capsule lean limits', () => {
     }
     const inside = {
       rotX: CAPSULE_LIMITS.tipAway / 2,
-      rotY: -CAPSULE_LEAN / 2,
+      rotY: -CAPSULE_LIMITS.yaw / 2,
     };
     expect(capsuleLean(inside)).toEqual({
       yaw: inside.rotY,
@@ -84,7 +83,7 @@ describe('capsule lean limits', () => {
       spin: {
         count: N,
         turn: 0,
-        lean: CAPSULE_LEAN,
+        lean: CAPSULE_LIMITS.yaw,
         spinPose: ciaoPose,
         exit,
         panel,

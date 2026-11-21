@@ -261,7 +261,7 @@ describe('poseAt: swap, pointer, idle, sold out', () => {
     }
   });
 
-  it('ignores focus and turn for now (step 2)', () => {
+  it('ignores focus and turn for now', () => {
     expect(poseAt(state({ focus: 1, turn: 1 }), 4, DESK, true, false)).toEqual(
       REST_POSE,
     );

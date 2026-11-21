@@ -1,6 +1,5 @@
 /**
- * Pack stage: the full-page flow model (full-flow plan sections 2.1, 2.4 to
- * 2.7). Pure: no DOM, no clock, no React, no three.js. Imported only by the
+ * Pack stage: the full-page flow model. Pure: no DOM, no clock, no React, no three.js. Imported only by the
  * lazy stage chunks, never by the first load.
  *
  * The page is one table of scroll positions. The paged part: the row rest
@@ -19,24 +18,23 @@
  */
 import type { StageLap } from './contract';
 import { power1InOut } from './stage-focus';
-import { easeOutCubic } from './stage-spin-driver';
-import { clamp01 } from './stage-spin-math';
+import { clamp01, easeOutCubic } from './stage-spin-math';
 
-/** One section: 1.25 panels (min-height 125svh) [code, D §A; P §A]. Equals CIAO_EXIT_PANELS [ours]; the lineup exit runs over two sections. */
+/** One section: 1.25 panels (min-height 125svh). Equals CIAO_EXIT_PANELS; the lineup exit runs over two sections. */
 export const FLOW_SECTION_PANELS = 1.25;
-/** The detail band: six slots, Front to Closing, for every variant [ours, plan 2.1]. */
+/** The detail band: six slots, Front to Closing, for every variant. */
 export const FLOW_DETAIL_SLOTS = 6;
-/** The lineup rest sits one section after the band: R0 + 7 S [ours, plan 2.1]. */
+/** The lineup rest sits one section after the band: R0 + 7 S. */
 export const FLOW_LINEUP_SLOT = FLOW_DETAIL_SLOTS + 1;
-/** The rise starts when the Telegram top reaches this share of the viewport [measured P §G: 296 of 844]. */
+/** The rise starts when the Telegram top reaches this share of the viewport (296 of 844 px on a phone). */
 export const RISE_START_VIEWPORT = 0.35;
-/** The others' row spacing at the start of the hand-off and of Return, in row steps [code, D §C; plan 2.4, 2.6]. */
+/** The others' row spacing at the start of the hand-off and of Return, in row steps. */
 export const FLOW_SPREAD_FROM = 5;
 /** ... and at the end: the row's own step. */
 export const FLOW_SPREAD_TO = 1;
-/** The locked scroll back to the row after the wrap [code; measured D §H: lock 1.1-1.3 s]. */
+/** The locked scroll back to the row after the wrap (measured 1.1-1.3 s). */
 export const WRAP_GUARD_MS = 1200;
-/** The row UI fades back in over this after the wrap [measured D §H: back 0.06-0.40 s]. */
+/** The row UI fades back in over this after the wrap (measured 0.06-0.40 s). */
 export const WRAP_UI_FADE_MS = 350;
 
 /** Live geometry, in document scroll pixels (a rect's top plus the scroll it was read at). */
@@ -50,7 +48,7 @@ export type FlowGeometry = {
   /** The viewport height (px) the rise start is a share of. */
   viewport: number;
   /**
-   * The Exit spacer (plan 2.1: after Row S, the band 6 S and Lineup S); its
+   * The Exit spacer (after Row S, the band 6 S and Lineup S); its
    * bottom is the opening line's top, where the free part starts (the exit
    * itself runs from RL to there). Absent or zero height: the end is
    * computed as RL + 2 S, from the spacers' CSS heights.
@@ -80,7 +78,7 @@ export type FlowTable = {
   exitStart: number;
   /** The end of the lineup exit (the free part starts). */
   exitEnd: number;
-  /** The paged zone ends here (RL + S / 2) [ours, plan 2.2]. */
+  /** The paged zone ends here (RL + S / 2). */
   edge: number;
   rise: FlowRange | null;
   ret: FlowRange | null;
@@ -98,7 +96,7 @@ export type FlowAt =
  * The slots (in sections after R0) a variant with n stops rests on: evenly
  * over the six-slot band, first at slot 1 and last at slot 6, so the page
  * height and the lineup never depend on the chosen pack. One stop rests on
- * slot 1; none, nothing (both are cases the plan does not describe).
+ * slot 1; none, nothing (both cases are undefined).
  */
 export function flowSlots(n: number): number[] {
   const c = Math.floor(n);
@@ -249,7 +247,7 @@ export function flowPosition(at: FlowAt, t: FlowTable): number {
 /**
  * The rise from the Telegram section's live rect (viewport pixels): 0 when
  * its top reaches 0.35 of the viewport, 1 when its bottom reaches the top
- * [measured P §G]. It reads only this section, so Just Pulled's height
+ * . It reads only this section, so Just Pulled's height
  * never moves it.
  */
 export function riseProgress(
@@ -271,7 +269,7 @@ export function returnProgress(rectTop: number, height: number): number {
 
 /**
  * What draws the 3D at P. At most two adjacent terms carry weight and the
- * weights sum to 1 (this replaces canStartFocus and spinWhileFocused):
+ * weights sum to 1:
  * - `focus`: the focused view at F (0 is the row at rest);
  * - `lineup`: the tilted lineup, then its exit;
  * - `empty`: nothing drawn (the free content);
@@ -284,7 +282,7 @@ export type FlowTerms = {
   weights: Record<FlowTerm, number>;
   /** F for the focus term, 0..n (Closing during the hand-off). */
   focus: number;
-  /** The hand-off h, Closing to the lineup, power1InOut of the local progress (plan 2.4). */
+  /** The hand-off h, Closing to the lineup, power1InOut of the local progress. */
   handoff: number;
   /** The lineup exit, 0..1. */
   exit: number;
@@ -356,8 +354,7 @@ export function flowTerms(at: FlowAt, n: number): FlowTerms {
 
 /**
  * The focused back is released once the hand-off passes this share of the
- * move from Closing to the lineup, and wanted again below it (full-flow plan
- * 2.12, risk 4); it is printed only at rest, so never mid-move.
+ * move from Closing to the lineup, and wanted again below it; it is printed only at rest, so never mid-move.
  */
 export const BACK_RELEASE_AT = 0.5;
 
@@ -383,7 +380,7 @@ export function lineupResident(o: {
   return o.stops > 0 && o.focus >= o.stops - 1e-3;
 }
 
-/** A lineup pack whose front was not drawable a moment ago fades in over this [ours]. */
+/** A lineup pack whose front was not drawable a moment ago fades in over this. */
 export const LINEUP_APPEAR_MS = 300;
 
 /**
@@ -399,7 +396,7 @@ export function lineupAppear(elapsed: number): number {
 export type FlowSection = { top: number; height: number };
 
 /**
- * The free part's place for a re-measure (plan 2.9, fault 3): the section
+ * The free part's place for a re-measure: the section
  * under the viewport's middle and the share of it there. Null above the
  * first section; past the last, its end.
  */
@@ -451,7 +448,7 @@ export function wrapTarget(
 }
 
 /**
- * The lap's state at a flow position (plan 2.6): none in the paged part and
+ * The lap's state at a flow position: none in the paged part and
  * the exit; nothing drawn in the free span (`trim`: only the chosen pack
  * kept, see `lapTrim`); the rise and the return as read from their live
  * rects; Last holds the end.
@@ -503,11 +500,11 @@ export const LAP_END: Readonly<StageLap> = Object.freeze({
   trim: false,
 });
 
-/** The free span's ends where every pack stays resident, in viewports [ours]. */
+/** The free span's ends where every pack stays resident, in viewports. */
 export const LAP_TRIM_MARGIN = 0.25;
 
 /**
- * Whether only the chosen pack is kept (plan 1.1a): from a quarter viewport
+ * Whether only the chosen pack is kept: from a quarter viewport
  * past the exit end to a quarter viewport before the rise, so the way back up
  * to the lineup and the way on to the rise find their packs loaded (the
  * others are drawn only from Return on, and fade in if they come late).

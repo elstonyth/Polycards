@@ -6,7 +6,7 @@ import { ciaoOpacity, ciaoPose } from '../stage-spin';
 import { LEAN } from '../stage-spin-math';
 import type { ComposeCtx, StageLayout } from '../contract';
 
-describe('poseAt with the Ciao row injected', () => {
+describe('poseAt with the lineup row injected', () => {
   const L: StageLayout = { cx: 195, cy: 330, step: 180, artH: 352, artW: 190 };
   const ctx: ComposeCtx = {
     spin: {

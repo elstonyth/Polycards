@@ -1,8 +1,8 @@
 /**
- * Pack stage, step 2: the composed pose (plan-step2.md 10.9 "composition"):
+ * Pack stage: the composed pose:
  * the rest-carousel block -> the spin term (`ctx.spin.spinPose`) -> the
  * focus term (`ctx.focusTerm`) -> the float-in, swap, pointer-lean and idle
- * terms of step 1 added on top. Pure. Reached only through `ctx.compose`
+ * terms of the plain carousel added on top. Pure. Reached only through `ctx.compose`
  * (the spin chunk, the runtime, `stage-compose.ts`), never the first load.
  */
 import type {
@@ -25,7 +25,7 @@ import {
 } from './stage-pose';
 import { SPIN_GATHER, clamp01, smoothstep } from './stage-spin-math';
 
-/** Idle bob phase offset per pack in the spin row (10.9: "idle bob phase += 0.9 * i * g"). */
+/** Idle bob phase offset per pack in the spin row ("idle bob phase += 0.9 * i * g"). */
 const SPIN_BOB_PHASE = 0.9;
 
 /** The row at rest under a lap: no focus, no lineup, no lap. */
@@ -34,7 +34,7 @@ function plainOf(st: Readonly<StageState>): StageState {
 }
 
 /**
- * The lap's pose (full-flow plan 2.6): the row's own rest pose (live idle
+ * The lap's pose: the row's own rest pose (live idle
  * and pointer included, so the end of Return is the row exactly); the chosen
  * pack offset from one panel below (power1InOut of the rise), the others at
  * their row offsets widened by the spread (5 to 1 over Return).
@@ -82,7 +82,7 @@ export function restBlock(
 }
 
 /**
- * The hand-off from Closing to the lineup (full-flow plan 2.4): while a pack
+ * The hand-off from Closing to the lineup: while a pack
  * is focused, `st.spin` is the local progress from Closing to the lineup
  * rest and `st.exit` the lineup's exit. Null: no hand-off (the focused view,
  * or no focus). Its weight h is power1InOut of that progress, applied once
@@ -141,7 +141,7 @@ export function composeOpacity(
 }
 
 /**
- * The whole pose while the spin row or focus runs (10.9 composition). The
+ * The whole pose while the spin row or focus runs (composition). The
  * pointer lean fades out with the row's formation weight, so the row's pitch
  * is the row's own. `poseAt` calls it through `ctx.compose`.
  */
@@ -161,7 +161,7 @@ export function composePose(
   const focus = st.focus > 0 && ctx.focus && ctx.focusTerm ? ctx.focus : null;
 
   const rest = restBlock(st, i, l, desktop, soldOut);
-  // The row's formation weight (the full-turn row's gather, Ciao's row's ease
+  // The row's formation weight (the full-turn row's gather, the row's ease
   // both start at 0 and reach 1): the pointer lean and the bob phase follow it.
   const g = s > 0 ? smoothstep(0, SPIN_GATHER, s) : 0;
 

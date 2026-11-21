@@ -119,15 +119,15 @@ export function flowSwitch(o: {
   return o.was || o.scrollY <= o.r0 + o.panel / 2;
 }
 
-/** A failed load is tried again by a call this long after it at the earliest [ours]. */
+/** A failed load is tried again by a call this long after it at the earliest. */
 export const FOCUS_RETRY_MS = 1000;
 /**
  * A load still running this long after it began counts as failed: the flow
  * switches off (plain scrolling) while the request goes on, and comes back
- * when it lands [ours, review finding 3].
+ * when it lands.
  */
 export const LOAD_DEADLINE_MS = 2500;
-/** A down gesture held for the chunk is replayed at most this long after it was made [ours]. */
+/** A down gesture held for the chunk is replayed at most this long after it was made. */
 export const HOLD_MAX_MS = 3000;
 
 /** A down gesture kept for the chunk: when it was made and where (the tab and the centred pack). */
@@ -239,7 +239,7 @@ export function createFocusLoad<T>(d: {
  * from the hand-off's first frame the panel takes no taps (Closing's
  * controls are leaving with their text); the lineup and its exit are drawn;
  * the free span hides the panel (nothing is drawn there; the 3D keeps the
- * chosen pack, full-flow plan 1.1a); from the rise on (`lap`: the rise,
+ * chosen pack); from the rise on (`lap`: the rise,
  * Return and Last) it shows again, still taking no taps.
  */
 export function panelState(

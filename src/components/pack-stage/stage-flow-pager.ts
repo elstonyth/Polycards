@@ -1,6 +1,5 @@
 /**
- * Pack stage: the one pager of the full-page flow (full-flow plan sections
- * 2.2, 2.5 and 2.9). Pure: no DOM, no clock (the caller passes `now` and
+ * Pack stage: the one pager of the full-page flow. Pure: no DOM, no clock (the caller passes `now` and
  * `scrollY`, and writes `scrollTo` to the window each frame).
  *
  * Built from the focus pager's rules (`createPager` stays the tested core
@@ -9,7 +8,7 @@
  *
  * - Stops: [R0, the pack's rests, RL]; a down gesture from the last stop
  *   pages on to the exit end (the start of the free part) when there is one.
- * - Zone: paged up to RL + S / 2 (`edge`), free below [ours, plan 2.2].
+ * - Zone: paged up to RL + S / 2 (`edge`), free below.
  * - Wheel and keys: one gesture = one stop, ease-out cubic; 1.5 s, or 1.0 s
  *   only between Pull Odds and Buyback (both ways). |deltaY| < 4 is
  *   ignored; events during a move are swallowed, reverse included; after a
@@ -36,7 +35,7 @@
  *   paged part changed shape.
  * - Row: up at R0 does nothing; down at R0 enters stop 1 only while entry
  *   is allowed (a pack that cannot be focused swallows it).
- * - Wrap (plan 2.7): crossing Last's top going down, by any means, jumps to
+ * - Wrap: crossing Last's top going down, by any means, jumps to
  *   R0 plus the overshoot and runs a locked 1.2 s ease-out scroll to R0; the
  *   pager owns it, so no glide or held finger writes an old position after
  *   it, and wheel, keys and touch are swallowed until it ends. `home` runs
@@ -58,21 +57,21 @@ import {
   WHEEL_MIN_DELTA,
   durationFor,
 } from './stage-pager';
-import { easeOutCubic } from './stage-spin-driver';
+import { easeOutCubic } from './stage-spin-math';
 
-/** Wheel deltas under this are ignored [measured D §B]: one value, the focus pager's. */
+/** Wheel deltas under this are ignored: one value, the focus pager's. */
 export { WHEEL_MIN_DELTA };
-/** Quiet before an off-rest page snaps back [ours, plan 2.2]. */
+/** Quiet before an off-rest page snaps back. */
 export const SNAP_QUIET_MS = 150;
-/** The snap back's length [ours, plan 2.2]. */
+/** The snap back's length. */
 export const SNAP_MS = 600;
-/** Free touch release: glide sign * |v|^1.7 px [code, P §C]. */
+/** Free touch release: glide sign * |v|^1.7 px. */
 export const GLIDE_POWER = 1.7;
-/** ... eased by this lerp per frame [code, P §C], applied as a 60 Hz rate so frame time cannot change it [ours]. */
+/** ... eased by this lerp per frame, applied as a 60 Hz rate so frame time cannot change it. */
 export const GLIDE_LERP = 0.075;
 /** The release speed comes from the moves made in this long before the lift; a finger still this long gets no glide. */
 export const RELEASE_HOLD_MS = 100;
-/** An up glide this close to the paged edge hands over to the move to RL [ours]. */
+/** An up glide this close to the paged edge hands over to the move to RL. */
 export const GLIDE_HANDOFF_PX = 4;
 /** Positions this close count as the same. */
 const SAME_PX = 0.5;

@@ -1,5 +1,5 @@
 /**
- * Pack stage 3D runtime (plan section 4), async chunk `pack-stage-3d`. Only
+ * Pack stage 3D runtime, async chunk `pack-stage-3d`. Only
  * `Stage3dProvider` reaches it, through a dynamic import.
  *
  * One renderer on the canvas it is given, one shared studio environment, one
@@ -36,7 +36,8 @@ import type {
 } from '../contract';
 import type { Capsule3dModel } from '@/components/pack-3d/capsule/build';
 import { clamp01, poseAt, stageSpring } from '../stage-pose';
-import { CAPSULE_LEAN, LEAN } from '../stage-spin-math';
+import { CAPSULE_LIMITS } from '../stage-capsule-lean';
+import { LEAN } from '../stage-spin-math';
 import {
   capsuleEstimateBytes,
   capsuleMaps,
@@ -630,11 +631,11 @@ export function createStageRuntime(
   // --- residency ---------------------------------------------------------------
 
   /**
-   * `spinRow`: the Ciao row is formed or forming. Every pack whose wrapped row
+   * `spinRow`: the lineup row is formed or forming. Every pack whose wrapped row
    * slot is within the row's reach (desktop 6, phone 2, plus the fading one)
    * is needed, all at half resolution, no full-front promotion. The row's
    * slots do not move during the spin (no travel, the track is locked), so
-   * this plan holds still through a move; residency maps each pack to its
+   * this set holds still through a move; residency maps each pack to its
    * wrapped index so the plan's distances are row distances.
    */
   const applyPlan = (
@@ -1077,7 +1078,7 @@ export function createStageRuntime(
       direction = direction
         ? nextDirection(direction, track)
         : initialDirection(track);
-      // the end of the lap (full-flow plan 2.6): the row at rest, no focus
+      // the end of the lap: the row at rest, no focus
       // and no lineup (rise, Return, Last, the wrap's lock); the free span
       // draws nothing
       // and keeps the lineup's own residency, trimmed to the chosen pack
@@ -1085,8 +1086,8 @@ export function createStageRuntime(
       const lap = s.lap ?? null;
       const rowLap = lap !== null && !lap.free;
       const fo = !rowLap && s.focus > 0 ? (s.focusOn ?? null) : null;
-      // the row (Ciao's packshot), or the focused pack's hand-off into the
-      // lineup and its exit (full-flow plan 2.4): the row's residency and
+      // the row (the packshot lineup), or the focused pack's hand-off into the
+      // lineup and its exit: the row's residency and
       // repeats. Up to Closing + 0.5 the focused pack keeps its back and its
       // promoted front; past it both are let go for the lineup's fronts.
       const spinRow = !rowLap && (s.spin > 0 || s.exit > 0);
@@ -1200,13 +1201,13 @@ export function createStageRuntime(
               ? lineupAppear(now - since)
               : 1;
           if (appear < 1) appearing = true;
-          // One context for the CSS tiles and the canvas: the Ciao row, its
+          // One context for the CSS tiles and the canvas: the lineup row, its
           // exit, the row's own fade (stage-pose composes the rest).
           const ctx: ComposeCtx = {
             spin: {
               count: n,
               turn: 0,
-              lean: slot.capsule ? CAPSULE_LEAN : LEAN,
+              lean: slot.capsule ? CAPSULE_LIMITS.yaw : LEAN,
               spinPose: ciaoPose,
               soldOut: slot.soldOut,
               exit: s.exit,
@@ -1262,7 +1263,7 @@ export function createStageRuntime(
             obj.visible = true;
             obj.updateMatrixWorld(true);
           };
-          // The spin row's repeats (Ciao repeats its six cans to 24): clones.
+          // The spin row's repeats (a short set is repeated out to 24 cans): clones.
           const offsets = spinRow
             ? ciaoCopies(slot.index, track, n, desktop).filter((o) => o !== 0)
             : [];

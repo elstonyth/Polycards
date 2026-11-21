@@ -34,7 +34,7 @@ import {
 // Does a real gateway back the sheet? Any value except 'mock' (or unset)
 // sends the customer to the provider's checkout page and credits nothing here
 // — the balance updates later, when the gateway's callback settles the
-// deposit. WHICH gateway is the backend's decision (admin switch, plan 130):
+// deposit. WHICH gateway is the backend's decision (admin switch):
 // the storefront never needs to know, since every real gateway is a redirect.
 // 'mock' / unset keeps the mock gateway, which credits synchronously and stays
 // the local/dev path. Any other value ('tgpay') means the real gateway.

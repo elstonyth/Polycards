@@ -241,7 +241,7 @@ describe('planResidency', () => {
     ).toBe(0);
   });
 
-  it('budgets from the plan caps', () => {
+  it('budgets from the caps', () => {
     expect(textureBudgetBytes(false, 18e6)).toBe(22e6);
     expect(textureBudgetBytes(true, 62e6)).toBe(34e6);
     expect(textureBudgetBytes(false, 50e6)).toBe(0);
@@ -297,7 +297,7 @@ describe('nextPromotion', () => {
   });
 });
 
-describe('residency in the free span (full-flow plan 1.1a)', () => {
+describe('residency in the free span', () => {
   for (const config of [RESIDENCY_PHONE, RESIDENCY_DESKTOP])
     it(`only the chosen pack stays resident, whatever was resident before (reach ${config.reach})`, () => {
       const resident = new Map<number, ResidentInfo>();

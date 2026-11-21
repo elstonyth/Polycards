@@ -1,5 +1,5 @@
 /**
- * The Just Pulled drawer as data (full-flow plan 1.1, work package 11): which
+ * The Just Pulled drawer as data: which
  * pulls stand in the stack, where each one stands, and what a new feed does
  * to it. Pure: no React, no DOM. The drawer's markup reads the result and its
  * CSS draws it (drawer.module.css).

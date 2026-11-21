@@ -34,7 +34,7 @@ import { useFlowData } from './use-flow-data';
 import type { FlowData, FlowSeed } from './types';
 import styles from './focus.module.css';
 
-/** The focused pack's stops (plan-focus-ciao section 2), in order. */
+/** The focused pack's stops, in order. */
 export type FocusStopKind =
   'front' | 'tophits' | 'odds' | 'buyback' | 'pulls' | 'closing';
 
@@ -122,7 +122,7 @@ function demoDetail(data: FlowData): PackDetail | null {
 }
 
 /**
- * The focused pack's stops (plan-focus-ciao sections 2 and 5): Front, Top
+ * The focused pack's stops: Front, Top
  * Hits, Pull Odds, Buyback, Recent Pulls, Closing (a capsule has no Buyback,
  * a pack with no pull odds neither Pull Odds nor Buyback). Over the stage one
  * block shows at a time, switched 20% into a move on 0.5 s fades; an icon

@@ -1,5 +1,5 @@
 /**
- * Pack stage: the focused pack's paging (plan-focus-ciao section 5). Pure: no
+ * Pack stage: the focused pack's paging. Pure: no
  * DOM, no clock (the caller passes `now` and `scrollY`); the spin chunk's one
  * set of listeners feeds it while a pack is focused, and writes `scrollTo` to
  * the window each frame.
@@ -22,14 +22,14 @@
  *   touch is not consumed (the Top Hits strip scrolls natively).
  * - Forward past the last stop: nothing.
  */
-import { easeOutCubic } from './stage-spin-driver';
+import { easeOutCubic } from './stage-spin-math';
 
 export const PAGE_MS = 1500;
 export const SAME_FRAMING_MS = 1000;
 export const WHEEL_GAP_MS = 120;
 export const AXIS_LOCK_PX = 6;
 export const TOUCH_PAGE_PX = 24;
-/** Wheel deltas under this are ignored [measured D §B]. */
+/** Wheel deltas under this are ignored. */
 export const WHEEL_MIN_DELTA = 4;
 
 export type PagerFrame = {
@@ -222,7 +222,7 @@ export function createPager(): Pager {
   };
 }
 
-/** The wheel / key / icon duration between stops of these kinds (section 5). */
+/** The wheel / key / icon duration between stops of these kinds. */
 export function durationFor(
   kinds: readonly string[],
 ): (from: number, to: number) => number {

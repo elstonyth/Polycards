@@ -18,7 +18,7 @@ function pullOddsFromTiers(tiers: PackTiers | null): FlowPullOdds | null {
 }
 
 /**
- * The focused pack's live data (plan-step2 section 3, `use-flow-data.ts`).
+ * The focused pack's live data.
  *
  * Seeded from the server (`flowSeed` on the pack page, `flowSeedFromHighlights`
  * on the homepage), then filled from `/api/pack-tiers/<slug>` through the pack

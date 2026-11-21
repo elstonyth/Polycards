@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act } from 'react';
 import { renderHook } from '@/lib/__tests__/render-hook';
 
-// The flow's address (plan-step2 section 1 "URLs"): stage / focus / other,
+// The flow's address: stage / focus / other,
 // our own focus entries, Back / Forward, a reload on a focused URL and a cold
 // load, and the reel seam. Next's router is a mock that reads the live URL,
 // as Next's own does after a history move.

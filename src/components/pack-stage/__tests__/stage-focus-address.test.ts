@@ -509,7 +509,7 @@ describe('focus address: guards', () => {
   });
 });
 
-describe('focus address: a pick in the lineup (work package 5)', () => {
+describe('focus address: a pick in the lineup', () => {
   it("coming back up after a pick steps onto the tap's entry and shows the picked pack there", () => {
     const b = browser();
     const a = createFocusAddress(b.h, b.loc);

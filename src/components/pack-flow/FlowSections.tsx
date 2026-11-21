@@ -9,8 +9,7 @@ import { FlowSpacers } from './FlowSpacers';
 import { FlowTelegram } from './FlowTelegram';
 
 /**
- * Everything below the stage on the preview, in the flow's order (full-flow
- * plan 1): the paged spacers, the opening line (the free pack offer and the
+ * Everything below the stage on the preview, in the flow's order: the paged spacers, the opening line (the free pack offer and the
  * ships and buyback line), Just Pulled, Telegram with the trust points and the
  * footer, then the Return and Last spacers. Server-rendered: no client code of
  * its own.

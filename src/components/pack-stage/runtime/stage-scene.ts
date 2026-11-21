@@ -1,5 +1,5 @@
 /**
- * Pack stage scene (plan section 4): the renderer, the camera, the one shared
+ * Pack stage scene: the renderer, the camera, the one shared
  * studio environment, the host-pixel to world mapping and the GPU memory
  * arithmetic. Renderer and camera settings match the tuned capture harness
  * (docs/research/home-3d/pack-3d/harness/stage.js): fov 28, NeutralToneMapping,

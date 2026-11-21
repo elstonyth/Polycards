@@ -1,14 +1,13 @@
 /**
- * Pack stage, step 2: `poseAt` and `stageOpacity` with the focus term plugged
- * in (plan-step2.md 10.9 "composition"). The composition itself lives in
- * `stage-pose.ts`; the focus maths (`stage-focus.ts`) is injected here, so the
+ * Pack stage: `poseAt` and `stageOpacity` with the focus term plugged
+ * in. The composition itself lives in `stage-pose.ts`; the focus maths (`stage-focus.ts`) is injected here, so the
  * first load (which imports only `stage-pose.ts`) never carries it.
  *
- * Two deliberate departures, both documented in integration-notes.md:
+ * Two deliberate departures, :
  * - the pointer lean fades out with the gather weight (it would otherwise
- *   push the row's pitch past the +5 degree clamp of 10.7);
+ *   push the row's pitch past the +5 degree clamp);
  * - on the focused pack the extra yaw is clamped to +-5 degrees, so a back
- *   at rest stays 175..185 degrees (decision 9c).
+ *   at rest stays 175..185 degrees.
  */
 import type {
   ComposeCtx,

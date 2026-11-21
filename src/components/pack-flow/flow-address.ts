@@ -12,7 +12,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import type { FlowLocation } from './types';
 
 /**
- * The flow's address (plan-step2 section 1 "URLs" and section 3).
+ * The flow's address.
  *
  * | Moment | Address |
  * |---|---|
@@ -25,9 +25,9 @@ import type { FlowLocation } from './types';
  * `leave()`: when the focus entry is OURS (pushed by `enter` in this document),
  * `history.back()`, so Back and "All packs" are one move and the history has
  * no extra entry. Otherwise (a cold-loaded pack page, a reload, a link in) the
- * flow marks the arrival (the float-in, section 10.10) and pushes `basePath`.
+ * flow marks the arrival (the float-in) and pushes `basePath`.
  *
- * `enterReel(href)` is the ONE reel seam (section 1 "Reel"): plain navigation
+ * `enterReel(href)` is the ONE reel seam: plain navigation
  * today; the cinematic curtain, when it resumes, wraps it and nothing else.
  *
  * The quantity is read from `location.search` in an effect (and on Back /

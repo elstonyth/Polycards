@@ -1,5 +1,5 @@
 /**
- * Guards for the pack stage (plan sections 2 and 8):
+ * Guards for the pack stage:
  * - The stage must sit on the route-cached `/` later, so nothing under
  *   `src/components/pack-stage/` may read cookies, headers or search params.
  * - Only `runtime/` (the async `pack-stage-3d` chunk) may import `three` or

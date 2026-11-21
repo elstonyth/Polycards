@@ -118,7 +118,7 @@ describe('poolExpectedValue', () => {
   });
 
   it('skips unpriced cards in the tier average, like poolValueRange', () => {
-    // tiers must sum to ~100 post-guard (plan 119); Rare:100 is the only
+    // tiers must sum to ~100 post-guard; Rare:100 is the only
     // Pull Odds tier so the average itself still proves the skip: if the
     // unpriced card were counted, avg would be 50, not 100.
     const pool = [
@@ -149,11 +149,11 @@ describe('poolExpectedValue', () => {
     expect(poolExpectedValue(pool, { Rare: 100 })).toBe(3.34);
   });
 
-  // Plan 119: the row must only render when the Pull Odds are an
+  // The row must only render when the Pull Odds are an
   // arithmetically coherent promise — Σ≈100, with every Pull Odds tier
   // actually contributing priced cards. Otherwise the caller's "Card value
   // range" fallback is the honest display.
-  it('case 1 — happy path: tiers sum to exactly 100, pins the pre-plan value', () => {
+  it('case 1 — happy path: tiers sum to exactly 100, pins the earlier value', () => {
     // Rare avg 100, Common avg 50 → 0.2×100 + 0.8×50 = 60 — same fixture and
     // expected value as the original (pre-guard) 'folds tier averages' test
     // above, proving the guard changes nothing for a well-formed pack.

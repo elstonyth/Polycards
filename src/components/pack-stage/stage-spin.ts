@@ -1,12 +1,11 @@
 /**
- * Pack stage, step 2: the scroll spin section's pose (plan-step2.md 10.3,
- * 10.7 and 10.9). Pure: no DOM, no three.js, no clock, no React.
+ * Pack stage: the scroll spin section's pose. Pure: no DOM, no three.js, no clock, no React.
  *
  * `spin` (`s`) runs 0..1 through the pinned section. Three phases:
  * - gather, s 0..0.15: the carousel closes into one tilted row (smoothstep);
  * - travel and turn, s 0.15..0.85: the row travels left through every pack
  *   once (wrapping) while each pack turns about its own axis, neighbours
- *   `K` apart, plus one extra full turn (power1.inOut, as Ciao's tweens);
+ *   `K` apart, plus one extra full turn (power1.inOut);
  * - hold, s 0.85..1: the row is back in its starting order, fronts facing.
  *
  * `spinPose` replaces ONLY the rest-carousel block of `poseAt` (lerp by the
@@ -49,7 +48,7 @@ export type SpinConfig = {
   MIN_TRAVEL_N: number;
 };
 
-// S tuned 2026-11-20 against Ciao's reference frames: their packshot cans
+// S tuned 2026-11-20 against measured reference frames: the packshot cans
 // stand about 340 CSS px on a 1440x900 desktop and 285-300 on a 390x844
 // phone; at 0.62 / 0.55 ours were 218 / 308. Now about 282 / 336.
 export const SPIN_PHONE: Readonly<SpinConfig> = Object.freeze({
@@ -81,7 +80,7 @@ export const K = 0.6;
 /** Pitch ramp: tops toward the viewer, more to the right. */
 export const PITCH0 = 0.1;
 export const PITCH_K = 0.035;
-/** Pitch never above +5 degrees in any spin pose (10.7; positive = top away). */
+/** Pitch never above +5 degrees in any spin pose (positive = top away). */
 export const PITCH_MAX = 0.087;
 /** Height wave along the row, in art heights, and its phase per slot. */
 export const WAVE_A = 0.05;
@@ -90,7 +89,7 @@ export const WAVE_W = 1.1;
 export const ARC = 0.1;
 /** Pack aspect used when the layout gives no `artW` (step 1 CSS: --art-w = 0.54 art heights). */
 export const DEFAULT_ART_ASPECT = 0.54;
-/** `data-spinning` hysteresis around SPIN_LOCK (10.3). */
+/** `data-spinning` hysteresis around SPIN_LOCK. */
 const SPIN_LOCK_HYSTERESIS = 0.005;
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -124,7 +123,7 @@ export function wrapRow(x: number, n: number): number {
   return r - h + 0; // +0 normalises -0
 }
 
-/** The pack's row position d' during the spin (10.9). */
+/** The pack's row position d' during the spin. */
 export function spinRowPosition(
   s: number,
   i: number,
@@ -140,8 +139,8 @@ export function spinRowPosition(
 /**
  * The continuous centre of the wrapped row in pack-index space (track + T),
  * for residency: pass `wrappedIndex(i, centre, n)` as each pack's index and
- * `centre` as the track (10.5 "Fronts: today's residency on the wrapped spin
- * centre").
+ * `centre` as the track (fronts keep today's residency on the wrapped spin
+ * centre).
  */
 export function spinCentre(
   s: number,
@@ -158,7 +157,7 @@ export function wrappedIndex(i: number, centre: number, count: number): number {
 }
 
 /**
- * The glare pass band (10.7). Periodic, odd, monotone, piecewise linear: the
+ * The glare pass band. Periodic, odd, monotone, piecewise linear: the
  * output bands 150..170 and 190..210 degrees (and every 360-degree copy) each
  * come from only 5 degrees of input (slope 4); the other 320 output degrees
  * from the other 350 input degrees. passBand(0) = 0, passBand(2 pi) = 2 pi.
@@ -200,7 +199,7 @@ export function spinRowStep(
 }
 
 /**
- * The spin's pose for pack i (10.9). `rest` is `poseAt`'s rest-carousel block
+ * The spin's pose for pack i. `rest` is `poseAt`'s rest-carousel block
  * (before float-in, swap, pointer and idle). s <= 0 returns `rest` unchanged.
  */
 export const spinPose: SpinPoseFn = (rest, st, i, l, desktop, ctx) => {
@@ -255,10 +254,10 @@ export const spinPose: SpinPoseFn = (rest, st, i, l, desktop, ctx) => {
   );
 };
 
-// --- Ciao's packshot row and its exit (motion sheet 2026-11-20, 7.2 and 8) --
+// --- The packshot lineup row and its exit ---------------------------------
 
 /**
- * Ciao's quadratic in-out (`power1.inOut`), the ease of every section tween:
+ * The quadratic in-out (`power1.inOut`), the ease of every section tween:
  * e(t) = t < 0.5 ? 2t^2 : 1 - (2 - 2t)^2 / 2.
  */
 export function quadInOut(t: number): number {
@@ -266,7 +265,7 @@ export function quadInOut(t: number): number {
   return x < 0.5 ? 2 * x * x : 1 - ((2 - 2 * x) * (2 - 2 * x)) / 2;
 }
 
-/** A Ciao camera keyframe: position, Euler XYZ rotation (rad), fov (deg), row spacing, key light. */
+/** A lineup camera keyframe: position, Euler XYZ rotation (rad), fov (deg), row spacing, key light. */
 export type CiaoCamera = {
   x: number;
   y: number;
@@ -279,7 +278,7 @@ export type CiaoCamera = {
   light: number;
 };
 
-/** Keyframe at the top of section 7: the tilted packshot row (motion sheet 6). */
+/** Keyframe at the top of the lineup section: the tilted packshot row. */
 export const CIAO_PACKSHOT: Readonly<CiaoCamera> = Object.freeze({
   x: -3,
   y: -3.5,
@@ -292,7 +291,7 @@ export const CIAO_PACKSHOT: Readonly<CiaoCamera> = Object.freeze({
   light: 10,
 });
 
-/** Keyframe at the top of section 8: the camera has dropped, come closer, levelled; light out. */
+/** Keyframe at the top of the exit section: the camera has dropped, come closer, levelled; light out. */
 export const CIAO_LEAVE: Readonly<CiaoCamera> = Object.freeze({
   x: 0,
   y: -5.5,
@@ -305,7 +304,7 @@ export const CIAO_LEAVE: Readonly<CiaoCamera> = Object.freeze({
   light: 0,
 });
 
-/** Ciao's row step in its units, the cans' depth in the packshot, and the swirl pitch ramp. */
+/** The lineup's row step in its units, the cans' depth in the packshot, and the swirl pitch ramp. */
 export const CIAO_ROW = Object.freeze({
   step: 3.5,
   canZ: -0.4,
@@ -315,11 +314,11 @@ export const CIAO_ROW = Object.freeze({
   ratioRefWidth: 1440,
   ratioMax: 2.4,
   /**
-   * A Ciao can's height in its scene units, measured off the reference
+   * A can's height in the lineup's scene units, measured off the reference
    * frames at rest: about 340 CSS px on the 900 px desktop viewport at depth
    * 20.5 under fov 30 (4.15 units; the phone's 285-300 px reads 3.7-3.9 with
    * the steeper ramp shortening it). Our pack takes this height, so it stands
-   * as tall on screen as their can.
+   * as tall on screen as the reference can.
    */
   canWorldH: 4.1,
   /** Our pack width over the row step: "nearly touching" (their cans: about 125 px wide at a 133 px step). */
@@ -332,9 +331,9 @@ export const CIAO_ROW = Object.freeze({
   reachDesktop: 6,
   reachPhone: 2,
   /**
-   * Light. Ciao's packshot raises the environment to x2 (tint 2) while its key
+   * Light. The packshot raises the environment to x2 (tint 2) while its key
    * spots run at 10, so its cans read bright; ours are lit by the environment
-   * only, so the formed row lifts by `restLight`. On the exit Ciao's spots go
+   * only, so the formed row lifts by `restLight`. On the exit the spots go
    * 10 -> 0 but the environment stays, and the reference frames show the cans
    * barely darker as they leave: the row ends at `exitLight` of its rest.
    */
@@ -351,12 +350,12 @@ function ciaoLight(cam: Readonly<CiaoCamera>): number {
   return CIAO_ROW.restLight * (1 - (1 - CIAO_ROW.exitLight) * out);
 }
 
-/** World step between our packs in Ciao units at the packshot (for an art aspect w/h). */
+/** World step between our packs in lineup units at the packshot (for an art aspect w/h). */
 export function ciaoPackStep(artAspect: number): number {
   return (CIAO_ROW.canWorldH * artAspect) / CIAO_ROW.fill;
 }
 
-/** Exit length after the pin, in panel heights (one Ciao section, 1.25 viewports). */
+/** Exit length after the pin, in panel heights (one section, 1.25 viewports). */
 export const CIAO_EXIT_PANELS = 1.25;
 
 export function ciaoCameraAt(exit: number): CiaoCamera {
@@ -443,7 +442,7 @@ const transpose = (m: M3): M3 => [
   m[8],
 ];
 
-/** One pack of Ciao's row seen through a Ciao camera (three.js axes: y up, camera looks down -z). */
+/** One pack of the lineup row seen through a lineup camera (three.js axes: y up, camera looks down -z). */
 export type CiaoView = {
   /** Screen position in half-heights from the centre (y up): px = s * panelH / 2. */
   sx: number;
@@ -470,7 +469,7 @@ export function ciaoView(
   r: number,
   o: { spacingScale?: number; capsule?: boolean } = {},
 ): CiaoView {
-  // x in Ciao's row units (the ramp keeps its per-pack numbers); the world
+  // x in the lineup's row units (the ramp keeps its per-pack numbers); the world
   // step widens by `spacingScale` because a pack is wider than a can
   const x = dp * CIAO_ROW.step;
   const px = x * cam.spacing * (o.spacingScale ?? 1) - cam.x;
@@ -510,7 +509,7 @@ export function ciaoView(
 
 const DEFAULT_PANEL = { w: 390, h: 716, anchorY: 0.46 };
 
-/** The Ciao row's pose for a pack at row position dp, as our pose (fx / fy carry the position). */
+/** The lineup row's pose for a pack at row position dp, as our pose (fx / fy carry the position). */
 function ciaoRowBlock(
   dp: number,
   d: number,
@@ -531,7 +530,7 @@ function ciaoRowBlock(
     capsule,
   });
   const t = Math.tan(((cam.fov / 2) * Math.PI) / 180);
-  // Ciao maps its fov to the VIEWPORT height; so do we, so sizes match in px
+  // The lineup maps its fov to the VIEWPORT height, so sizes match in px: so sizes match in px
   const projH = panel.viewH ?? panel.h;
   const pxX = v.sx * (projH / 2);
   const pxY = -v.sy * (projH / 2);
@@ -554,7 +553,7 @@ function ciaoRowBlock(
 /**
  * Row slot offsets (multiples of the set's size, 0 included) at which pack i
  * is drawn in the `tip` row, so the row runs off both edges however short the
- * set: Ciao repeats its six flavours to 24 cans. The caller draws each extra
+ * set: a short set is repeated out to 24 cans. The caller draws each extra
  * slot with a CLONE of the pack's model (shared geometry and textures) and
  * passes the offset as `SpinCtx.copy`. The centred pack is always offset 0.
  */
@@ -577,13 +576,13 @@ export function ciaoCopies(
 }
 
 /**
- * The `tip` variant: Ciao's packshot look, faithfully (motion sheet 7.2):
+ * The `tip` variant: the packshot look:
  * no own-axis turn; the row closes tight while a pitch ramp fans the packs
  * (12 deg more per pack on desktop, 29 on phones; the centre +11.5 deg) and
- * the whole row is seen through Ciao's packshot camera (pitch 10, yaw -9, roll
- * -10 deg, fov 30), all on one power1.inOut across the spin, as Ciao's
+ * the whole row is seen through the packshot camera (pitch 10, yaw -9, roll
+ * -10 deg, fov 30), all on one power1.inOut across the spin, as one
  * section tween. Fronts only, so the back-text glare clamp does not apply.
- * `ctx.exit` then plays Ciao's leave: camera drops, comes closer, levels, row
+ * `ctx.exit` then plays the leave: camera drops, comes closer, levels, row
  * opens 0.47 -> 0.6, light goes out.
  */
 export const ciaoPose: SpinPoseFn = (rest, st, i, l, desktop, ctx) => {
@@ -640,7 +639,7 @@ export function ciaoOpacity(
 }
 
 /**
- * The exit for the full-turn row: the same camera move as Ciao's leave,
+ * The exit for the full-turn row: the same camera move as the lineup's leave,
  * applied to the row on screen about the panel centre (zoom as the camera
  * comes closer, the drop, the roll levelling, the light out).
  */
@@ -662,7 +661,7 @@ function applyExit(
   const yc = (panel.anchorY - 0.5) * panel.h;
   const X = d * l.step + b.dx;
   const Y = yc + b.dy;
-  // the full-turn row keeps its own rest light and dims like Ciao's on the exit
+  // the full-turn row keeps its own rest light and dims like the lineup on the exit
   const light = ciaoLight(cam) / CIAO_ROW.restLight;
   return {
     dx: X * zoom - d * l.step + 0,
@@ -701,7 +700,7 @@ export function reachOpacity(d: number, reach: number): number {
 }
 
 /**
- * The spin's reach fade (10.9): lerp(slotOpacity(d), reach fade of d', g).
+ * The spin's reach fade: lerp(slotOpacity(d), reach fade of d', g).
  * Multiply by the swap fade and `introOpacity` as `stageOpacity` does.
  */
 export function spinOpacity(
@@ -727,14 +726,14 @@ export function spinOpacity(
 }
 
 /**
- * `data-spinning` toggle (10.3): on above 0.02, off below 0.015 (hysteresis
+ * `data-spinning` toggle: on above 0.02, off below 0.015 (hysteresis
  * 0.005), so a follow settling near the edge never flickers.
  */
 export function spinningFlag(prev: boolean, s: number): boolean {
   return prev ? s > SPIN_LOCK - SPIN_LOCK_HYSTERESIS : s >= SPIN_LOCK;
 }
 
-/** Turn weight tween length (10.7). */
+/** Turn weight tween length. */
 export const TURN_WEIGHT_MS = 400;
 
 /**

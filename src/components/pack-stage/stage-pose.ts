@@ -1,7 +1,7 @@
 /**
- * Pack stage pose function (plan section 1 and 4). Pure: no DOM, no three.js,
+ * Pack stage pose function. Pure: no DOM, no three.js,
  * no clock. The same `StageState` always gives the same `Pose`, so the CSS
- * tiles, the WebGL runtime and (step 2) a scroll position can all seek it.
+ * tiles, the WebGL runtime and (the spin chunk) a scroll position can all seek it.
  *
  * Pose units and axes are CSS (the layout is measured in host CSS px):
  * - `dx`, `dy`: offset in host CSS px from the tile's linear slot
@@ -18,7 +18,7 @@
  * - `scale`: model scale on top of the measured art size (1 = centred pack).
  * - `dim`: brightness multiplier (1 = full). Sold out multiplies by 0.4.
  *
- * State conventions (the provider drives these; step 2 may drive any of them):
+ * State conventions (the provider drives these; the spin chunk may drive any of them):
  * - `intro` in [0,1] is LINEAR time through the float-in (`INTRO_TOTAL_MS`);
  *   each slot applies its own stagger and easing here.
  * - `swap` in [0,1]: 0 = in place, 1 = sunk out of the stage. Displacement is
@@ -28,20 +28,20 @@
  * - `idle`: idle clock in seconds (0 = no idle motion). Bob and sway are both
  *   zero at every multiple of `IDLE_REST_PERIOD_S`; the provider eases the
  *   clock to the next one to come to rest.
- * - `spin`, `exit` (step 2): the scroll spin's progress and its exit; the row
+ * - `spin`, `exit`: the scroll spin's progress and its exit; the row
  *   itself comes from the injected `ctx.spin.spinPose` (lazily loaded).
- * - `focus`, `turn` (step 2): read only through the injected focus term.
+ * - `focus`, `turn`: read only through the injected focus term.
  *
- * Composition (plan-step2.md 10.9): the rest-carousel block -> the spin term
+ * Composition: the rest-carousel block -> the spin term
  * (only with `ctx.spin.spinPose`) -> the focus term (only with
  * `ctx.focusTerm`) -> the float-in, swap, pointer-lean and idle terms added on
- * top. With no spin, no exit and no focus `poseAt` is step 1's pose exactly.
+ * top. With no spin, no exit and no focus `poseAt` is the plain carousel pose exactly.
  */
 import { cubicBezier } from '@/components/loader/loader-timeline';
 
 import type { ComposeCtx, Pose, StageLayout, StageState } from './contract';
 
-/** Below this the spin counts as stopped: controls back, focus allowed (10.3, 10.4). */
+/** Below this the spin counts as stopped: controls back, focus allowed. */
 export const SPIN_LOCK = 0.02;
 
 /** soft.tsx SPRING curve. */
@@ -174,8 +174,8 @@ export function labelIntro(intro: number, d: number): number {
 }
 
 /**
- * The whole pose (10.9 composition). Without spin, exit or focus this is step
- * 1's pose exactly. The composed pose (`stage-pose-compose.ts`) is injected
+ * The whole pose (composition). Without spin, exit or focus this is the
+ * plain carousel pose exactly. The composed pose (`stage-pose-compose.ts`) is injected
  * as `ctx.compose` by the lazily loaded spin chunk and the runtime, so the
  * first load never carries it; without it the spin term is skipped.
  */

@@ -20,7 +20,7 @@
 // odds or no odds rows prints nothing, leaves the pack as it is and resolves
 // null. `printableBack()` is the same test for callers.
 //
-// Step 2 (plan-step2.md sections 4 and 10.5):
+// Spin handles:
 // - showBack(details, { releaseCanvas: true }) sets the print canvas to 0x0
 //   once the renderer has uploaded it (texture.onUpdate), so only the GPU copy
 //   stays. Nothing may set needsUpdate on that texture afterwards.
@@ -89,7 +89,7 @@ export type OpenPack3dOptions = {
   fonts?: DrawOptions['fonts'];
   /**
    * 2 draws the front at half the chosen resolution's size: with
-   * `resolution: 'half'`, the quarter spin handle (10.5). Default 1.
+   * `resolution: 'half'`, the quarter spin handle. Default 1.
    */
   downscale?: 1 | 2;
 };

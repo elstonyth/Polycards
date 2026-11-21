@@ -1,6 +1,6 @@
 /**
  * The focused pack's back: what it prints, when it reprints, and whether the
- * pack turns to it at all (plan-step2 sections 1, 3 and 4). Pure and
+ * pack turns to it at all. Pure and
  * server-safe.
  *
  * Rules, in the owner's order:
@@ -60,7 +60,7 @@ export function backFor(
 }
 
 /** Changes exactly when the printed text changes (price, buyback, odds), so
- *  the stage reprints only then (section 4: debounced, never mid-turn). */
+ *  the stage reprints only then (debounced, never mid-turn). */
 export const backKey = (back: PackBackDetails | null): string =>
   back === null
     ? 'none'

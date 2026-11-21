@@ -8,7 +8,7 @@ import { focusKeys } from '@/components/pack-stage/stage-focus-keys';
 import { PACK_3D_SETTINGS } from './catalog/pack-3d-settings';
 import { spotRects } from './pack-print-template';
 
-// The focused back (plan-focus-ciao sections 3 and 4): its lit rects and the
+// The focused back: its lit rects and the
 // pose that reads it level.
 const DEG = Math.PI / 180;
 const SLUGS = Object.keys(POSES.packs);

@@ -1,5 +1,5 @@
 {
-  "note": "Trimmed from docs/research/home-3d/pack-stage/focus-ciao/focus-poses.json (plan-focus-ciao): per pack and size, the focused pack at each stop. cx, cy: centre as fractions of the panel; long: the long side over the panel height; rz: screen roll, clockwise degrees; ry: own turn, degrees (180 = back); rx: pitch, degrees (positive tips the top away); on: the spotlight. litRects: the lit rects of the back image (x across, y along from the top).",
+  "note": "Per pack and size, the focused pack at each stop. cx, cy: centre as fractions of the panel; long: the long side over the panel height; rz: screen roll, clockwise degrees; ry: own turn, degrees (180 = back); rx: pitch, degrees (positive tips the top away); on: the spotlight. litRects: the lit rects of the back image (x across, y along from the top).",
   "stops": ["front", "tophits", "odds", "buyback", "pulls", "closing"],
   "variants": {
     "capsule": ["front", "tophits", "odds", "pulls", "closing"],

@@ -313,7 +313,7 @@ describe('flow pager: wheel', () => {
     expect(p.busy()).toBe(false);
   });
 
-  it("keys in the free part are the browser's own (plan 2.10)", () => {
+  it("keys in the free part are the browser's own", () => {
     const p = make();
     expect(p.step(-1, 20000, 0)).toBe('free');
     expect(p.step(1, 9500, 0)).toBe('free');
@@ -480,7 +480,7 @@ describe('flow pager: the snap invariant', () => {
 });
 
 describe('flow pager: free touch and glide', () => {
-  it('the glide is sign * |v|^1.7 (P §C: 16, 32, 48 px per frame give about 110, 360, 720 px)', () => {
+  it('the glide is sign * |v|^1.7 (16, 32, 48 px per frame give about 110, 360, 720 px)', () => {
     expect(glideDistance(16)).toBeGreaterThan(105);
     expect(glideDistance(16)).toBeLessThan(115);
     expect(glideDistance(32)).toBeGreaterThan(350);
@@ -1120,7 +1120,7 @@ describe('flow pager: a touch on a sideways scroller in the free part', () => {
   });
 });
 
-describe('flow pager: the wrap (plan 2.7)', () => {
+describe('flow pager: the wrap', () => {
   it("a flick across Last's top wraps once to the overshoot, then the 1.2 s lock eases to the row", () => {
     const p = make();
     let y = 12800;

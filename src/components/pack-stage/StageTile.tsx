@@ -113,8 +113,7 @@ export function tileVars(
 }
 
 /**
- * One pack in the carousel, in the slot markup the 3D layer attaches to (plan
- * section 10): `li[data-stage-tile][data-pack-id][data-index]` holding a
+ * One pack in the carousel, in the slot markup the 3D layer attaches to: `li[data-stage-tile][data-pack-id][data-index]` holding a
  * `[data-stage-art][data-live]` box with the picture in it. A pack with a 3D
  * set shows its bundled half front as a plain `<img>` (the texture fetch then
  * hits the HTTP cache, and the swap lines up); any other pack its catalogue

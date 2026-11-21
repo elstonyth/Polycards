@@ -1,8 +1,8 @@
-// The catalogue's step 2 back handling (plan-step2.md sections 4 and 10.5):
+// The catalogue's back handling:
 // the no-odds rule, hideBack(), releaseCanvas, the quarter spin back and the
 // quarter spin handle, and their byte accounting. Node has no canvas or
 // ImageBitmap, so pictures, canvases and the print are stand-ins; the GPU
-// side (re-binding the front without an upload) is proven on the step 2 bench.
+// side (re-binding the front without an upload) is proven on the bench.
 import * as THREE from 'three';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 

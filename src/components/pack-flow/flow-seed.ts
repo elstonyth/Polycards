@@ -1,6 +1,5 @@
 /**
- * The focused view's starting data, built on the server (plan-step2 section 3,
- * "Data per section and surface"). Server-safe and pure: the callers hand in
+ * The focused view's starting data, built on the server. Server-safe and pure: the callers hand in
  * what their page already read, nothing here fetches.
  *
  * - Cold load of `/slots/<id>` (the gated pack page): `flowSeed(PackPageData)`,

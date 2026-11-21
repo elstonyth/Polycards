@@ -1,5 +1,5 @@
 /**
- * Pack stage animation layer (plan-step2.md section 2): a small local
+ * Pack stage animation layer: a small local
  * scheduler that replaces the `motion` library on the stage, so the stage's
  * first load no longer carries it. It provides exactly what the stage used:
  *

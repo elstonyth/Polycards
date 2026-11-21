@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * Pack stage 3D provider (plan sections 3-5). Owns the one canvas, the gate,
+ * Pack stage 3D provider. Owns the one canvas, the gate,
  * the ONLY dynamic import of the three.js runtime, the frame loop, the layout
  * measure, the `data-live` flags, the watchdog and every observer.
  *

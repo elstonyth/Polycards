@@ -1,6 +1,6 @@
 /**
  * Pack stage: the focused pack's keys per pack, size and kind (the trimmed
- * `focus-poses.json` beside this file, from plan-focus-ciao). Loaded with
+ * `focus-poses.json` beside this file). Loaded with
  * the focus chunk and the runtime, never in the first load.
  *
  * - A card pack with pull odds: Front, Top Hits, Pull Odds, Buyback, Recent
@@ -33,7 +33,7 @@ type JsonPack = {
 const PACKS = POSES.packs as unknown as Record<string, JsonPack>;
 /** The poses a pack not in the table (a capsule) borrows. */
 const FALLBACK = '151';
-/** A capsule's held lean at its Pull Odds stop (plan section 2), degrees. */
+/** A capsule's held lean at its Pull Odds stop, degrees. */
 const CAPSULE_ODDS_LEAN = -10;
 
 export type FocusVariant = 'sleeve' | 'capsule' | 'noOdds';

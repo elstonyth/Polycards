@@ -28,7 +28,7 @@ import {
 import { drawingBufferBytes } from '../runtime/stage-scene';
 import { CIAO_ROW } from '../stage-spin';
 
-// The hand-off from Closing to the lineup (full-flow plan 2.4): while a pack
+// The hand-off from Closing to the lineup: while a pack
 // is focused, st.spin is the local progress from Closing to the lineup rest
 // and st.exit the lineup's exit. h = power1InOut(spin), applied once.
 
@@ -205,7 +205,7 @@ for (const s of SIZES)
     });
   });
 
-describe('the focused back at the hand-off (full-flow plan 2.12, risk 4)', () => {
+describe('the focused back at the hand-off', () => {
   it('is wanted up to Closing + 0.5 and released past it', () => {
     expect(BACK_RELEASE_AT).toBe(0.5);
     expect(focusBackWanted(0)).toBe(true);

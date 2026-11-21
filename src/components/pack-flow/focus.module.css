@@ -1,5 +1,5 @@
 /*
- * The focused pack's stop blocks (plan-focus-ciao sections 2 and 5).
+ * The focused pack's stop blocks.
  * `.over`: over the pinned stage panel, one block at a time. `.doc`: every
  * block in page order (reduced motion, no stage).
  * Positions are fractions of the panel (desktop 1440 x 828, phone 390 x 716).

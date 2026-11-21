@@ -125,7 +125,7 @@ describe('the spin composes with the other terms', () => {
     expect(p.rotZ).toBe(0);
   });
 
-  // Spin and focus are no longer exclusive (full-flow plan 2.4): while a
+  // Spin and focus are no longer exclusive: while a
   // pack is focused the spin is the hand-off into the lineup
   // (stage-handoff.test.ts). With no hand-off the focus pose is alone.
   it('focused with no hand-off (spin 0), the row term is not drawn', () => {
@@ -143,7 +143,7 @@ describe('the spin composes with the other terms', () => {
   });
 });
 
-describe('introOpacity (10.10)', () => {
+describe('introOpacity', () => {
   it('draws nothing at intro 0 and everything at intro 1', () => {
     for (const d of [-2, -1, 0, 1, 2]) {
       expect(introOpacity(0, d)).toBe(0);

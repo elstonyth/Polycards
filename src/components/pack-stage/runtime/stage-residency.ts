@@ -1,5 +1,5 @@
 /**
- * Pack stage residency (plan section 4, "Memory"). Pure: no three.js, no DOM,
+ * Pack stage residency. Pure: no three.js, no DOM,
  * no clock (the caller passes `now`). Decides which packs hold a model and a
  * GPU texture, given the track position, the drag direction, phone or desktop,
  * the promoted centre pack and a byte budget.
@@ -54,7 +54,7 @@ export function residencyConfig(desktop: boolean): Readonly<ResidencyConfig> {
 }
 
 /**
- * The free span (full-flow plan 1.1a): nothing is drawn, and only the chosen
+ * The free span: nothing is drawn, and only the chosen
  * pack (the track) is kept, so Just Pulled's pictures have the room; the
  * others are staged again with the rise.
  */

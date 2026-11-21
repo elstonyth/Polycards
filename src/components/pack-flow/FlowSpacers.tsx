@@ -1,6 +1,6 @@
 import styles from './home-flow.module.css';
 
-/** The paged part's spacers, in page order (full-flow plan 2.1). */
+/** The paged part's spacers, in page order. */
 const PAGED = ['row', 'band', 'lineup', 'exit'] as const;
 /** After the free content: Return, then Last (its top is the wrap line). */
 const END = ['return', 'last'] as const;

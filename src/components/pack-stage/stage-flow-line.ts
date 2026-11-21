@@ -1,6 +1,5 @@
 /**
- * Pack stage: the endless pick in the tilted lineup (full-flow plan 2.4,
- * work package 5). Pure: no DOM, no clock (the caller passes the time and
+ * Pack stage: the endless pick in the tilted lineup. Pure: no DOM, no clock (the caller passes the time and
  * the pointer's x, and writes the track it gets back to the row).
  *
  * - A sideways drag moves an unbounded line position at one pack per
@@ -18,11 +17,11 @@
  */
 import { WHEEL_GAP_MS, WHEEL_MIN_DELTA } from './stage-pager';
 
-/** Drag factor: one pack per 100 px, phone and desktop [code l.882; measured D §E, P §E]. */
+/** Drag factor: one pack per 100 px, phone and desktop. */
 export const LINE_PX_PER_PACK = 100;
-/** Release: the last frame's movement times 8 [code l.1146-1156]. */
+/** Release: the last frame's movement times 8. */
 export const LINE_FLING = 8;
-/** The settle: a lerp of 10 per second [code l.1155, l.1314-1323]. */
+/** The settle: a lerp of 10 per second. */
 export const LINE_LERP_PER_S = 10;
 /** The line counts as at rest this close to its target. */
 const SETTLE = 1e-3;

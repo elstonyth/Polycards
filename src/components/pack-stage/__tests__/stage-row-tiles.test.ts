@@ -8,11 +8,12 @@
 import { describe, expect, it } from 'vitest';
 
 import type { FocusCtx, Pose, StageLayout, StageState } from '../contract';
-import { CAPSULE_LIMITS } from '../stage-capsule-lean';
+import { CAPSULE_LIMITS, SLEEVE_TILE } from '../stage-capsule-lean';
 import { FOCUS_TERM } from '../stage-compose';
 import { focusKeys } from '../stage-focus-keys';
 import { rowTilePacks, tilePose, tileSpinCtx } from '../stage-row-tiles';
 import { poseAt, restState } from '../stage-pose';
+import { LEAN } from '../stage-spin-math';
 import { ciaoCopies } from '../stage-spin';
 
 const SIZES = [
@@ -31,7 +32,7 @@ const N = 5;
 const EPS = 1e-9;
 const CAPSULES = rowTilePacks(
   Array.from({ length: N }, (_, i) => `Capsule ${i}, RM 10`),
-  Array.from({ length: N }, () => ({ ticket: true })),
+  Array.from({ length: N }, () => ({ ticket: true, soldOut: false })),
 );
 
 const over = (p: Pose) =>
@@ -52,10 +53,13 @@ function within(p: Pose, what: string) {
 }
 
 describe('rowTilePacks', () => {
-  it('takes the capsule flag from the row on show', () => {
+  it('takes the capsule flag and the sold-out state from the row on show', () => {
     const out = rowTilePacks(
       ['Gold Capsule, RM 10', 'Silver Capsule, RM 5, sold out'],
-      [{ ticket: true }, { ticket: true }],
+      [
+        { ticket: true, soldOut: false },
+        { ticket: true, soldOut: true },
+      ],
     );
     expect(out).toEqual([
       { soldOut: false, ticket: true },
@@ -64,14 +68,37 @@ describe('rowTilePacks', () => {
     expect(CAPSULES.every((p) => p.ticket)).toBe(true);
   });
 
-  it('keeps sleeves as sleeves, and a tile with no row entry a sleeve', () => {
+  it("reads sold out from the row entry, whatever the tile's name says", () => {
     expect(
-      rowTilePacks(['151, RM 30', null, 'Extra'], [{ ticket: false }]),
+      rowTilePacks(
+        ['Gold, RM 10, sold out', 'Silver, RM 5'],
+        [
+          { ticket: false, soldOut: false },
+          { ticket: false, soldOut: true },
+        ],
+      ),
     ).toEqual([
       { soldOut: false, ticket: false },
-      { soldOut: false, ticket: false },
-      { soldOut: false, ticket: false },
+      { soldOut: true, ticket: false },
     ]);
+  });
+
+  it('a capsule leans by the capsule yaw limit and a sleeve by LEAN', () => {
+    const panel = SIZES[0]!.panel;
+    expect(tileSpinCtx(N, CAPSULES[0]!, 0, panel).spin!.lean).toBe(
+      CAPSULE_LIMITS.yaw,
+    );
+    expect(tileSpinCtx(N, SLEEVE_TILE, 0, panel).spin!.lean).toBe(LEAN);
+  });
+
+  it('keeps sleeves as sleeves, and a tile with no row entry a sleeve', () => {
+    expect(SLEEVE_TILE).toEqual({ soldOut: false, ticket: false });
+    expect(
+      rowTilePacks(
+        ['151, RM 30', null, 'Extra'],
+        [{ ticket: false, soldOut: false }],
+      ),
+    ).toEqual([SLEEVE_TILE, SLEEVE_TILE, SLEEVE_TILE]);
     expect(rowTilePacks(['151, sold out'], undefined)).toEqual([
       { soldOut: true, ticket: false },
     ]);

@@ -1,6 +1,5 @@
 /**
- * Pack stage: the binding contract shared by every work package
- * (plan section 10, docs/research/home-3d/pack-stage/plan.md).
+ * Pack stage: the binding contract.
  *
  * Imports nothing heavy: types only, so the page, the provider and the async
  * three.js runtime can all depend on it without pulling each other in.
@@ -86,10 +85,10 @@ export type StageState = {
   idle: number;
   focus: number;
   turn: number;
-  /** Step 2 (10.9): 0..1, the progress through the spin pin (paged or followed). */
+  /** 0..1, the progress through the spin pin (paged or followed). */
   spin: number;
   /**
-   * ADDITION (Ciao motion sheet): 0..1 through the exit after the pin, the
+   * ADDITION: 0..1 through the exit after the pin, the
    * camera move that takes the formed row out of the top. Kept in the state
    * (not only in `SpinCtx`) so the runtime redraws when it changes.
    */
@@ -100,7 +99,7 @@ export type StageState = {
    */
   focusOn?: StageFocusOn | null;
   /**
-   * The end of the lap (full-flow plan 2.6), written by the spin chunk below
+   * The end of the lap, written by the spin chunk below
    * the lineup's exit. Absent: none.
    */
   lap?: StageLap | null;
@@ -109,7 +108,7 @@ export type StageState = {
  * `rise` 0..1: the chosen pack (`round(track)`) from one panel below to its
  * rest; `ret` 0..1: the others back from 5 row steps to 1, fading in;
  * `free`: nothing drawn; `trim`: only the chosen pack is kept resident (the
- * free span away from its ends, full-flow plan 1.1a).
+ * free span away from its ends).
  */
 export type StageLap = {
   rise: number;
@@ -130,8 +129,8 @@ export type StageLayout = {
   artW?: number;
 }; // host CSS px
 /**
- * Step 2 adds `fx`, `fy` and `rotZ`:
- * - `fx`: offset as a fraction of the host width (the Ciao row's projection).
+ * Spin adds `fx`, `fy` and `rotZ`:
+ * - `fx`: offset as a fraction of the host width (the lineup row's projection).
  * - `fy`: offset as a fraction of the host (panel) height.
  * - `rotZ`: radians, CSS `rotateZ` (clockwise on screen), applied before
  *   `rotateY` and `rotateX`. three.js: `rotation.set(-rotX, rotY, -rotZ, 'ZYX')`.
@@ -161,7 +160,7 @@ export type PoseBlock = {
   dim: number;
 };
 
-/** A spin pose may also offset by panel fractions (the Ciao row and the exit). */
+/** A spin pose may also offset by panel fractions (the lineup row and the exit). */
 export type SpinPoseBlock = PoseBlock & { fx?: number; fy?: number };
 
 export type SpinPoseFn = (
@@ -175,7 +174,7 @@ export type SpinPoseFn = (
 
 /**
  * The stage panel in host CSS px, and where the art centre sits in it (cy / h).
- * `viewH`: the viewport height (Ciao maps its fov to it; default `h`).
+ * `viewH`: the viewport height (the lineup maps its fov to it; default `h`).
  */
 export type SpinPanel = {
   w: number;
@@ -185,16 +184,16 @@ export type SpinPanel = {
 };
 
 /**
- * Per-tile spin context (section 10.9 and the Ciao motion sheet).
+ * Per-tile spin context (the lineup row and its exit).
  * - `count`: packs in the attached set.
  * - `turn`: this tile's turn weight (0 = lean .. 1 = full own-axis turn); the
- *   Ciao row ignores it.
- * - `lean`: `LEAN` for packs, `CAPSULE_LEAN` for capsules.
+ *   lineup row ignores it.
+ * - `lean`: `LEAN` for packs, `CAPSULE_LIMITS.yaw` for capsules.
  * - `spinPose`: the lazily loaded row function (`ciaoPose`); absent = no spin
  *   term (the CSS tiles before the idle import).
  * - `soldOut`: the row's dim is "soldOut ? 0.4 : 1".
  * - `exit`: 0..1 through the exit (the camera move after the pin).
- * - `panel`: the panel, for the Ciao row's projection and the exit.
+ * - `panel`: the panel, for the lineup row's projection and the exit.
  * - `copy`: row-slot offset of this drawn repeat (`ciaoCopies`); 0 = the pack.
  * - `capsule`: a capsule, whose ramp is clamped to the owner's tip limits.
  * - `spread`: the row's spacing as a multiple of its own (default 1); the
@@ -223,16 +222,7 @@ export type SpinOpacityFn = (
 ) => number;
 
 /**
- * What drives `spin`: `paged` (DEFAULT, Ciao's trigger: one gesture plays one
- * 1.5 s move) or `free` (the preview's `?spin=free`: the spin follows the
- * scroll). `tip` is the old name of the Ciao row look, kept for the unwired
- * full-turn helpers in `stage-spin.ts`.
- */
-export type SpinVariant = 'paged' | 'free' | 'tip';
-export type SpinMode = 'paged' | 'free';
-
-/**
- * The page's pin (10.9), as elements: the spin chunk measures the range from
+ * The page's pin, as elements: the spin chunk measures the range from
  * them (never per frame) and sets the panel's flags. `flow` holds the CSS
  * variables, `wrap` is the pin (its descendants' gestures page the spin),
  * `panel` the sticky stage section. `empty`: no packs, no pin.
@@ -259,9 +249,9 @@ export type PackBackDetails = {
   buyback: { headline: string; rule: string } | null;
 };
 
-// --- Focus (plan-focus-ciao) -----------------------------------------------
+// --- Focus -----------------------------------------------
 
-/** The focused pack's stops (plan-focus-ciao section 2), in order. */
+/** The focused pack's stops, in order. */
 export type StageStopKind =
   'front' | 'tophits' | 'odds' | 'buyback' | 'pulls' | 'closing';
 export type StageStop = { y: number; kind: StageStopKind };
@@ -274,7 +264,7 @@ export interface StageScrollSource {
 export type SpotRect = { x0: number; y0: number; x1: number; y1: number };
 
 /**
- * The focused pack at one stop (plan-focus-ciao section 2): centre as panel
+ * The focused pack at one stop: centre as panel
  * fractions, the long side over the panel height, screen roll (clockwise
  * degrees), own turn (degrees, 180 = back), pitch (degrees, positive tips the
  * top away), the spotlight and, at a back stop, its rect.
@@ -339,29 +329,9 @@ export type StageFocusDecl = {
 };
 
 export type StageBackStatus = 'none' | 'loading' | 'ready' | 'unavailable';
-export type StageRenderBackStatus = 'none' | 'loading' | 'ready' | 'failed';
 
-/** Spin back entries (10.5; the full-turn row, not wired: Ciao look ruling). */
+/** Spin back entries (the full-turn row, not wired). */
 export type StageSpinBack = { id: string; details: PackBackDetails | null };
-
-/** What `Stage3dStage` gains with focus (next phase). */
-export interface Stage3dStageFocusAdditions {
-  values: { focus: Observable<number>; turn: Observable<number> };
-  focusPack(
-    r: StageFocusRequest | null,
-    o?: { instant?: boolean },
-  ): Promise<void>;
-  updateBack(back: PackBackDetails | null): void;
-  bindScroll(s: StageScrollSource): () => void;
-  backStatus(): StageBackStatus;
-  /** True on the render after an "All packs" arrival (stage-arrival.ts). */
-  arrival: boolean;
-}
-
-/** What `StageRuntime` gains with focus (next phase). */
-export interface StageRuntimeFocusAdditions {
-  setFocus(f: StageFocusDecl | null): void;
-}
 
 // `poseAt` lives in `./stage-pose` (pure); re-exported so the contract path works too.
 export { poseAt } from './stage-pose';
@@ -459,7 +429,7 @@ export interface Stage3dStage extends Stage3dApi {
     swap: Observable<number>;
     pointerX: Observable<number>;
     pointerY: Observable<number>;
-    /** Step 2: the spin and the exit, mirrored into `state`. */
+    /** The spin and the exit, mirrored into `state`. */
     spin: Observable<number>;
     exit: Observable<number>;
   };
@@ -529,7 +499,7 @@ export type StageRuntime = {
   /**
    * ADDITION: `centre` is the new list's starting track (its index space).
    * Packs already resident, or staged by `prefetch`, are carried by key.
-   * `count` (step 2): the whole row's length, 3D or not (the spin row wraps
+   * `count`: the whole row's length, 3D or not (the spin row wraps
    * over it); default the list's.
    */
   setPacks(p: StageRuntimePack[] | null, centre?: number, count?: number): void;

@@ -1,5 +1,5 @@
 /**
- * Pack stage crash guard (plan section 5, "Crash loop"). One sessionStorage
+ * Pack stage crash guard. One sessionStorage
  * key:
  * - `'boot'` is written just before the WebGL renderer is created and removed
  *   after 5 s of stable running or on `pagehide`. iOS kills a tab that runs

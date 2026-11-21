@@ -25,6 +25,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { StagePack } from './contract';
 import { useStage3d } from './Stage3dProvider';
+import { SLEEVE_TILE } from './stage-capsule-lean';
 import { spinKit } from './stage-spin-load';
 import { SPIN_LOCK, STAGE_REACH, restState } from './stage-pose';
 import { stageStartIndex } from './stage-filter';
@@ -86,7 +87,7 @@ const SETTLE = {
   damping: 32,
   restDelta: 0.001,
 } as const;
-/** Camera field of view the 3D stage renders with (plan section 4). The CSS
+/** Camera field of view the 3D stage renders with. The CSS
  *  perspective is that camera's distance in CSS px. */
 const CAMERA_FOV_DEG = 28;
 
@@ -100,7 +101,7 @@ export type StageTrackHandle = {
 };
 
 /**
- * One category's carousel (plan sections 1, 3, 7). A motion value holds the
+ * One category's carousel. A motion value holds the
  * continuous centred index; every change is written straight into the tiles'
  * CSS pose (no React render per frame) and read by the 3D provider through
  * `attach`. Moves by swipe (horizontal pan only: `touch-action: pan-y` keeps
@@ -187,9 +188,9 @@ export default function StageTrack({
       focusOn: live.focusOn,
     };
     row.style.setProperty('--track', String(Math.round(t * 10000) / 10000));
-    // The spin row (Ciao's packshot) and the focused view are posed by the
+    // The spin row (the packshot lineup) and the focused view are posed by the
     // lazily loaded chunk: the same pose the canvas draws, so a tile without
-    // a 3D pack stands in place. At rest (or before the chunk) step 1's.
+    // a 3D pack stands in place. At rest (or before the chunk) the plain carousel's.
     const host = hostRef.current;
     if (
       (state.spin > 0 || state.exit > 0 || state.focus > 0) &&
@@ -200,12 +201,13 @@ export default function StageTrack({
     const tiles = row.children;
     for (let i = 0; i < tiles.length; i++) {
       const tile = tiles[i] as HTMLElement;
+      const entry = packs[i] ?? SLEEVE_TILE;
       const vars = tileVars(
         i,
         state,
-        packs[i]?.soldOut ?? false,
+        entry.soldOut,
         cyArtRef.current,
-        packs[i]?.ticket ?? false,
+        entry.ticket,
       );
       for (const key in vars) tile.style.setProperty(key, vars[key] ?? '');
     }
@@ -342,7 +344,7 @@ export default function StageTrack({
     if (!press || press.id !== event.pointerId) return;
     const dx = event.clientX - press.x0;
     if (!panRef.current) {
-      // The spin owns the row once it has started (10.4): no new swipe. A
+      // The spin owns the row once it has started: no new swipe. A
       // swipe already under way finishes its snap.
       if (values.spin.get() >= SPIN_LOCK) return;
       const dy = event.clientY - press.y0;

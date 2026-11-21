@@ -346,7 +346,7 @@ export type SpotRect = { x0: number; y0: number; x1: number; y1: number };
 export const SPOT_PAD = 0.012;
 
 /**
- * The focused back's two lit rects (plan-focus-ciao section 4): `odds`, the
+ * The focused back's two lit rects: `odds`, the
  * whole gold box (the union of the headline, odds heading and odds zones),
  * and `buyback`, the buyback paragraph; each padded by `SPOT_PAD`. Null when
  * the geometry lacks one of the zones.

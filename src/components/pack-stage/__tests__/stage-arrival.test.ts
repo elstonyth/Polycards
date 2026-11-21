@@ -8,7 +8,7 @@ import {
   takeArrival,
 } from '../stage-arrival';
 
-describe('the arrival flag (10.10)', () => {
+describe('the arrival flag', () => {
   beforeEach(() => resetArrivalForTests());
 
   it('is unset by default', () => {
