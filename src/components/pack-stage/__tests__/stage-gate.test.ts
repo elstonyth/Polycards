@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { STAGE_CRASH_KEY } from '../crash-guard';
 import {
   COARSE_POINTER_QUERY,
+  FLOW_OFF_QUERY,
   REDUCED_DATA_QUERY,
   REDUCED_MOTION_QUERY,
   createFrameWatchdog,
@@ -371,5 +372,13 @@ describe('stepDownAllowed: a too-slow verdict rebuilds only where no pack is hel
     expect(at({ lap: { rise: 0.4, ret: 0, free: false, trim: false } })).toBe(
       false,
     );
+  });
+});
+
+describe('FLOW_OFF_QUERY', () => {
+  it('turns the flow off for reduced motion and for a phone on its side', () => {
+    const parts = FLOW_OFF_QUERY.split(',').map((q) => q.trim());
+    expect(parts).toContain(REDUCED_MOTION_QUERY);
+    expect(parts).toContain('(orientation: landscape) and (max-height: 500px)');
   });
 });

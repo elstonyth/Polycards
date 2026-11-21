@@ -26,7 +26,7 @@ import type {
 } from './contract';
 import type { FocusRun } from './stage-focus-kit';
 import type { StageTrackHandle } from './StageTrack';
-import { STAGE_DESKTOP_QUERY } from './stage-gate';
+import { FLOW_OFF_QUERY, STAGE_DESKTOP_QUERY } from './stage-gate';
 import { stageAnnouncement } from './stage-filter';
 import { tileVars } from './StageTile';
 import { SLEEVE_TILE } from './stage-capsule-lean';
@@ -257,7 +257,7 @@ function wheelPx(e: WheelEvent): number {
  * data-flow-on, which pins the panel and gives the spacers their height.
  */
 export function startSpin(host: SpinHost): SpinControl {
-  const rmq = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const rmq = window.matchMedia(FLOW_OFF_QUERY);
   let src: StageSpinSource | null = null;
   let looping = false;
   let wokeAt = 0;

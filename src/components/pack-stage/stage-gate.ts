@@ -18,6 +18,13 @@ export type GateMode = '3d' | 'lite' | 'flat';
 export type StageOverride = GateMode | null;
 
 export const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
+/**
+ * The flow (pinned panel, paged stops) is off: reduced motion, or a view too
+ * short for a stop's text beside its pack (a phone on its side). Such a view
+ * reads as the plain page; turned upright at the row, the flow comes back.
+ */
+export const FLOW_OFF_QUERY =
+  '(prefers-reduced-motion: reduce), (orientation: landscape) and (max-height: 500px)';
 export const REDUCED_DATA_QUERY = '(prefers-reduced-data: reduce)';
 export const COARSE_POINTER_QUERY = '(pointer: coarse)';
 /** Desktop layout and runtime flag. Tailwind `lg`. */
