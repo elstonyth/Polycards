@@ -98,8 +98,7 @@ export type FlowSpan = 'exit' | 'free' | 'rise' | 'ret' | 'last';
 
 /** The flow position: paged (P, 0 = row, 1..n stops, n + 1 = lineup) or a free span's progress. */
 export type FlowAt =
-  | { zone: 'paged'; p: number }
-  | { zone: 'free'; span: FlowSpan; t: number };
+  { zone: 'paged'; p: number } | { zone: 'free'; span: FlowSpan; t: number };
 
 /**
  * The slots (in sections after R0) a variant with n stops rests on: evenly
@@ -453,6 +452,27 @@ export function freeAnchor(
       return { i, frac: s.height > 0 ? clamp01((mid - s.top) / s.height) : 0 };
   }
   return null;
+}
+
+/**
+ * Where the plain page opens when the flow switches off under a visitor
+ * (a phone turned on its side): from the paged part (the row, a stop, the
+ * lineup and its exit, all above `exitEnd`) the row at `r0`; below it the
+ * same share of the same section under the viewport's middle, read on the
+ * flow's page (`on`) and placed on the plain one (`plain`). The row when
+ * no section was measured.
+ */
+export function offPlace(
+  y: number,
+  exitEnd: number,
+  r0: number,
+  on: readonly FlowSection[],
+  plain: readonly FlowSection[],
+  viewport: number,
+): number {
+  if (y < exitEnd) return r0;
+  const a = freeAnchor(y, on, viewport);
+  return a && plain.length > 0 ? freeAnchorY(a, plain, viewport) : r0;
 }
 
 /** The scroll that puts the same share of the same section under the middle. */

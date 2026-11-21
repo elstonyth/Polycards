@@ -17,6 +17,7 @@ import {
   flowTerms,
   freeAnchor,
   freeAnchorY,
+  offPlace,
   lapAt,
   lapTrim,
   returnProgress,
@@ -785,5 +786,34 @@ describe('stage flow: the end rests (the footer, the chosen pack, the row back)'
       free: false,
       trim: false,
     });
+  });
+});
+
+describe('stage flow: where the plain page opens when the flow switches off', () => {
+  // the flow-on page: Just Pulled at 8000 (3000 tall), the footer at 11000;
+  // the plain page: the same sections at 900 and 3900
+  const on = [
+    { top: 8000, height: 3000 },
+    { top: 11000, height: 400 },
+  ];
+  const plain = [
+    { top: 900, height: 3000 },
+    { top: 3900, height: 400 },
+  ];
+
+  it('from the paged part (the row, a stop, the lineup, its exit): the row', () => {
+    for (const y of [0, 3000, 7000, 7999])
+      expect(offPlace(y, 8000, 0, on, plain, 800)).toBe(0);
+  });
+
+  it('from Just Pulled or the end: the same share of the same section under the middle', () => {
+    // 9100 + 400 = 9500 is half-way through Just Pulled: 900 + 1500 - 400
+    expect(offPlace(9100, 8000, 0, on, plain, 800)).toBe(2000);
+    // the footer under the middle
+    expect(offPlace(10800, 8000, 0, on, plain, 800)).toBe(3700);
+  });
+
+  it('with no sections measured: the row', () => {
+    expect(offPlace(9100, 8000, 0, [], plain, 800)).toBe(0);
   });
 });

@@ -45,6 +45,7 @@ import {
   WRAP_UI_FADE_MS,
   lapAt,
   lapTrim,
+  offPlace,
   returnProgress,
   riseProgress,
   sameLap,
@@ -344,6 +345,19 @@ export function startSpin(host: SpinHost): SpinControl {
       r0,
       panel,
     });
+    // the flow switching off under the visitor (a phone on its side): where
+    // they were, read before the spacers go
+    const sectionsNow = () =>
+      Array.from(
+        src!.flow.querySelectorAll<HTMLElement>('[data-flow-section]'),
+      ).map((el) => {
+        const r = el.getBoundingClientRect();
+        return { top: r.top + window.scrollY, height: r.height };
+      });
+    const leaving =
+      was && !on
+        ? { y: window.scrollY, t: input.table(), on: sectionsNow() }
+        : null;
     if (on !== was) {
       src.flow.toggleAttribute('data-flow-on', on);
       // Return and Last take their height with the flow
@@ -351,6 +365,19 @@ export function startSpin(host: SpinHost): SpinControl {
       src.flow.toggleAttribute('data-flow-last', on);
       if (!on) clearPast(src);
       restore(on);
+      // the plain page opens at the row, or at the same place in the sections
+      if (leaving?.t) {
+        const top = headerHeight();
+        const y = offPlace(
+          leaving.y,
+          leaving.t.exitEnd,
+          rowTop(src),
+          leaving.on.map((r) => ({ ...r, top: r.top - top })),
+          sectionsNow().map((r) => ({ ...r, top: r.top - top })),
+          window.innerHeight,
+        );
+        window.scrollTo(0, y);
+      }
     }
     // the rise, Return and Last, in the same origin (scroll under the header)
     const rectOf = (el: HTMLElement | null) => {

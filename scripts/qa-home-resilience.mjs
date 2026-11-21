@@ -537,6 +537,193 @@ async function viewportPart(size, kind) {
   await s.ctx.close();
 }
 
+/** The plain page's layout in a phone on its side: no sideways scroll, nothing cut off, no overlap. */
+const plainLayout = (page) =>
+  page.evaluate(() => {
+    const vw = innerWidth;
+    const els = [
+      document.querySelector('[data-stage-root]'),
+      ...document.querySelectorAll('[data-flow-section]'),
+    ].filter(Boolean);
+    const boxes = els
+      .map((el) => {
+        const r = el.getBoundingClientRect();
+        return {
+          name:
+            el.getAttribute('data-flow-section') ??
+            (el.hasAttribute('data-stage-root') ? 'stage' : el.tagName),
+          top: r.top + scrollY,
+          bottom: r.bottom + scrollY,
+          left: r.left,
+          right: r.right,
+        };
+      })
+      .filter((b) => b.bottom > b.top);
+    const bad = [];
+    const sw = document.documentElement.scrollWidth;
+    if (sw > vw + 1) bad.push('sideways scroll: ' + sw + ' wide in ' + vw);
+    for (const b of boxes)
+      if (b.left < -1 || b.right > vw + 1)
+        bad.push(
+          b.name +
+            ' cut off (' +
+            Math.round(b.left) +
+            '..' +
+            Math.round(b.right) +
+            ')',
+        );
+    const sorted = [...boxes].sort((a, b) => a.top - b.top);
+    for (let i = 1; i < sorted.length; i++)
+      if (sorted[i].top < sorted[i - 1].bottom - 1)
+        bad.push(sorted[i].name + ' overlaps ' + sorted[i - 1].name);
+    const tall = [...document.querySelectorAll('[data-flow-spacer]')].filter(
+      (el) => el.getBoundingClientRect().height > 0,
+    );
+    if (tall.length) bad.push(tall.length + ' spacer(s) with height');
+    return bad;
+  });
+/** Packs the 3D draws now. */
+const drawnCount = (page) =>
+  page.evaluate(
+    () =>
+      (window.__packStage?.runtime?.()?.drawn ?? []).filter(
+        (d) => d.opacity > 0,
+      ).length,
+  );
+
+/**
+ * A phone on its side reads as the plain page; upright the flow comes back.
+ * From the row, a detail stop, the lineup, Just Pulled and the single pack:
+ * on its side the plain page (flow off, no sideways scroll, nothing cut off
+ * or overlapping); upright the flow on again at a rest, or, from below the
+ * row, the plain page until the visitor scrolls back to the row (the flow
+ * never jumps a scrolled page); there the flow is on at the row, the packs
+ * are drawn, and one swipe moves one step.
+ */
+async function sidewaysPart(size) {
+  const s = await open(size);
+  const { page } = s;
+  const from = PROFILES[size].viewport;
+  const places = [
+    ['row', async () => walkTo(s, 0)],
+    ['stop3', async () => walkTo(s, 3)],
+    [
+      'lineup',
+      async () => {
+        await load(s);
+        await rest(page);
+        return key(page, 'End');
+      },
+    ],
+    ['just-pulled', async () => toFreeMiddle(s)],
+    [
+      'single-pack',
+      async () => {
+        await load(s);
+        await rest(page);
+        const p = await key(page, 'End');
+        await page.evaluate((v) => window.scrollTo(0, v), p.ends[1]);
+        await page.waitForTimeout(800);
+        return rest(page);
+      },
+    ],
+  ];
+  for (const [name, reach] of places) {
+    const tag = 'sideways-' + name + '-' + size;
+    const bad = [];
+    const p0 = await reach();
+    await page.setViewportSize(TURNED[size]);
+    await page.waitForTimeout(800);
+    const q1 = await probe(page);
+    await shot(page, tag + '-1-on-its-side');
+    if (q1.flowOn) bad.push('on its side: the flow is still on');
+    // the plain page opens where the visitor was: the row from the paged
+    // part, the same section below it
+    const want =
+      { row: 'row', stop3: 'row', lineup: 'row' }[name] ??
+      (name === 'just-pulled' ? 'just-pulled' : 'footer');
+    const seen =
+      q1.y <= 2
+        ? 'row'
+        : (q1.anchor?.name ?? (q1.y >= q1.max - 2 ? 'footer' : 'none'));
+    if (seen !== want && !(want === 'footer' && q1.y >= q1.max - 2))
+      bad.push(
+        'on its side: opens at ' +
+          seen +
+          ' (scrollY ' +
+          q1.y +
+          '), want ' +
+          want,
+      );
+    for (const b of await plainLayout(page)) bad.push('on its side: ' + b);
+    await page.setViewportSize(from);
+    await page.waitForTimeout(800);
+    let q2 = await rest(page);
+    await shot(page, tag + '-2-upright');
+    const where = q2.flowOn
+      ? 'flow on at rest ' + restIndex(q2) + ' (scrollY ' + q2.y + ')'
+      : 'plain page at scrollY ' + q2.y;
+    if (
+      q2.flowOn &&
+      restIndex(q2) < 0 &&
+      !q2.ends.some((v) => Math.abs(v - q2.y) < 1)
+    )
+      bad.push('upright: flow on off every rest (scrollY ' + q2.y + ')');
+    if (!q2.flowOn) {
+      // the plain page until the row: scrolled back up, the flow returns there
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.waitForTimeout(800);
+      q2 = await rest(page);
+      if (!q2.flowOn) bad.push('upright at the top: the flow is still off');
+    }
+    const k = restIndex(q2);
+    if (q2.flowOn && k < 0)
+      bad.push('upright: off every rest (scrollY ' + q2.y + ')');
+    const packs = await drawnCount(page);
+    if (q2.flowOn && k >= 0 && k < q2.stops.length - 1 && packs < 1)
+      bad.push('upright: no pack drawn');
+    // one swipe, one step
+    let stepText = '';
+    if (q2.flowOn && k >= 0 && k < q2.stops.length - 1) {
+      await swipe(s, 200, 600, 200, 380);
+      await page.waitForTimeout(400);
+      const q3 = await rest(page);
+      const k3 = restIndex(q3);
+      stepText = '; one swipe: rest ' + k + ' to ' + k3;
+      if (k3 !== k + 1) bad.push('one swipe went from rest ' + k + ' to ' + k3);
+    }
+    const back =
+      k === restIndex(p0) && Math.abs(q2.y - p0.y) < 1
+        ? 'the same place'
+        : 'not the place left (' +
+          label(p0, Math.max(0, restIndex(p0))) +
+          ' at ' +
+          p0.y +
+          ')';
+    log.push({ name: tag, p0, q1, q2 });
+    report(
+      tag,
+      bad.length === 0,
+      bad.join('; ') ||
+        'on its side the plain page; upright ' +
+          where +
+          ', then rest ' +
+          k +
+          ' with ' +
+          packs +
+          ' pack(s) drawn, ' +
+          back +
+          stepText,
+    );
+  }
+  report(
+    'errors-rotate-' + size,
+    page.errors.length === 0,
+    page.errors.join(' | ') || 'none',
+  );
+  await s.ctx.close();
+}
+
 /** Every key in the plan's key table (2.10), down and back. */
 async function keysPart(size) {
   const s = await open(size);
@@ -1050,8 +1237,11 @@ async function lapPart(size) {
       'scrollY ' + q.y + ', rest ' + q.ends[j] + ' (ends ' + q.ends + ')',
     );
   };
-  await onRest('rotate-at-the-chosen-pack-' + size, 1, 'rise');
-  await onRest('rotate-at-the-footer-' + size, 0, 'rise');
+  // a phone on its side shows the plain page: its turns are the sideways part's
+  if (size !== 'phone') {
+    await onRest('rotate-at-the-chosen-pack-' + size, 1, 'rise');
+    await onRest('rotate-at-the-footer-' + size, 0, 'rise');
+  }
   // End (the browser's: past Last's top) and PageDown (one move to the row
   // back) at the chosen pack both land on the row
   const wraps = [];
@@ -1425,7 +1615,10 @@ for (const size of ['phone', 'desktop']) {
       report(name + '-' + size + '-crashed', false, String(e).split('\n')[0]);
     }
   };
-  await run('rotate', () => viewportPart(size, 'rotate'));
+  // a phone on its side reads as the plain page (FLOW_OFF_QUERY): its own part
+  await run('rotate', () =>
+    size === 'phone' ? sidewaysPart(size) : viewportPart(size, 'rotate'),
+  );
   await run('height', () => viewportPart(size, 'height'));
   await run('keys', () => keysPart(size));
   await run('touch', () => touchPart(size));
