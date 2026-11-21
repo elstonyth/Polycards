@@ -128,6 +128,11 @@ export const GatewayDeposit = model
     // check (deposit-adjustment-entry.ts), is what the audit then checks in
     // place of the order. One entry backs one row (partial unique index).
     gateway_adjustment_ref: model.text().nullable(),
+    // The gateway's OWN id for that entry (GlobePay365: D…), as it answered
+    // the link. Unique too: the typed reference may come in another letter
+    // case, and a gateway that ignores case would then let one entry back two
+    // rows (review, 2026-11-21). NULL when the gateway gave no id.
+    gateway_adjustment_entry_id: model.text().nullable(),
   })
   .indexes([
     // Callback lookup path: they hand us a MerchantTransactionId and we must
@@ -154,6 +159,13 @@ export const GatewayDeposit = model
       on: ['gateway_adjustment_ref'],
       unique: true,
       where: 'gateway_adjustment_ref IS NOT NULL AND deleted_at IS NULL',
+    },
+    {
+      name: 'IDX_gateway_deposit_adjustment_entry_id_unique',
+      on: ['gateway_adjustment_entry_id'],
+      unique: true,
+      where:
+        "gateway_adjustment_entry_id IS NOT NULL AND gateway_adjustment_entry_id <> '' AND deleted_at IS NULL",
     },
   ]);
 

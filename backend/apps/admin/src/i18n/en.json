@@ -1067,6 +1067,8 @@
     "linkRef": "Merchant Reference ID of the manual entry",
     "linkRefHint": "From the gateway back office, the MD… number in the Merchant Reference ID column. Not the Deposit ID (D…).",
     "linkedToast": "Gateway entry linked",
+    "replaceEntry": "Replace gateway entry",
+    "linkReplaceHint": "This deposit is already linked to an entry the gateway no longer backs. The new entry replaces it, and the old reference stays in the audit log.",
     "checkAcknowledged_one": "{{count, number}} acknowledged, still differs",
     "checkAcknowledged_other": "{{count, number}} acknowledged, still differ"
   },

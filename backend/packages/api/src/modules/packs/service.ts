@@ -4996,6 +4996,56 @@ class PacksModuleService extends MedusaService({
     return rows.length === 1;
   }
 
+  /**
+   * ATOMIC LINK CLAIM on one gateway_deposit row's gateway_adjustment_ref —
+   * Settlement's Link gateway entry. Same warning as claimDepositStatus:
+   * `updateGatewayDeposits({ selector, … })` is find-then-write with no row
+   * lock, so two operators linking one row would both win and the second
+   * reference would silently replace the first (code review, 2026-11-20).
+   *
+   * `from` is the reference the caller READ before asking the gateway (null:
+   * not linked), so a row linked or re-linked meanwhile is left alone and the
+   * claim answers false. `true` means THIS caller moved the row. A reference
+   * another row already holds trips the partial unique index, and that error
+   * propagates as a throw for the caller to word.
+   *
+   * `entryId` is the gateway's own id for the entry, written in the same
+   * statement (null clears it on a replace) and unique like the reference: a
+   * reference typed in another letter case cannot link one entry twice
+   * (review, 2026-11-21). `audit` is inserted in this transaction, only when
+   * the claim was won, so a failed insert rolls the link back and a link never
+   * stands without its log entry (review, 2026-11-21).
+   */
+  @InjectTransactionManager()
+  async claimDepositAdjustmentRef(
+    input: {
+      id: string;
+      from: string | null;
+      to: string;
+      entryId: string | null;
+      /** Plain columns written in the same statement (the audit note). */
+      set?: Record<string, unknown>;
+      audit?: AdminAuditRow;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<boolean> {
+    const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+    const rows = await claimRows(em, {
+      table: 'gateway_deposit',
+      ids: [input.id],
+      where: { gateway_adjustment_ref: input.from },
+      set: {
+        ...(input.set ?? {}),
+        gateway_adjustment_ref: input.to,
+        gateway_adjustment_entry_id: input.entryId,
+      },
+    });
+    if (rows.length === 1 && input.audit) {
+      await this.audit(input.audit, sharedContext);
+    }
+    return rows.length === 1;
+  }
+
   /** The ORM half of a settle claim — see SettlementMirror for why the two
    *  bigNumber columns cannot ride the raw statement. Runs on the claim's own
    *  transaction, and only after it was won, so a loser leaves no trace. */

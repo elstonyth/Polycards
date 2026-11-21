@@ -23,7 +23,7 @@ import {
 } from '../../lib/queries';
 import { rm } from '../../lib/format';
 import { paymentStatus } from '../../lib/dashboard';
-import { auditCounts, canCreditDeposit, canLinkEntry } from './audit-counts';
+import { auditCounts, canCreditDeposit, linkEntryAction } from './audit-counts';
 
 // The first few are enough to act on; the rest are one click away.
 const SHOWN = 10;
@@ -59,6 +59,7 @@ export const AuditFindings = ({ currency }: { currency: string }) => {
   const [linkRef, setLinkRef] = useState('');
   const [linkReason, setLinkReason] = useState('');
   const link = useLinkAdjustmentEntry();
+  const linkAction = linkTarget ? linkEntryAction(linkTarget) : null;
   const a = audit.data;
   if (!a) return null;
   const n = auditCounts(a);
@@ -188,17 +189,21 @@ export const AuditFindings = ({ currency }: { currency: string }) => {
                     <Table.Cell className="text-right">
                       {!canEdit ? null : (
                         <div className="flex justify-end gap-2 whitespace-nowrap">
-                          {canLinkEntry(f) ? (
+                          {linkEntryAction(f) ? (
                             <Button
                               size="small"
                               variant="secondary"
                               onClick={() => {
                                 setLinkRef('');
                                 setLinkReason('');
+                                // An old refusal belongs to the row it was for.
+                                link.reset();
                                 setLinkTarget(f);
                               }}
                             >
-                              {t('settlement.linkEntry')}
+                              {linkEntryAction(f) === 'replace'
+                                ? t('settlement.replaceEntry')
+                                : t('settlement.linkEntry')}
                             </Button>
                           ) : null}
                           {!acked && canCreditDeposit(f) ? (
@@ -375,7 +380,12 @@ export const AuditFindings = ({ currency }: { currency: string }) => {
         <Prompt.Content>
           <Prompt.Header>
             <Prompt.Title>{t('settlement.linkTitle')}</Prompt.Title>
-            <Prompt.Description>{t('settlement.linkDesc')}</Prompt.Description>
+            <Prompt.Description>
+              {t('settlement.linkDesc')}
+              {linkAction === 'replace'
+                ? ` ${t('settlement.linkReplaceHint')}`
+                : null}
+            </Prompt.Description>
           </Prompt.Header>
           <div className="flex flex-col gap-1 px-6 pb-2">
             <Text size="small" className="text-ui-fg-subtle">
@@ -409,23 +419,39 @@ export const AuditFindings = ({ currency }: { currency: string }) => {
               placeholder={t('settlement.creditReasonPlaceholder')}
               onChange={(e) => setLinkReason(e.target.value)}
             />
+            {link.error ? (
+              <Text size="small" role="alert" className="text-ui-fg-error mt-2">
+                {link.error instanceof Error
+                  ? link.error.message
+                  : String(link.error)}
+              </Text>
+            ) : null}
           </div>
           <Prompt.Footer>
             <Prompt.Cancel>{t('settlement.ackCancel')}</Prompt.Cancel>
             <Prompt.Action
               disabled={!linkRef.trim() || !linkReason.trim() || link.isPending}
-              onClick={() => {
+              onClick={(e) => {
+                // Refusals are likely here (wrong reference, amount differs,
+                // gateway busy), so the prompt stays open with what was typed
+                // until the backend says yes (2026-11-20 code review). Radix
+                // skips its own close when the click is defaultPrevented.
+                e.preventDefault();
                 if (!linkTarget || !linkRef.trim() || !linkReason.trim())
                   return;
-                link.mutate({
-                  id: linkTarget.id,
-                  ref: linkRef.trim(),
-                  reason: linkReason.trim(),
-                });
-                setLinkTarget(null);
+                link.mutate(
+                  {
+                    id: linkTarget.id,
+                    ref: linkRef.trim(),
+                    reason: linkReason.trim(),
+                  },
+                  { onSuccess: () => setLinkTarget(null) },
+                );
               }}
             >
-              {t('settlement.linkEntry')}
+              {linkAction === 'replace'
+                ? t('settlement.replaceEntry')
+                : t('settlement.linkEntry')}
             </Prompt.Action>
           </Prompt.Footer>
         </Prompt.Content>

@@ -45,12 +45,17 @@ const entryPaid = {
 
 const orderFailed = { state: 'failed' as const, amount: 0 };
 
-/** The gateway answers the row's own order (PC-1) and the entry apart. */
-const answer = (entry: object | Error, order: object | Error = orderFailed) =>
+/** The gateway answers each reference apart: the row's own order (PC-1), an
+ *  entry the row is already linked to (MD-OLD), and the entry being linked. */
+const answer = (
+  entry: object | Error,
+  order: object | Error = orderFailed,
+  old: object | Error = entryPaid,
+) =>
   fakeGateway.script({
     getDepositDetail: (() => {
-      const pick =
-        fakeGateway.calls.depositDetails.at(-1) === 'PC-1' ? order : entry;
+      const asked = fakeGateway.calls.depositDetails.at(-1);
+      const pick = asked === 'PC-1' ? order : asked === 'MD-OLD' ? old : entry;
       if (pick instanceof Error) throw pick;
       return pick;
     }) as never,
@@ -59,6 +64,7 @@ const answer = (entry: object | Error, order: object | Error = orderFailed) =>
 function harness(
   row: Record<string, unknown> | null = shortRow,
   taken: Record<string, unknown>[] = [],
+  handCredits: Record<string, unknown>[] = [],
 ) {
   const packs = {
     listGatewayDeposits: jest.fn(async (f: Record<string, unknown>) => {
@@ -68,14 +74,21 @@ function harness(
         Object.entries(f).every(([k, v]) => t[k] === v),
       );
     }),
-    updateGatewayDeposits: jest.fn(async () => ({})),
-    createAdminActionAudits: jest.fn(async () => []),
+    // Hand credits to OTHER customers that quote the reference.
+    listCreditTransactions: jest.fn(
+      async (_filter: Record<string, unknown>, _config: unknown) => handCredits,
+    ),
+    // The compare-and-set on the row's link: true = this caller won it.
+    // The audit row rides the claim, in its transaction (review, 2026-11-21).
+    claimDepositAdjustmentRef: jest.fn(
+      async (_input: Record<string, unknown>): Promise<boolean> => true,
+    ),
   } satisfies FakeFacet<
     Pick<
       GatewayDeposits,
+      | 'claimDepositAdjustmentRef'
+      | 'listCreditTransactions'
       | 'listGatewayDeposits'
-      | 'updateGatewayDeposits'
-      | 'createAdminActionAudits'
     >
   >;
   const scope = { resolve: () => packs } as never;
@@ -103,34 +116,161 @@ describe('linkAdjustmentEntry', () => {
       'PC-1',
       'MD20261108102020',
     ]);
-    expect(h.packs.updateGatewayDeposits).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: 'gpd_1',
-        gateway_adjustment_ref: 'MD20261108102020',
-        audit_note: null,
-      }),
+    // One conditional write, from "not linked": the note goes with it.
+    expect(h.packs.claimDepositAdjustmentRef).toHaveBeenCalledWith({
+      id: 'gpd_1',
+      from: null,
+      to: 'MD20261108102020',
+      entryId: 'D-ENTRY-1',
+      set: { audit_note: null },
+      audit: expect.objectContaining({ entity_id: 'gpd_1' }),
+    });
+  });
+
+  // An entry the gateway answers with no id of its own still links; there is
+  // nothing to key "one entry, one row" on beyond the typed reference.
+  it('links an entry with no gateway id, writing none', async () => {
+    answer({ ...entryPaid, transactionId: '' });
+    const h = harness();
+    await expect(h.link()).resolves.toMatchObject({ entryId: null });
+    expect(h.packs.claimDepositAdjustmentRef).toHaveBeenCalledWith(
+      expect.objectContaining({ entryId: null }),
     );
+    expect(h.packs.listGatewayDeposits).not.toHaveBeenCalledWith(
+      expect.objectContaining({ gateway_adjustment_entry_id: '' }),
+      expect.anything(),
+    );
+  });
+
+  // Two operators, one row: both pass every check on the copy they read, and
+  // an unconditional write let the second reference replace the first while
+  // the log kept both (code review, 2026-11-20).
+  // A lost claim writes no audit row: the service inserts it only when the
+  // claim was won (integration spec).
+  it('refuses when the row changed while the gateway was asked', async () => {
+    answer(entryPaid);
+    const h = harness();
+    h.packs.claimDepositAdjustmentRef.mockResolvedValueOnce(false);
+    await expect(h.link()).rejects.toThrow(/changed while/i);
+  });
+
+  it.each([
+    'duplicate key value violates unique constraint "IDX_gateway_deposit_adjustment_ref_unique"',
+    'Gateway deposit with gateway_adjustment_entry_id: D-ENTRY-1, already exists.',
+  ])(
+    'refuses when another row took the reference or entry meanwhile (%s)',
+    async (message) => {
+      answer(entryPaid);
+      const h = harness();
+      h.packs.claimDepositAdjustmentRef.mockRejectedValueOnce(
+        new Error(message),
+      );
+      await expect(h.link()).rejects.toThrow(/another deposit/i);
+    },
+  );
+
+  // One link per row, but a link the gateway stopped backing must not need a
+  // database edit to point at the corrected entry (code review, 2026-11-20).
+  describe('on a row already linked', () => {
+    const linkedRow = {
+      ...shortRow,
+      gateway_adjustment_ref: 'MD-OLD',
+      audit_note:
+        "gateway's manual entry MD-OLD is FAILED, but the row is settled — investigate",
+    };
+
+    it.each([
+      ['failed', { ...entryPaid, state: 'failed' }],
+      ['pending', { ...entryPaid, state: 'pending' }],
+      ['paid for a different sum', { ...entryPaid, amount: 50 }],
+      [
+        'gone from the gateway',
+        new GatewayError('Not found', [], 400, false, { result: 'not-found' }),
+      ],
+    ])('replaces the link when the old entry is %s', async (_label, old) => {
+      answer(entryPaid, orderFailed, old);
+      const h = harness(linkedRow);
+      await expect(h.link()).resolves.toMatchObject({
+        linked: true,
+        ref: 'MD20261108102020',
+      });
+      expect(fakeGateway.calls.depositDetails).toEqual([
+        'PC-1',
+        'MD-OLD',
+        'MD20261108102020',
+      ]);
+      expect(h.packs.claimDepositAdjustmentRef).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'gpd_1',
+          from: 'MD-OLD',
+          to: 'MD20261108102020',
+        }),
+      );
+      expect(h.packs.claimDepositAdjustmentRef).toHaveBeenCalledWith(
+        expect.objectContaining({
+          entryId: 'D-ENTRY-1',
+          audit: expect.objectContaining({
+            before: { gateway_adjustment_ref: 'MD-OLD' },
+            after: expect.objectContaining({
+              gateway_adjustment_ref: 'MD20261108102020',
+            }),
+          }),
+        }),
+      );
+    });
+
+    const nothing = (h: ReturnType<typeof harness>) => {
+      expect(h.packs.claimDepositAdjustmentRef).not.toHaveBeenCalled();
+    };
+
+    it('keeps a link the gateway still backs', async () => {
+      answer(entryPaid, orderFailed, entryPaid);
+      const h = harness(linkedRow);
+      await expect(h.link()).rejects.toThrow(
+        /already linked to gateway entry MD-OLD/,
+      );
+      nothing(h);
+      expect(fakeGateway.calls.depositDetails).toEqual(['PC-1', 'MD-OLD']);
+    });
+
+    it('keeps it while the gateway cannot be asked about the old entry', async () => {
+      answer(entryPaid, orderFailed, new GatewayError('their outage', [], 500));
+      const h = harness(linkedRow);
+      await expect(h.link()).rejects.toThrow(
+        /could not be asked about entry MD-OLD/,
+      );
+      nothing(h);
+    });
+
+    it('refuses the reference it already holds, without asking the gateway', async () => {
+      const h = harness(linkedRow);
+      await expect(h.link('MD-OLD')).rejects.toThrow(/already linked/i);
+      nothing(h);
+      expect(fakeGateway.calls.depositDetails).toEqual([]);
+    });
   });
 
   it('records who linked it, why, and what the gateway said', async () => {
     answer(entryPaid);
     const h = harness();
     await h.link();
-    expect(h.packs.createAdminActionAudits).toHaveBeenCalledWith([
+    expect(h.packs.claimDepositAdjustmentRef).toHaveBeenCalledWith(
       expect.objectContaining({
-        admin_id: 'usr_admin_1',
-        entity_type: 'gateway_deposit',
-        entity_id: 'gpd_1',
-        action: 'edit',
-        before: { gateway_adjustment_ref: null },
-        after: expect.objectContaining({
-          gateway_adjustment_ref: 'MD20261108102020',
-          gateway_entry_id: 'D-ENTRY-1',
-          entry_amount: 56.49,
+        audit: expect.objectContaining({
+          admin_id: 'usr_admin_1',
+          entity_type: 'gateway_deposit',
+          entity_id: 'gpd_1',
+          action: 'edit',
+          before: { gateway_adjustment_ref: null },
+          after: expect.objectContaining({
+            gateway_adjustment_ref: 'MD20261108102020',
+            gateway_entry_id: 'D-ENTRY-1',
+            entry_amount: 56.49,
+          }),
+          reason: 'Checked back office',
         }),
-        reason: 'Checked back office',
       }),
-    ]);
+    );
   });
 
   it('trims the reference it was given', async () => {
@@ -145,8 +285,7 @@ describe('linkAdjustmentEntry', () => {
 
   describe('refuses, writing nothing', () => {
     const nothing = (h: ReturnType<typeof harness>) => {
-      expect(h.packs.updateGatewayDeposits).not.toHaveBeenCalled();
-      expect(h.packs.createAdminActionAudits).not.toHaveBeenCalled();
+      expect(h.packs.claimDepositAdjustmentRef).not.toHaveBeenCalled();
     };
 
     it.each(['', 'has space', 'x'.repeat(65), 'MD<script>'])(
@@ -168,12 +307,6 @@ describe('linkAdjustmentEntry', () => {
     it.each(['pending', 'failed', 'expired'])('a %s row', async (status) => {
       const h = harness({ ...shortRow, status });
       await expect(h.link()).rejects.toThrow(/only a settled deposit/i);
-      nothing(h);
-    });
-
-    it('a row already linked', async () => {
-      const h = harness({ ...shortRow, gateway_adjustment_ref: 'MD-OLD' });
-      await expect(h.link()).rejects.toThrow(/already linked/i);
       nothing(h);
     });
 
@@ -200,6 +333,45 @@ describe('linkAdjustmentEntry', () => {
       await expect(h.link()).rejects.toThrow(/another deposit/i);
       nothing(h);
       expect(fakeGateway.calls.depositDetails).toEqual([]);
+    });
+
+    // A reference typed in another letter case passes every check on the
+    // typed text if the gateway ignores case. The gateway's OWN id for the
+    // entry is what one entry, one row is keyed on (review, 2026-11-21).
+    it.each([['gateway_transaction_id'], ['gateway_adjustment_entry_id']])(
+      'an entry whose gateway id another row holds as %s',
+      async (column) => {
+        answer(entryPaid);
+        const h = harness(shortRow, [
+          { id: 'gpd_other', [column]: 'D-ENTRY-1' },
+        ]);
+        await expect(h.link()).rejects.toThrow(/another deposit/i);
+        nothing(h);
+        expect(fakeGateway.calls.depositDetails).toEqual([
+          'PC-1',
+          'MD20261108102020',
+        ]);
+      },
+    );
+
+    // The gateway's answer names no payer. The ledger is the only other
+    // witness: a hand credit to someone else that quotes the entry means the
+    // entry already backs that credit (code review, 2026-11-20).
+    it("a reference another customer's hand credit already quotes", async () => {
+      const h = harness(shortRow, [], [{ id: 'ctx_other' }]);
+      await expect(h.link()).rejects.toThrow(
+        /hand credit to another customer/i,
+      );
+      nothing(h);
+      expect(fakeGateway.calls.depositDetails).toEqual([]);
+      expect(h.packs.listCreditTransactions).toHaveBeenCalledWith(
+        {
+          customer_id: { $ne: 'cus_1' },
+          reason: ['adjustment', 'bonus_grant'],
+          reference: { $ilike: '%MD20261108102020%' },
+        },
+        expect.objectContaining({ take: 1 }),
+      );
     });
 
     it.each(['pending', 'failed'] as const)(
