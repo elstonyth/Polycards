@@ -474,7 +474,12 @@ async function changeFree(s, kind, to) {
           (p0.anchor?.name ?? 'none') +
           ')',
       );
-    else if (Math.abs(q.anchor.frac - p0.anchor.frac) > 0.1)
+    else if (
+      Math.abs(q.anchor.frac - p0.anchor.frac) > 0.1 &&
+      // resting at the footer rest, still inside the same section, is kept
+      // by role: the rest moves with the new view
+      !(q.ends.length > 0 && Math.abs(q.y - q.ends[0]) < 1.5)
+    )
       bad.push(
         when +
           ': ' +
@@ -505,8 +510,9 @@ async function toFreeMiddle(s) {
   await key(page, 'End');
   let p = await key(page, 'ArrowDown');
   // the middle of the free span (between the exit end and the rise)
+  // (never past the footer rest, where the free part ends)
   const target = p.rise
-    ? (p.exitEnd + p.rise.start) / 2
+    ? (p.exitEnd + Math.min(p.rise.start, p.ends[0] ?? Infinity)) / 2
     : p.exitEnd + (p.max - p.exitEnd) / 2;
   await page.evaluate((y) => window.scrollTo(0, y), target);
   await page.waitForTimeout(600);
