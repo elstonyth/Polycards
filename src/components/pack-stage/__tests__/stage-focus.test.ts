@@ -5,6 +5,7 @@ import POSES from '../focus-poses.json';
 import {
   blockAt,
   DESKTOP_BACK_LANE,
+  DESKTOP_MAX_H,
   DESKTOP_MAX_W,
   fitBackKey,
   fitPhoneTextKey,
@@ -574,7 +575,11 @@ describe('very wide desktops: the stops keep to a centred box', () => {
       x0 + key.cx * DESKTOP_MAX_W,
       6,
     );
-    expect(p.scale * l.artH).toBeCloseTo(key.long * panel.h, 6);
+    // the box is capped in height too, centred: the pack sizes to it
+    const bh = Math.min(panel.h, DESKTOP_MAX_H);
+    const y0 = (panel.h - bh) / 2;
+    expect((l.cy / panel.h + p.fy) * panel.h).toBeCloseTo(y0 + key.cy * bh, 6);
+    expect(p.scale * l.artH).toBeCloseTo(key.long * bh, 6);
   });
   it('a panel no wider than the box is unchanged', () => {
     expect(DESKTOP_MAX_W).toBeGreaterThanOrEqual(2560);

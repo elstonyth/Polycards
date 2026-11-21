@@ -167,6 +167,8 @@ export function fitPhoneTextKey(
  * and the pack stay together. focus.module.css `.over` caps at the same width.
  */
 export const DESKTOP_MAX_W = 2560;
+/** And at most this tall (the 1440 x 828 reference aspect at that width), centred. */
+export const DESKTOP_MAX_H = 1472;
 
 /** A key as a pose block for the focused pack (`d` slots off the track). */
 function keyBlock(
@@ -180,10 +182,12 @@ function keyBlock(
   const { w, h } = ctx.panel;
   // desktop keys are fractions of the centred box (the whole panel up to its cap)
   const bw = desktop ? Math.min(w, DESKTOP_MAX_W) : w;
+  const bh = desktop ? Math.min(h, DESKTOP_MAX_H) : h;
   const x0 = (w - bw) / 2;
+  const y0 = (h - bh) / 2;
   const { cx, long, cy } =
     desktop && key.face === 'back'
-      ? { ...key, ...fitBackKey(key, bw, h) }
+      ? { ...key, ...fitBackKey(key, bw, bh) }
       : !desktop && (key.kind === 'front' || key.kind === 'closing')
         ? { ...key, ...fitPhoneTextKey(key, w, h) }
         : key;
@@ -198,10 +202,10 @@ function keyBlock(
     rotX: key.rx * DEG,
     rotY: ry * DEG,
     rotZ: key.rz * DEG,
-    scale: (long * h) / (l.artH * (ctx.fit ?? 1)),
+    scale: (long * bh) / (l.artH * (ctx.fit ?? 1)),
     dim: soldOut ? FOCUS_SOLD_OUT_DIM : 1,
     fx: w > 0 ? (x0 + cx * bw - l.cx) / w : 0,
-    fy: h > 0 ? (cy * h - l.cy) / h : 0,
+    fy: h > 0 ? (y0 + cy * bh - l.cy) / h : 0,
   };
 }
 
