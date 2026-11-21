@@ -175,8 +175,7 @@ async function packMask(s) {
  * nothing: the notice is reported as INFO, not as a page error.
  */
 function dropReportOnlyNotice(s) {
-  const re =
-    /was delivered in report-only mode, but does not specify a 'report-to'/;
+  const re = /^console: The Content Security Policy 'default-src/; // the notice (errors are cut at 300 chars)
   const n = s.errors.filter((e) => re.test(e)).length;
   if (n)
     qa.info(
