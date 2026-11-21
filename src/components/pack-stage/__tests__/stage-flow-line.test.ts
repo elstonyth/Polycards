@@ -78,11 +78,41 @@ describe('flow line: the drag', () => {
 describe('flow line: the fling', () => {
   it('adds 8 times the last frame of movement, then rounds to a pack', () => {
     const l = createFlowLine();
-    l.sync(0, 5);
+    l.sync(0, 10);
     // 8 moves of 30 px, 16 ms apart: 2.4 packs, the last frame 0.3 packs
     const r = drag(l, -240, { moves: 8, dt: 16 }).end;
-    // 2.4 + 8 * 0.3 = 4.8: the fifth pack (index 4 of 5... 5 mod 5 = 0)
-    expect(r.index).toBe(0);
+    // 2.4 + 8 * 0.3 = 4.8 (under half a lap of 10): the fifth pack on
+    expect(r.index).toBe(5);
+  });
+
+  it('flings at most half a lap: floor(n / 2) packs, at least 1, either way', () => {
+    // 2 moves of 100 px, 16 ms apart: 2 packs dragged, the last frame about
+    // 1 pack, so an uncapped fling would add about 8 more
+    for (const [n, cap] of [
+      [10, 5],
+      [5, 2],
+      [2, 1],
+    ] as const) {
+      const fwd = createFlowLine();
+      fwd.sync(0, n);
+      drag(fwd, -200, { moves: 2, dt: 16 });
+      expect(fwd.pos(), `n=${n} forward`).toBe(2 + cap);
+      const back = createFlowLine();
+      back.sync(0, n);
+      drag(back, 200, { moves: 2, dt: 16 });
+      expect(back.pos(), `n=${n} back`).toBe(-2 - cap);
+    }
+  });
+
+  it('a capped fling still rests on a whole pack that can be picked', () => {
+    // half a lap past 2 dragged lands on 7, which cannot be picked: on to 8
+    const l = createFlowLine({ canPick: (i) => i !== 7 });
+    l.sync(0, 10);
+    const r = drag(l, -200, { moves: 2, dt: 16 }).end;
+    expect(r.moving).toBe(false);
+    expect(Number.isInteger(r.track)).toBe(true);
+    expect(r.index).toBe(8);
+    expect(l.pos()).toBe(8);
   });
 
   it('is the same at any frame rate (the delta is read per 60 Hz frame)', () => {

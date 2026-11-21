@@ -6,7 +6,8 @@
  * - A sideways drag moves an unbounded line position at one pack per
  *   100 px on every size, so the row never has an end.
  * - On release the position gets 8 times the last frame's movement (read
- *   per 60 Hz frame, so the frame rate cannot change it), the target rounds
+ *   per 60 Hz frame, so the frame rate cannot change it), capped at half a
+ *   lap (floor(n / 2) packs, at least 1), the target rounds
  *   to the nearest pack, and the position eases there at 10 per second.
  *   The line always comes to rest on a pack.
  * - Keys and the sideways wheel step one pack (one per wheel gesture; the
@@ -141,7 +142,9 @@ export function createFlowLine(
       void now;
       if (!held) return;
       held = false;
-      const t = Math.round(pos + (fling && n > 1 ? LINE_FLING * v : 0));
+      const cap = Math.max(1, Math.floor(n / 2));
+      const add = fling && n > 1 ? LINE_FLING * v : 0;
+      const t = Math.round(pos + Math.max(-cap, Math.min(cap, add)));
       aim(t, Math.sign(t - grabbedAt) || Math.sign(v) || 1);
       v = 0;
     },

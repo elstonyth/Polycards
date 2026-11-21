@@ -229,6 +229,8 @@
   padding: 0;
   list-style: none;
   transform-style: preserve-3d;
+  /* The set-back packs sit behind this flat list: it takes no taps. */
+  pointer-events: none;
   /* --track: the continuous centred index, written per frame. */
   transform: translate3d(
     calc((var(--track, 0) + 0.5) * var(--step) * -1),
