@@ -1353,7 +1353,8 @@ const freeMiddle = (p) =>
   p.exitEnd === null
     ? Infinity
     : p.rise
-      ? (p.exitEnd + p.rise.start) / 2
+      ? // never past the footer rest, where the free part ends
+        (p.exitEnd + Math.min(p.rise.start, p.ends?.[0] ?? Infinity)) / 2
       : p.exitEnd + (p.max - p.exitEnd) / 2;
 
 async function trimPart(size) {
