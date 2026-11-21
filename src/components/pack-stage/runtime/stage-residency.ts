@@ -67,7 +67,8 @@ export function lapResidency(
 
 /** Whole-page GPU caps from the plan's table (decimal MB, so on the safe side). */
 export const GPU_CAP_PHONE_BYTES = 40e6;
-export const GPU_CAP_DESKTOP_BYTES = 96e6;
+// desktop: room for a whole-host canvas at full ratio on a 4K monitor (~96 MB) plus the textures
+export const GPU_CAP_DESKTOP_BYTES = 200e6;
 
 export function gpuCapBytes(desktop: boolean): number {
   return desktop ? GPU_CAP_DESKTOP_BYTES : GPU_CAP_PHONE_BYTES;

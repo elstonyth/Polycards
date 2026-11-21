@@ -74,11 +74,11 @@ import {
   type ResidentInfo,
 } from './stage-residency';
 import {
-  MSAA_BELOW_DPR,
   createStageScene,
   dprCap,
   drawingBufferBytes,
   fitPixelRatio,
+  wantsMsaa,
   placeModel,
   stageBand,
   type StageScene,
@@ -354,12 +354,21 @@ export function createStageRuntime(
 
   // --- renderer (created on first need, so MSAA can follow the pixel ratio) --
 
-  const ensureStage = (dpr: number): StageScene | null => {
+  const ensureStage = (
+    dpr: number,
+    w = globalThis.innerWidth ?? 0,
+    h = globalThis.innerHeight ?? 0,
+  ): StageScene | null => {
     if (stage || dead()) return stage;
     try {
       stage = createStageScene({
         canvas,
-        antialias: Math.min(dpr, cap) < MSAA_BELOW_DPR,
+        antialias: wantsMsaa(
+          Math.min(dpr, cap),
+          w,
+          h,
+          gpuCapBytes(desktop) / 2,
+        ),
         failIfMajorPerformanceCaveat: failCaveat,
       });
     } catch {
@@ -755,7 +764,7 @@ export function createStageRuntime(
 
   const resize = (w: number, h: number, dpr: number, vh?: number) => {
     if (dead()) return;
-    const st = ensureStage(dpr);
+    const st = ensureStage(dpr, w, h);
     if (!st) return;
     sized = true;
     hostW = Math.max(0, w);

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { drawingBufferBytes, fitPixelRatio } from '../runtime/stage-scene';
+import {
+  drawingBufferBytes,
+  fitPixelRatio,
+  wantsMsaa,
+} from '../runtime/stage-scene';
 import {
   GPU_CAP_DESKTOP_BYTES,
   NO_PROMOTION,
@@ -164,46 +168,48 @@ describe('planResidency', () => {
     }
   });
 
-  it('a whole-host canvas on a wide desktop leaves room for 3D packs', () => {
-    // 2560x1200 at ratio 1 with 4x MSAA: ~123 MB, over the 96 MB cap alone
-    const atOne = drawingBufferBytes(2560, 1200, 4);
-    expect(textureBudgetBytes(true, atOne)).toBe(0);
-    for (const [w, h, dpr, samples] of [
-      [2560, 1200, 1, 4],
-      [1920, 1080, 1, 4],
-      [1440, 900, 2, 0],
-    ] as const) {
-      const r = fitPixelRatio(dpr, w, h, samples, GPU_CAP_DESKTOP_BYTES / 2);
-      expect(r).toBeLessThan(dpr);
-      const buffer = drawingBufferBytes(
-        Math.round(w * r),
-        Math.round(h * r),
-        samples,
-      );
-      expect(buffer).toBeLessThanOrEqual(GPU_CAP_DESKTOP_BYTES / 2 + 1e5);
-    }
-    // a canvas that already fits keeps its ratio; never under 0.5
+  it('a canvas over its share of the cap lowers its ratio, never under 0.5', () => {
+    const r = fitPixelRatio(1, 2560, 1200, 4, 60e6);
+    expect(r).toBeLessThan(1);
+    expect(
+      drawingBufferBytes(Math.round(2560 * r), Math.round(1200 * r), 4),
+    ).toBeLessThanOrEqual(60e6 + 1e5);
+    // a canvas that already fits keeps its ratio
     expect(fitPixelRatio(2, 390, 300, 0, 40e6 / 2)).toBe(2);
     expect(fitPixelRatio(1, 8000, 8000, 4, 1e6)).toBe(0.5);
   });
 
-  it("the owner's window (2500x1288 at ratio 1.5) holds the focused pack and its printed back", () => {
-    // measured at the stops: whole host 2500x1219 CSS px, no MSAA, ~4 MB environment. At ratio 1.5 the
-    // 10 MB left could not hold a half front plus the back's charge (a full front while it prints), so the
-    // plan dropped the focused pack, which cancelled the print, which freed the charge: a 3-frame reload loop
-    const r = fitPixelRatio(1.5, 2500, 1219, 0, GPU_CAP_DESKTOP_BYTES / 2);
-    const at = (ratio: number) =>
-      textureBudgetBytes(
+  it('a 4K monitor in each of its forms, 1920x1080 and the recorded 2500x1288 window draw the stops at full ratio', () => {
+    // the stage is the window under the 70 px header (measured at each form)
+    const share = GPU_CAP_DESKTOP_BYTES / 2;
+    for (const [w, h, dpr] of [
+      [3840, 2160, 1],
+      [3072, 1728, 1.25],
+      [2560, 1440, 1.5],
+      [1920, 1080, 2],
+      [1920, 1080, 1],
+      [2500, 1288, 1.5],
+    ] as const) {
+      const hostH = h - 70;
+      const samples = wantsMsaa(dpr, w, hostH, share) ? 4 : 0;
+      const r = fitPixelRatio(dpr, w, hostH, samples, share);
+      expect(r).toBe(dpr);
+      // what is left holds the lineup's fronts and the focused pack's printed back: no drop-and-reload loop
+      const left = textureBudgetBytes(
         true,
-        drawingBufferBytes(
-          Math.round(2500 * ratio),
-          Math.round(1219 * ratio),
-          0,
-        ) + 4e6,
+        drawingBufferBytes(Math.round(w * r), Math.round(hostH * r), samples) +
+          4e6,
       );
-    expect(at(1.5) - FULL).toBeLessThan(HALF);
-    expect(r).toBeLessThan(1.5);
-    expect(at(r) - FULL).toBeGreaterThanOrEqual(HALF);
+      expect(left).toBeGreaterThanOrEqual(10 * HALF + FULL);
+    }
+    // MSAA where it is cheap, not where the screen's own pixels are dense enough
+    expect(wantsMsaa(1, 1920, 1010, share)).toBe(true);
+    expect(wantsMsaa(1, 3840, 2090, share)).toBe(false);
+    expect(wantsMsaa(1.5, 800, 600, share)).toBe(false);
+  });
+
+  it('a phone keeps the tight cap', () => {
+    expect(textureBudgetBytes(false, 0)).toBe(40e6);
   });
 
   it('a tight budget keeps the centre first', () => {
@@ -295,7 +301,7 @@ describe('planResidency', () => {
 
   it('budgets from the caps', () => {
     expect(textureBudgetBytes(false, 18e6)).toBe(22e6);
-    expect(textureBudgetBytes(true, 62e6)).toBe(34e6);
+    expect(textureBudgetBytes(true, 62e6)).toBe(138e6);
     expect(textureBudgetBytes(false, 50e6)).toBe(0);
   });
 });

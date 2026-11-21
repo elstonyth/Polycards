@@ -20,6 +20,30 @@ export const DPR_CAP_FULL = 2;
 export const DPR_CAP_LITE = 1.5;
 /** MSAA only below this pixel ratio (plan: `antialias: dpr < 1.5`). */
 export const MSAA_BELOW_DPR = 1.5;
+/** MSAA samples counted when sizing the canvas (WebGL's usual 4). */
+const MSAA_SAMPLES = 4;
+
+/**
+ * MSAA below ratio 1.5, and only while a multisampled canvas of `width` x
+ * `height` CSS px fits in `maxBytes`: on a large screen (a 4K monitor at
+ * ratio 1 or 1.25) it would cost the pixel ratio, and the screen's own dense
+ * pixels already smooth the edges.
+ */
+export function wantsMsaa(
+  dpr: number,
+  width: number,
+  height: number,
+  maxBytes: number,
+): boolean {
+  return (
+    dpr < MSAA_BELOW_DPR &&
+    drawingBufferBytes(
+      Math.round(width * dpr),
+      Math.round(height * dpr),
+      MSAA_SAMPLES,
+    ) <= maxBytes
+  );
+}
 
 const HALF_FOV_TAN = Math.tan(((CAMERA_FOV_DEG / 2) * Math.PI) / 180);
 
