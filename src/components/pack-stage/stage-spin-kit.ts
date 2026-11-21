@@ -374,6 +374,7 @@ export function startSpin(host: SpinHost): SpinControl {
           leaving.sections,
           plain,
           leaving.viewport,
+          window.innerHeight,
         );
         window.scrollTo(0, y);
       }

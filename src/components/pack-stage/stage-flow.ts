@@ -459,7 +459,8 @@ export function freeAnchor(
  * (a phone turned on its side): from the paged part (the row, a stop, the
  * lineup and its exit, all above `exitEnd`) the row at `r0`; below it the
  * same share of the same section under the viewport's middle, read on the
- * flow's page (`on`) and placed on the plain one (`plain`). The row when
+ * flow's page (`on`, its viewport) and placed on the plain one (`plain`, its
+ * viewport: the turned view's own height). The row when
  * no section was measured.
  */
 export function offPlace(
@@ -469,10 +470,11 @@ export function offPlace(
   on: readonly FlowSection[],
   plain: readonly FlowSection[],
   viewport: number,
+  plainViewport: number = viewport,
 ): number {
   if (y < exitEnd) return r0;
   const a = freeAnchor(y, on, viewport);
-  return a && plain.length > 0 ? freeAnchorY(a, plain, viewport) : r0;
+  return a && plain.length > 0 ? freeAnchorY(a, plain, plainViewport) : r0;
 }
 
 /** The scroll that puts the same share of the same section under the middle. */

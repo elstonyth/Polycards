@@ -813,6 +813,12 @@ describe('stage flow: where the plain page opens when the flow switches off', ()
     expect(offPlace(10800, 8000, 0, on, plain, 800)).toBe(3700);
   });
 
+  it('the place is read in the old viewport and set in the new one', () => {
+    // the middle of an 800 px view half-way through Just Pulled; the plain
+    // page's view is 400 px: the same point under its middle
+    expect(offPlace(9100, 8000, 0, on, plain, 800, 400)).toBe(2200);
+  });
+
   it('with no sections measured: the row', () => {
     expect(offPlace(9100, 8000, 0, [], plain, 800)).toBe(0);
   });
