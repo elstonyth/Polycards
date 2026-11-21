@@ -3,6 +3,7 @@
 // At 71ea7f2f7 the stops ran a 3-frame drop/reload loop here (the pack flickered and never turned).
 // Usage: node scripts/qa-home-wide-focus.mjs [--base=http://127.0.0.1:PORT]
 import { launch, stage, check, done, deadline } from './lib/qa-kit.mjs';
+import { missing } from './lib/qa-present.mjs';
 
 deadline(150000);
 const b = await launch();
@@ -17,6 +18,11 @@ try {
   for (let i = 1; i <= 6; i++) {
     await s.page.mouse.wheel(0, 120);
     const r = await stage.rest(s, 6000);
+    // the stop's block names it; with none found, no stop would ask the back to turn
+    const noBlock = await missing(
+      s.page,
+      '[data-testid="focus-stops"] section[data-on]',
+    );
     // 30 frames at rest: loads, disposals, the 3D pack drawn, the back's state
     const f = await s.page.evaluate(
       () =>
@@ -42,12 +48,13 @@ try {
     const turns = r.block === 'odds' || r.block === 'buyback';
     check(
       'stop-' + i + '-' + r.block + '-steady-3d',
-      r.on &&
+      !noBlock &&
+        r.on &&
         f.loads === 0 &&
         f.disposals === 0 &&
         f.blank === 0 &&
         (!turns || f.back === 'ready'),
-      JSON.stringify(f),
+      (noBlock ? noBlock + '; ' : '') + JSON.stringify(f),
     );
   }
 } finally {
