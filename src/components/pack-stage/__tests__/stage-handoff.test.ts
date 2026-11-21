@@ -11,7 +11,7 @@ import { FOCUS_TERM } from '../stage-compose';
 import { focusKeys } from '../stage-focus-keys';
 import { poseAt, restState } from '../stage-pose';
 import { composeOpacity, composePose } from '../stage-pose-compose';
-import { ciaoOpacity, ciaoPose } from '../stage-spin';
+import { lineupOpacity, lineupPose } from '../stage-spin';
 import { LEAN } from '../stage-spin-math';
 import {
   BACK_RELEASE_AT,
@@ -26,7 +26,7 @@ import {
   textureBytes,
 } from '../runtime/stage-residency';
 import { drawingBufferBytes } from '../runtime/stage-scene';
-import { CIAO_ROW } from '../stage-spin';
+import { LINEUP_ROW } from '../stage-spin';
 
 // The hand-off from Closing to the lineup: while a pack
 // is focused, st.spin is the local progress from Closing to the lineup rest
@@ -77,12 +77,12 @@ function setup(s: (typeof SIZES)[number]) {
     count: COUNT,
     turn: 0,
     lean: LEAN,
-    spinPose: ciaoPose,
+    spinPose: lineupPose,
     panel: s.panel,
   };
   const ctx: ComposeCtx = {
     spin,
-    spinOpacity: ciaoOpacity,
+    spinOpacity: lineupOpacity,
     compose: composePose,
     focus,
     focusTerm: FOCUS_TERM,
@@ -90,7 +90,7 @@ function setup(s: (typeof SIZES)[number]) {
   /** The row alone (no focus): the old spin path, the lineup's own pose. */
   const rowCtx = (exit = 0): ComposeCtx => ({
     spin: { ...spin, exit },
-    spinOpacity: ciaoOpacity,
+    spinOpacity: lineupOpacity,
     compose: composePose,
   });
   const st = (spin: number, exit = 0): StageState => ({
@@ -179,7 +179,7 @@ for (const s of SIZES)
       const op = (spin: number, i: number, copy = 0) =>
         composeOpacity(t.st(spin), i, s.desktop, COUNT, t.ctx, copy);
       const rowOp = (i: number, copy = 0) =>
-        ciaoOpacity(
+        lineupOpacity(
           { ...restState(CHOSEN), spin: 1 },
           i,
           s.desktop,
@@ -225,13 +225,13 @@ describe('the focused back at the hand-off', () => {
     {
       name: 'phone (DPR 2, 390x716 panel)',
       buffer: drawingBufferBytes(780, 1432, 0),
-      reach: CIAO_ROW.reachPhone,
+      reach: LINEUP_ROW.reachPhone,
       cap: GPU_CAP_PHONE_BYTES,
     },
     {
       name: 'desktop (DPR 2, 1440x828 panel)',
       buffer: drawingBufferBytes(2880, 1656, 0),
-      reach: CIAO_ROW.reachDesktop,
+      reach: LINEUP_ROW.reachDesktop,
       cap: GPU_CAP_DESKTOP_BYTES,
     },
   ];

@@ -1,5 +1,4 @@
-// Resilience QA for the full-page flow on /home-preview (full-flow plan 2.9
-// fault 3 and 2.10; work package 8), on the production server with
+// Resilience QA for the full-page flow on /home-preview, on the production server with
 // HOME_PREVIEW=1. Headless, muted (--mute-audio where the engine takes it,
 // plus a media guard), logged out; only the cookie banner's "Reject" is ever
 // clicked.
@@ -946,7 +945,7 @@ async function nojsPart(size) {
   await s.ctx.close();
 }
 
-/** At the rise, Return and Last (work packages 6 and 7). */
+/** At the rise, Return and Last. */
 async function lapPart(size) {
   const to = TURNED[size];
   const from = PROFILES[size].viewport;
@@ -1018,7 +1017,7 @@ async function lapPart(size) {
   p = await toLap('lastTop');
   await turnAndBack('rotate-at-last-' + size, p, 'ret', 0.1);
   // End and PageDown at Last are the browser's: they cross Last's top and
-  // the page wraps to the row (plan 2.7, 2.10)
+  // the page wraps to the row
   const wraps = [];
   for (const k of ['End', 'PageDown']) {
     p = await toLap('lastTop');

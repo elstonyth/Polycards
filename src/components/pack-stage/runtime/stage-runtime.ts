@@ -47,10 +47,10 @@ import {
   type StageCapsuleHandle,
 } from './stage-capsule';
 import {
-  CIAO_ROW,
-  ciaoCopies,
-  ciaoOpacity,
-  ciaoPose,
+  LINEUP_ROW,
+  lineupCopies,
+  lineupOpacity,
+  lineupPose,
   wrapRow,
 } from '../stage-spin';
 import { composeOpacity, composePose } from '../stage-pose-compose';
@@ -655,7 +655,7 @@ export function createStageRuntime(
     for (const s of slots)
       if (s.half || s.full)
         resident.set(wrapped(s.index), { lastNeeded: s.lastNeeded });
-    const reach = desktop ? CIAO_ROW.reachDesktop : CIAO_ROW.reachPhone;
+    const reach = desktop ? LINEUP_ROW.reachDesktop : LINEUP_ROW.reachPhone;
     const plan = planResidency({
       indices: slots.filter((s) => !s.halfFailed).map((s) => wrapped(s.index)),
       track,
@@ -1208,13 +1208,13 @@ export function createStageRuntime(
               count: n,
               turn: 0,
               lean: slot.capsule ? CAPSULE_LIMITS.yaw : LEAN,
-              spinPose: ciaoPose,
+              spinPose: lineupPose,
               soldOut: slot.soldOut,
               exit: s.exit,
               panel,
               capsule: slot.capsule,
             },
-            spinOpacity: ciaoOpacity,
+            spinOpacity: lineupOpacity,
             compose: composePose,
           };
           // The picture is `object-fit: contain` in the art box: a pack wider
@@ -1265,7 +1265,7 @@ export function createStageRuntime(
           };
           // The spin row's repeats (a short set is repeated out to 24 cans): clones.
           const offsets = spinRow
-            ? ciaoCopies(slot.index, track, n, desktop).filter((o) => o !== 0)
+            ? lineupCopies(slot.index, track, n, desktop).filter((o) => o !== 0)
             : [];
           for (const [o, c] of shown.copies)
             if (!offsets.includes(o)) c.visible = false;

@@ -148,7 +148,7 @@ export type Pose = {
   fy: number;
 };
 
-/** The rest-carousel block `spinPose`, `ciaoPose` and `focusPose` work on (no fx / fy). */
+/** The rest-carousel block `spinPose`, `lineupPose` and `focusPose` work on (no fx / fy). */
 export type PoseBlock = {
   dx: number;
   dy: number;
@@ -189,12 +189,12 @@ export type SpinPanel = {
  * - `turn`: this tile's turn weight (0 = lean .. 1 = full own-axis turn); the
  *   lineup row ignores it.
  * - `lean`: `LEAN` for packs, `CAPSULE_LIMITS.yaw` for capsules.
- * - `spinPose`: the lazily loaded row function (`ciaoPose`); absent = no spin
+ * - `spinPose`: the lazily loaded row function (`lineupPose`); absent = no spin
  *   term (the CSS tiles before the idle import).
  * - `soldOut`: the row's dim is "soldOut ? 0.4 : 1".
  * - `exit`: 0..1 through the exit (the camera move after the pin).
  * - `panel`: the panel, for the lineup row's projection and the exit.
- * - `copy`: row-slot offset of this drawn repeat (`ciaoCopies`); 0 = the pack.
+ * - `copy`: row-slot offset of this drawn repeat (`lineupCopies`); 0 = the pack.
  * - `capsule`: a capsule, whose ramp is clamped to the owner's tip limits.
  * - `spread`: the row's spacing as a multiple of its own (default 1); the
  *   hand-off from Closing widens the others' row by 5 falling to 1.
@@ -212,7 +212,7 @@ export type SpinCtx = {
   spread?: number;
 };
 
-/** The spin row's opacity rule (`ciaoOpacity`), when loaded. */
+/** The spin row's opacity rule (`lineupOpacity`), when loaded. */
 export type SpinOpacityFn = (
   st: Readonly<StageState>,
   i: number,

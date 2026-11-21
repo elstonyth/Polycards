@@ -12,7 +12,7 @@ import { spreadAt } from '../stage-flow';
 import { focusKeys } from '../stage-focus-keys';
 import { poseAt, poseStep1, restState, stageOpacity } from '../stage-pose';
 import { composeOpacity, composePose } from '../stage-pose-compose';
-import { ciaoOpacity, ciaoPose } from '../stage-spin';
+import { lineupOpacity, lineupPose } from '../stage-spin';
 import { LEAN } from '../stage-spin-math';
 
 // The end of the lap: the chosen pack rises from
@@ -69,11 +69,11 @@ function setup(s: (typeof SIZES)[number], chosen: number) {
       count: COUNT,
       turn: 0,
       lean: LEAN,
-      spinPose: ciaoPose,
+      spinPose: lineupPose,
       panel: s.panel,
       exit: 1,
     },
-    spinOpacity: ciaoOpacity,
+    spinOpacity: lineupOpacity,
     compose: composePose,
     focus,
     focusTerm: FOCUS_TERM,

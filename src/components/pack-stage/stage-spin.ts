@@ -266,7 +266,7 @@ export function quadInOut(t: number): number {
 }
 
 /** A lineup camera keyframe: position, Euler XYZ rotation (rad), fov (deg), row spacing, key light. */
-export type CiaoCamera = {
+export type LineupCamera = {
   x: number;
   y: number;
   z: number;
@@ -279,7 +279,7 @@ export type CiaoCamera = {
 };
 
 /** Keyframe at the top of the lineup section: the tilted packshot row. */
-export const CIAO_PACKSHOT: Readonly<CiaoCamera> = Object.freeze({
+export const LINEUP_REST_CAMERA: Readonly<LineupCamera> = Object.freeze({
   x: -3,
   y: -3.5,
   z: 20,
@@ -292,7 +292,7 @@ export const CIAO_PACKSHOT: Readonly<CiaoCamera> = Object.freeze({
 });
 
 /** Keyframe at the top of the exit section: the camera has dropped, come closer, levelled; light out. */
-export const CIAO_LEAVE: Readonly<CiaoCamera> = Object.freeze({
+export const LINEUP_EXIT_CAMERA: Readonly<LineupCamera> = Object.freeze({
   x: 0,
   y: -5.5,
   z: 10,
@@ -305,7 +305,7 @@ export const CIAO_LEAVE: Readonly<CiaoCamera> = Object.freeze({
 });
 
 /** The lineup's row step in its units, the cans' depth in the packshot, and the swirl pitch ramp. */
-export const CIAO_ROW = Object.freeze({
+export const LINEUP_ROW = Object.freeze({
   step: 3.5,
   canZ: -0.4,
   pitchPerUnit: 0.06,
@@ -345,23 +345,23 @@ export const CIAO_ROW = Object.freeze({
 });
 
 /** The light multiplier for camera `cam` (rest light, falling to the exit light as the spots go out). */
-function ciaoLight(cam: Readonly<CiaoCamera>): number {
-  const out = 1 - cam.light / CIAO_PACKSHOT.light;
-  return CIAO_ROW.restLight * (1 - (1 - CIAO_ROW.exitLight) * out);
+function lineupLight(cam: Readonly<LineupCamera>): number {
+  const out = 1 - cam.light / LINEUP_REST_CAMERA.light;
+  return LINEUP_ROW.restLight * (1 - (1 - LINEUP_ROW.exitLight) * out);
 }
 
 /** World step between our packs in lineup units at the packshot (for an art aspect w/h). */
-export function ciaoPackStep(artAspect: number): number {
-  return (CIAO_ROW.canWorldH * artAspect) / CIAO_ROW.fill;
+export function lineupPackStep(artAspect: number): number {
+  return (LINEUP_ROW.canWorldH * artAspect) / LINEUP_ROW.fill;
 }
 
 /** Exit length after the pin, in panel heights (one section, 1.25 viewports). */
-export const CIAO_EXIT_PANELS = 1.25;
+export const LINEUP_EXIT_PANELS = 1.25;
 
-export function ciaoCameraAt(exit: number): CiaoCamera {
+export function lineupCameraAt(exit: number): LineupCamera {
   const e = quadInOut(exit);
-  const a = CIAO_PACKSHOT;
-  const b = CIAO_LEAVE;
+  const a = LINEUP_REST_CAMERA;
+  const b = LINEUP_EXIT_CAMERA;
   return {
     x: lerp(a.x, b.x, e),
     y: lerp(a.y, b.y, e),
@@ -443,7 +443,7 @@ const transpose = (m: M3): M3 => [
 ];
 
 /** One pack of the lineup row seen through a lineup camera (three.js axes: y up, camera looks down -z). */
-export type CiaoView = {
+export type LineupView = {
   /** Screen position in half-heights from the centre (y up): px = s * panelH / 2. */
   sx: number;
   sy: number;
@@ -455,26 +455,26 @@ export type CiaoView = {
   ez: number;
 };
 
-export function ciaoRatio(panelW: number): number {
+export function lineupRatio(panelW: number): number {
   return Math.min(
-    CIAO_ROW.ratioMax,
-    Math.max(1, CIAO_ROW.ratioRefWidth / Math.max(1, panelW)),
+    LINEUP_ROW.ratioMax,
+    Math.max(1, LINEUP_ROW.ratioRefWidth / Math.max(1, panelW)),
   );
 }
 
 /** The pack at row position dp (in packs) through camera `cam`, with the swirl pitch ramp for ratio r. */
-export function ciaoView(
+export function lineupView(
   dp: number,
-  cam: Readonly<CiaoCamera>,
+  cam: Readonly<LineupCamera>,
   r: number,
   o: { spacingScale?: number; capsule?: boolean } = {},
-): CiaoView {
+): LineupView {
   // x in the lineup's row units (the ramp keeps its per-pack numbers); the world
   // step widens by `spacingScale` because a pack is wider than a can
-  const x = dp * CIAO_ROW.step;
+  const x = dp * LINEUP_ROW.step;
   const px = x * cam.spacing * (o.spacingScale ?? 1) - cam.x;
   const py = 0 - cam.y;
-  const pz = CIAO_ROW.canZ - cam.z;
+  const pz = LINEUP_ROW.canZ - cam.z;
   // three's Euler 'XYZ': R = Rx * Ry * Rz
   const rc = mul(mul(rotXm(cam.rx), rotYm(cam.ry)), rotZm(cam.rz));
   const rt = transpose(rc);
@@ -482,11 +482,11 @@ export function ciaoView(
   const vy = rt[3] * px + rt[4] * py + rt[5] * pz;
   const vz = rt[6] * px + rt[7] * py + rt[8] * pz;
   // positive pitch tips the top toward the viewer: cans to the right show their tops
-  let pitch = x * CIAO_ROW.pitchPerUnit * r + CIAO_ROW.pitchBias;
+  let pitch = x * LINEUP_ROW.pitchPerUnit * r + LINEUP_ROW.pitchBias;
   if (o.capsule) {
     // as SEEN: the camera's own pitch tips everything away by cam.rx
-    const lo = cam.rx - CIAO_ROW.capsuleTipAway;
-    const hi = cam.rx + CIAO_ROW.capsuleTipToward;
+    const lo = cam.rx - LINEUP_ROW.capsuleTipAway;
+    const hi = cam.rx + LINEUP_ROW.capsuleTipToward;
     pitch = Math.max(lo, Math.min(hi, pitch));
   }
   const m = mul(rt, rotXm(pitch));
@@ -510,22 +510,23 @@ export function ciaoView(
 const DEFAULT_PANEL = { w: 390, h: 716, anchorY: 0.46 };
 
 /** The lineup row's pose for a pack at row position dp, as our pose (fx / fy carry the position). */
-function ciaoRowBlock(
+function lineupRowBlock(
   dp: number,
   d: number,
   l: Readonly<StageLayout>,
   panel: Readonly<SpinPanel>,
-  cam: Readonly<CiaoCamera>,
+  cam: Readonly<LineupCamera>,
   soldOut: boolean,
   capsule: boolean,
   spread = 1,
 ): SpinPoseBlock {
-  const r = ciaoRatio(panel.w);
+  const r = lineupRatio(panel.w);
   const artW = l.artW && l.artW > 0 ? l.artW : l.artH * DEFAULT_ART_ASPECT;
   const spacingScale =
-    ciaoPackStep(artW / l.artH) / (CIAO_ROW.step * CIAO_PACKSHOT.spacing);
-  const ref = ciaoView(0, CIAO_PACKSHOT, r, { spacingScale });
-  const v = ciaoView(dp, cam, r, {
+    lineupPackStep(artW / l.artH) /
+    (LINEUP_ROW.step * LINEUP_REST_CAMERA.spacing);
+  const ref = lineupView(0, LINEUP_REST_CAMERA, r, { spacingScale });
+  const v = lineupView(dp, cam, r, {
     spacingScale: spacingScale * spread,
     capsule,
   });
@@ -534,7 +535,7 @@ function ciaoRowBlock(
   const projH = panel.viewH ?? panel.h;
   const pxX = v.sx * (projH / 2);
   const pxY = -v.sy * (projH / 2);
-  const heightPx = (CIAO_ROW.canWorldH / v.depth / t) * (projH / 2);
+  const heightPx = (LINEUP_ROW.canWorldH / v.depth / t) * (projH / 2);
   return {
     dx: -d * l.step,
     dy: 0,
@@ -544,7 +545,7 @@ function ciaoRowBlock(
     rotY: v.ey,
     rotZ: -v.ez,
     scale: heightPx / l.artH,
-    dim: (soldOut ? SOLD_OUT_DIM : 1) * ciaoLight(cam),
+    dim: (soldOut ? SOLD_OUT_DIM : 1) * lineupLight(cam),
     fx: pxX / panel.w,
     fy: 0.5 + pxY / panel.h - panel.anchorY,
   };
@@ -557,14 +558,14 @@ function ciaoRowBlock(
  * slot with a CLONE of the pack's model (shared geometry and textures) and
  * passes the offset as `SpinCtx.copy`. The centred pack is always offset 0.
  */
-export function ciaoCopies(
+export function lineupCopies(
   i: number,
   track: number,
   count: number,
   desktop: boolean,
 ): number[] {
   if (count < 1) return [0];
-  const reach = (desktop ? CIAO_ROW.reachDesktop : CIAO_ROW.reachPhone) + 1;
+  const reach = (desktop ? LINEUP_ROW.reachDesktop : LINEUP_ROW.reachPhone) + 1;
   const dp = count > 1 ? wrapRow(i - track, count) : i - track;
   const out: number[] = [];
   const k = Math.ceil(reach / count) + 1;
@@ -585,7 +586,7 @@ export function ciaoCopies(
  * `ctx.exit` then plays the leave: camera drops, comes closer, levels, row
  * opens 0.47 -> 0.6, light goes out.
  */
-export const ciaoPose: SpinPoseFn = (rest, st, i, l, desktop, ctx) => {
+export const lineupPose: SpinPoseFn = (rest, st, i, l, desktop, ctx) => {
   void desktop;
   const s = clamp01(st.spin);
   const exit = clamp01(ctx.exit ?? 0);
@@ -595,12 +596,12 @@ export const ciaoPose: SpinPoseFn = (rest, st, i, l, desktop, ctx) => {
   const copy = ctx.copy ?? 0;
   const dp = (n > 1 ? wrapRow(d, n) : d) + copy;
   const w = quadInOut(s);
-  const row = ciaoRowBlock(
+  const row = lineupRowBlock(
     dp,
     d,
     l,
     ctx.panel ?? DEFAULT_PANEL,
-    ciaoCameraAt(exit),
+    lineupCameraAt(exit),
     !!ctx.soldOut,
     !!ctx.capsule,
     ctx.spread ?? 1,
@@ -622,7 +623,7 @@ export const ciaoPose: SpinPoseFn = (rest, st, i, l, desktop, ctx) => {
 };
 
 /** The `tip` variant's reach fade: lerp(step 1's, the packshot's reach, the formation ease). */
-export function ciaoOpacity(
+export function lineupOpacity(
   st: Readonly<StageState>,
   i: number,
   desktop: boolean,
@@ -633,7 +634,7 @@ export function ciaoOpacity(
   const s = clamp01(st.spin);
   if (!(s > 0)) return copy === 0 ? slotOpacity(d, desktop) : 0;
   const dp = (count > 1 ? wrapRow(d, count) : d) + copy;
-  const reach = desktop ? CIAO_ROW.reachDesktop : CIAO_ROW.reachPhone;
+  const reach = desktop ? LINEUP_ROW.reachDesktop : LINEUP_ROW.reachPhone;
   const restOp = Math.abs(dp - d) > 1e-9 ? 0 : slotOpacity(d, desktop);
   return lerp(restOp, reachOpacity(dp, reach), quadInOut(s));
 }
@@ -652,17 +653,17 @@ function applyExit(
   const exit = clamp01(ctx.exit ?? 0);
   if (!(exit > 0)) return b;
   const panel = ctx.panel ?? DEFAULT_PANEL;
-  const r = ciaoRatio(panel.w);
-  const cam = ciaoCameraAt(exit);
-  const a0 = ciaoView(0, CIAO_PACKSHOT, r);
-  const a1 = ciaoView(0, cam, r);
+  const r = lineupRatio(panel.w);
+  const cam = lineupCameraAt(exit);
+  const a0 = lineupView(0, LINEUP_REST_CAMERA, r);
+  const a1 = lineupView(0, cam, r);
   const zoom = a0.depth / a1.depth;
   const lev = quadInOut(exit);
   const yc = (panel.anchorY - 0.5) * panel.h;
   const X = d * l.step + b.dx;
   const Y = yc + b.dy;
   // the full-turn row keeps its own rest light and dims like the lineup on the exit
-  const light = ciaoLight(cam) / CIAO_ROW.restLight;
+  const light = lineupLight(cam) / LINEUP_ROW.restLight;
   return {
     dx: X * zoom - d * l.step + 0,
     dy: Y * zoom - yc + 0,

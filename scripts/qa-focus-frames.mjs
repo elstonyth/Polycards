@@ -25,8 +25,8 @@
 // - a block's heading is hidden while the rest of its block still shows
 //   (a block fades as one piece, both ways);
 // - the Front block shows while leaving from another stop;
-// - (full-flow WP3a) a scroll entry at the row strays from the tap's curve;
-// - (full-flow WP4) past Closing the panel fades, the page's content comes
+// - a scroll entry at the row strays from the tap's curve;
+// - past Closing the panel fades, the page's content comes
 //   into view over the hand-off, another pack is cut in rather than faded,
 //   a stop block still shows at the lineup, or the move does not land on the
 //   lineup; an up wheel from the free part does not rest on the lineup, or
@@ -621,7 +621,7 @@ for (const size of ['phone', 'desktop']) {
   }, index);
 
   // enter by scroll: one notch or swipe at the row focuses the centred pack
-  // on the tap's curve (full-flow WP3a)
+  // on the tap's curve
   const scrollIn = await frames(async () => {
     await page.waitForTimeout(300);
     await next();
@@ -661,7 +661,7 @@ for (const size of ['phone', 'desktop']) {
     }
   });
   judge(`${size}-stops`, walk);
-  // past Closing (full-flow WP4): one gesture pages to the lineup rest while
+  // past Closing: one gesture pages to the lineup rest while
   // the pack hands over to the tilted lineup: the panel never fades, the
   // page's content never comes into view over the hand-off, the others fade
   // in (never cut) and the stop text leaves; one more pages through the

@@ -170,7 +170,7 @@ export default async function HomePreviewPage({
       />
       <ShelfCategoryProvider categories={tabs}>
         <Stage3dProvider override={stage} debug={debug}>
-          {/* The page below the stage, in the flow's order (full-flow plan 1):
+          {/* The page below the stage, in the flow's order:
               PackStage lays it out after the pin, and it rises over the
               pinned panel during the spin's exit. */}
           <PackStage

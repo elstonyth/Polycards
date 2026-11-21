@@ -100,7 +100,7 @@ async function settle(page, k) {
   await page.waitForTimeout(500);
 }
 
-/** Back to Front by ArrowUp, one stop at a time (Home goes to the row: full-flow plan 2.10). */
+/** Back to Front by ArrowUp, one stop at a time (Home goes to the row). */
 async function toFront(page) {
   for (let i = 0; i < 8; i++) {
     const f = await focusOf(page);
@@ -170,7 +170,7 @@ for (const size of ['phone', 'desktop']) {
   const { ctx, page } = await stage(size);
   const cdp = size === 'phone' ? await ctx.newCDPSession(page) : null;
 
-  // a down gesture at the row focuses the centred pack (full-flow WP3a)
+  // a down gesture at the row focuses the centred pack
   if (cdp) await swipe(page, cdp, 200, 600, 200, 380);
   else {
     await page.mouse.move(720, 450);
@@ -349,7 +349,7 @@ for (const size of ['phone', 'desktop']) {
   );
 
   // a key during the leave fade does not cancel the leave (from Closing: End
-  // pages to the lineup since full-flow WP4, ArrowUp comes back to Closing)
+  // pages to the lineup, ArrowUp comes back to Closing)
   await page.keyboard.press('End');
   await page.waitForTimeout(1700);
   await page.keyboard.press('ArrowUp');

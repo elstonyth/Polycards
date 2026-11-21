@@ -10,7 +10,7 @@ import { FOCUS_TERM } from '../stage-compose';
 import { focusKeys } from '../stage-focus-keys';
 import { poseAt, restState } from '../stage-pose';
 import { composeOpacity, composePose } from '../stage-pose-compose';
-import { ciaoCopies, ciaoOpacity, ciaoPose } from '../stage-spin';
+import { lineupCopies, lineupOpacity, lineupPose } from '../stage-spin';
 import { LEAN } from '../stage-spin-math';
 
 // The endless pick moves the row's track while the focused
@@ -50,11 +50,11 @@ function setup(s: (typeof SIZES)[number]) {
       count: COUNT,
       turn: 0,
       lean: LEAN,
-      spinPose: ciaoPose,
+      spinPose: lineupPose,
       panel: s.panel,
       copy,
     },
-    spinOpacity: ciaoOpacity,
+    spinOpacity: lineupOpacity,
     compose: composePose,
     focus,
     focusTerm: FOCUS_TERM,
@@ -90,8 +90,8 @@ describe('the lineup repeats every n packs (the wrap is never seen)', () => {
       const { drawn } = setup(s);
       for (const t of [2, 2.4, -0.3, 6.45]) {
         for (let i = 0; i < COUNT; i++) {
-          const ca = ciaoCopies(i, t, COUNT, s.desktop);
-          const cb = ciaoCopies(i, t + COUNT, COUNT, s.desktop);
+          const ca = lineupCopies(i, t, COUNT, s.desktop);
+          const cb = lineupCopies(i, t + COUNT, COUNT, s.desktop);
           expect(cb).toEqual(ca);
           for (const c of ca) {
             const a = drawn(t, i, c);
@@ -112,7 +112,7 @@ describe('the focused pack, once the lineup has moved', () => {
       // dragged three packs on: the focused pack is three slots off centre
       const track = CHOSEN + 3;
       const op = composeOpacity(st(track), CHOSEN, s.desktop, COUNT, ctx());
-      const row = ciaoOpacity(st(track), CHOSEN, s.desktop, COUNT);
+      const row = lineupOpacity(st(track), CHOSEN, s.desktop, COUNT);
       expect(op).toBeCloseTo(row, 6);
     });
 

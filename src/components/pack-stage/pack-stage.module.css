@@ -1,5 +1,5 @@
 /*
- * Pack stage (plan sections 1, 3, 6, 10). The flat stage is posed entirely in
+ * Pack stage. The flat stage is posed entirely in
  * CSS: each tile carries its pose as unitless custom properties written by
  * StageTrack from `poseAt` (steps for x, art heights for y and z, radians,
  * scale, brightness), for phones (--m-*) and desktop (--d-*); the media query
@@ -35,8 +35,8 @@
    it (no JavaScript, reduced motion, the chunk failing, a visitor already
    down the page) the page below simply follows the panel. On, the pin holds
    the panel under the site header for the whole flow root, and the page
-   below (its spacers first: full-flow plan 2.1) starts at the panel's top and
-   scrolls over it, as Ciao's sections scroll over its fixed canvas. */
+   below (its spacers first) starts at the panel's top and
+   scrolls over it, covering the fixed canvas. */
 .spinWrap {
   position: relative;
 }
@@ -67,7 +67,7 @@
   pointer-events: auto;
 }
 
-/* Past Closing the pack carries on into the lineup (full-flow plan 2.4);
+/* Past Closing the pack carries on into the lineup;
    its stop text and controls leave on the text's own line (20% into the
    move down, 80% into it back up: data-flow-past, set by the spin chunk),
    fading as a stop's block does. The panel is hidden once the free part
@@ -95,7 +95,7 @@
   visibility: hidden;
 }
 
-/* The lap (full-flow plan 2.6, 2.7: the rise, Return and Last): the panel
+/* The lap (the rise, Return and Last): the panel
    shows the chosen pack rising and the others coming back, with the row's
    own UI out, so the frame at Last is the row's frame with its UI at 0. The
    wrap brings the UI back over 0.35 s (data-flow-wrap, set for that while
@@ -609,7 +609,7 @@
   }
 }
 
-/* ---- Loader (plan section 6) --------------------------------------------- */
+/* ---- Loader --------------------------------------------- */
 
 /* The shell exists in every server render but shows only once the inline
    pre-paint script has set html[data-stage-loader] (a document load that
@@ -855,7 +855,7 @@
 
 /* ---- The spin's text and lock (step 2) ------------------------------------ */
 
-/* Text over the stage changes on timed tweens (Ciao: 0.5 s power2.inOut once
+/* Text over the stage changes on timed tweens (0.5 s power2.inOut once
    a move is 20% done), never tied to the scroll position: PackStage sets the
    flags, the transitions play forward and back. Only children fade, so the
    loader's fill animation on the info block and the labels' per-frame reach
@@ -878,7 +878,7 @@
   transition-duration: 150ms;
 }
 
-/* Once the spin has started the row is the scroll's (10.4): a tap on a pack
+/* Once the spin has started the row is the scroll's: a tap on a pack
    is a scroll gesture, the discs and the info block take no hits. The tabs
    and the sort control stay live: a pick plays the usual sink and rise. */
 .stage[data-spinning] .pose,

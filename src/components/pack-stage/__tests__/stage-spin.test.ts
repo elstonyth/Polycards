@@ -7,13 +7,13 @@ import { restState, slotOpacity } from '../stage-pose';
 import { CAPSULE_LIMITS } from '../stage-capsule-lean';
 import { LEAN } from '../stage-spin-math';
 import {
-  CIAO_PACKSHOT,
-  CIAO_ROW,
-  ciaoCopies,
-  ciaoView,
-  ciaoOpacity,
-  ciaoPose,
-  ciaoRatio,
+  LINEUP_REST_CAMERA,
+  LINEUP_ROW,
+  lineupCopies,
+  lineupView,
+  lineupOpacity,
+  lineupPose,
+  lineupRatio,
   quadInOut,
   GATHER,
   HOLD,
@@ -429,7 +429,7 @@ describe('tip: the packshot look', () => {
     track = 0,
   ) => {
     const l = desktop ? DESKTOP : PHONE;
-    return ciaoPose(
+    return lineupPose(
       restBlock(st(s, track), i, l, desktop, false),
       st(s, track),
       i,
@@ -448,8 +448,8 @@ describe('tip: the packshot look', () => {
 
   it("reproduces the sheet's pitch ramp: phone -17, 11, 40; desktop 12 deg per pack", () => {
     const pitch = (dp: number, w: number) =>
-      dp * CIAO_ROW.step * CIAO_ROW.pitchPerUnit * ciaoRatio(w) +
-      CIAO_ROW.pitchBias;
+      dp * LINEUP_ROW.step * LINEUP_ROW.pitchPerUnit * lineupRatio(w) +
+      LINEUP_ROW.pitchBias;
     expect([-1, 0, 1].map((d) => Math.round(pitch(d, 390) * DEGR))).toEqual([
       -17, 11, 40,
     ]);
@@ -491,8 +491,8 @@ describe('tip: the packshot look', () => {
           const p = cpose(k / 400, i, desktop);
           // a wrapped pack takes its row slot at once, at zero opacity
           const seen =
-            ciaoOpacity(st(k / 400), i, desktop, 11) > 0.01 &&
-            ciaoOpacity(st((k - 1) / 400), i, desktop, 11) > 0.01;
+            lineupOpacity(st(k / 400), i, desktop, 11) > 0.01 &&
+            lineupOpacity(st((k - 1) / 400), i, desktop, 11) > 0.01;
           const l = desktop ? DESKTOP : PHONE;
           const w = panelOf(desktop).w;
           const x = (q: typeof p) => i * l.step + q.dx + (q.fx ?? 0) * w;
@@ -512,15 +512,15 @@ describe('tip: the packshot look', () => {
     const b = cpose(1, 0, false, 1);
     expect(b.fy ?? 0).toBeLessThan((a.fy ?? 0) - 0.15);
     expect(b.scale).toBeGreaterThan(a.scale * 1.5);
-    expect(a.dim).toBeCloseTo(CIAO_ROW.restLight, 9);
-    expect(b.dim).toBeCloseTo(CIAO_ROW.restLight * CIAO_ROW.exitLight, 9);
+    expect(a.dim).toBeCloseTo(LINEUP_ROW.restLight, 9);
+    expect(b.dim).toBeCloseTo(LINEUP_ROW.restLight * LINEUP_ROW.exitLight, 9);
   });
 
   it('packs stand as tall as the reference cans: about 340 px on desktop, 300 on phones', () => {
     // centre pack at rest, viewport-height projection as the viewport's
     const h = (desktop: boolean) => {
       const l = desktop ? DESKTOP : PHONE;
-      const p = ciaoPose(
+      const p = lineupPose(
         restBlock(st(1), 0, l, desktop, false),
         st(1),
         0,
@@ -546,31 +546,32 @@ describe('tip: the packshot look', () => {
       for (const desktop of [false, true]) {
         const slots = new Set<number>();
         for (let i = 0; i < n; i++)
-          for (const c of ciaoCopies(i, 0, n, desktop)) {
+          for (const c of lineupCopies(i, 0, n, desktop)) {
             const pos = wrapRow(i, n) + c;
             expect(slots.has(pos)).toBe(false);
             slots.add(pos);
           }
-        const reach = desktop ? CIAO_ROW.reachDesktop : CIAO_ROW.reachPhone;
+        const reach = desktop ? LINEUP_ROW.reachDesktop : LINEUP_ROW.reachPhone;
         for (let pos = -reach; pos <= reach; pos++)
           expect(slots.has(pos), `n=${n} pos=${pos}`).toBe(true);
-        expect(ciaoCopies(0, 0, n, desktop)).toContain(0);
-        expect(ciaoOpacity(st(0), 1, desktop, n, n)).toBe(0); // copies are invisible at rest
+        expect(lineupCopies(0, 0, n, desktop)).toContain(0);
+        expect(lineupOpacity(st(0), 1, desktop, n, n)).toBe(0); // copies are invisible at rest
       }
   });
 
   it('capsules: the ramp is clamped to tip away at most 15 deg and toward at most 25, as seen', () => {
-    const r = ciaoRatio(1440);
+    const r = lineupRatio(1440);
     for (let dp = -5; dp <= 5; dp++) {
-      const cap = ciaoView(dp, CIAO_PACKSHOT, r, { capsule: true });
-      const free = ciaoView(dp, CIAO_PACKSHOT, r);
+      const cap = lineupView(dp, LINEUP_REST_CAMERA, r, { capsule: true });
+      const free = lineupView(dp, LINEUP_REST_CAMERA, r);
       void free;
       // world pitch range [rx - 15, rx + 25] = [-5, 35] deg
       const pitch =
-        dp * CIAO_ROW.step * CIAO_ROW.pitchPerUnit * r + CIAO_ROW.pitchBias;
+        dp * LINEUP_ROW.step * LINEUP_ROW.pitchPerUnit * r +
+        LINEUP_ROW.pitchBias;
       const clamped = Math.max(
-        CIAO_PACKSHOT.rx - CIAO_ROW.capsuleTipAway,
-        Math.min(CIAO_PACKSHOT.rx + CIAO_ROW.capsuleTipToward, pitch),
+        LINEUP_REST_CAMERA.rx - LINEUP_ROW.capsuleTipAway,
+        Math.min(LINEUP_REST_CAMERA.rx + LINEUP_ROW.capsuleTipToward, pitch),
       );
       expect(clamped * DEGR).toBeGreaterThanOrEqual(-5 - 1e-9);
       expect(clamped * DEGR).toBeLessThanOrEqual(35 + 1e-9);
@@ -592,13 +593,13 @@ describe('tip: the packshot look', () => {
     expect(at(0)).toEqual(pose(1, 0, PHONE, false, ctx(11)));
     expect(at(1).fy ?? 0).toBeLessThan(-0.15);
     expect(at(1).scale).toBeGreaterThan(at(0).scale * 1.5);
-    expect(at(1).dim).toBeCloseTo(CIAO_ROW.exitLight, 9);
+    expect(at(1).dim).toBeCloseTo(LINEUP_ROW.exitLight, 9);
   });
 
   it('opacity: all 11 packs on desktop once formed, 3 plus a cut one each side on phones', () => {
     const shown = (desktop: boolean) =>
       Array.from({ length: 11 }, (_, i) =>
-        ciaoOpacity(st(1), i, desktop, 11),
+        lineupOpacity(st(1), i, desktop, 11),
       ).filter((o) => o > 0).length;
     expect(shown(true)).toBe(11);
     expect(shown(false)).toBe(5);

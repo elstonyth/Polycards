@@ -33,7 +33,7 @@ import { SLEEVE_TILE } from './stage-capsule-lean';
 import { rowTilePacks, tilePose, tileSpinCtx } from './stage-row-tiles';
 import { cancelFrame, frame, type FrameData } from './stage-motion';
 import { composeOpacity, composePose } from './stage-pose-compose';
-import { ciaoCopies, ciaoOpacity, ciaoPose } from './stage-spin';
+import { lineupCopies, lineupOpacity, lineupPose } from './stage-spin';
 import {
   createFlowInput,
   flowKeyIntent,
@@ -129,9 +129,9 @@ const fmt = (v: number) => String(Math.round(v * 10000) / 10000);
 
 export const SPIN_KIT: StageSpinKit = {
   compose: composePose,
-  spinPose: ciaoPose,
-  spinOpacity: ciaoOpacity,
-  copies: ciaoCopies,
+  spinPose: lineupPose,
+  spinOpacity: lineupOpacity,
+  copies: lineupCopies,
   paintTiles(row, host, packs, state, cyArt) {
     const g = geomOf(row, host);
     if (!g) return false;

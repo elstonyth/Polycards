@@ -14,7 +14,7 @@ import { focusKeys } from '../stage-focus-keys';
 import { rowTilePacks, tilePose, tileSpinCtx } from '../stage-row-tiles';
 import { poseAt, restState } from '../stage-pose';
 import { LEAN } from '../stage-spin-math';
-import { ciaoCopies } from '../stage-spin';
+import { lineupCopies } from '../stage-spin';
 
 const SIZES = [
   {
@@ -119,7 +119,7 @@ describe('tilePose: a capsule tile keeps the lean limits', () => {
               spin === 1 ? Array.from({ length: 101 }, (_, e) => e / 100) : [0];
             for (const exit of exits) {
               const s: StageState = { ...restState(track), spin, exit };
-              for (const copy of ciaoCopies(i, track, N, desktop)) {
+              for (const copy of lineupCopies(i, track, N, desktop)) {
                 const ctx = tileSpinCtx(N, CAPSULES[i]!, exit, panel);
                 ctx.spin!.copy = copy;
                 const what = `track=${track} i=${i} spin=${spin} exit=${exit} copy=${copy}`;

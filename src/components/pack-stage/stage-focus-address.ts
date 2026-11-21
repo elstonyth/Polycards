@@ -1,5 +1,5 @@
 /**
- * Pack stage: the focused pack's address (full-flow plan 2.8). Pure: the
+ * Pack stage: the focused pack's address. Pure: the
  * focus chunk passes the window's history and location, so the rules run
  * in tests without a browser.
  *
@@ -79,7 +79,7 @@ export type FocusAddress = {
 /**
  * A step forward of ours that has not landed by then never will (another
  * script pushed an entry meanwhile, which fires no popstate): the address
- * is replaced instead [ours].
+ * is replaced instead.
  */
 export const FOCUS_STEP_MS = 1000;
 

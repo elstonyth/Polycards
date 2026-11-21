@@ -46,7 +46,7 @@ const nounOf = (packs: readonly StagePack[]): 'pack' | 'capsule' =>
   packs.length > 0 && packs.every((p) => p.ticket) ? 'capsule' : 'pack';
 
 /**
- * The home pack stage (plan sections 1, 3, 7), complete without any 3D: the
+ * The home pack stage, complete without any 3D: the
  * compact heading, the franchise tabs (driving the shared ShelfCategory pick,
  * so Just Pulled follows), one carousel per category (every category's tiles
  * are in the server HTML; the inactive ones are `hidden`), the centred pack's
@@ -68,8 +68,8 @@ export default function PackStage({
   start?: { id: string; category: string; index: number };
   /**
    * The page below the stage. It is laid out from the pin's end and scrolls
-   * up OVER the stuck panel during the exit (as Ciao's FAQ scrolls over its
-   * fixed canvas), so it is rendered here, after the pin.
+   * up OVER the stuck panel during the exit (it covers the fixed canvas), so it
+   * is rendered here, after the pin.
    */
   children?: ReactNode;
 }) {
@@ -83,7 +83,7 @@ export default function PackStage({
   const trackRef = useRef<StageTrackHandle>(null);
   const empty0 = categories.length === 0;
 
-  // The pin (10.2 as corrected by the Ciao motion sheet): the panel sticks
+  // The pin: the panel sticks
   // under the site header for the spin (1.75 panels) and the exit (1.25
   // panels), then the page below covers it. The spin chunk measures the range
   // from these elements, sets the panel's flags and pages the spin.

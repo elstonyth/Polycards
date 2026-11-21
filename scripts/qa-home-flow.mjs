@@ -1,5 +1,5 @@
 // QA for the full-page flow's address, history, restore and keys on
-// /home-preview (full-flow plan 2.8, 2.9 and 2.10; work package 3b), on the
+// /home-preview, on the
 // production server with HOME_PREVIEW=1. Headless Chrome, muted
 // (--mute-audio plus a media guard), logged out; only the cookie banner's
 // "Reject" is ever clicked.
@@ -32,7 +32,7 @@
 //   and a finger landing mid-move past the paged edge; no tap on Closing's
 //   controls anywhere past Closing; the 3D asleep in the free part and awake
 //   again back at the lineup.
-// - (lineup, work package 4) Closing to the lineup and back, per frame: the
+// - (lineup) Closing to the lineup and back, per frame: the
 //   chosen pack's centre and scale move one way only and never step faster
 //   than the curve allows; the others fade in and out, never cut; when they
 //   come into frame; the stop text gone at the lineup; the GPU estimate's
@@ -72,7 +72,7 @@ const OUT =
   process.env.QA_OUT ?? 'docs/research/home-3d/full-flow/checkpoints/wp3b';
 const SLUG = '151';
 const PREVIEW = '/home-preview';
-/** The landing window for one move [plan 2.2: 1.46-1.5 s]; the landing frame is the first frame at or after it. */
+/** The landing window for one move [1.46-1.5 s]; the landing frame is the first frame at or after it. */
 const LAND_MS = [1460, 1500];
 mkdirSync(OUT, { recursive: true });
 
@@ -420,7 +420,7 @@ for (const size of sizes) {
         .map((x) => `${x.block}@${x.y}`)
         .join(' '),
     );
-    // Closing to the lineup (work package 4): a rest, the address back to the
+    // Closing to the lineup: a rest, the address back to the
     // base path, the stop text gone, the panel taking no taps
     await gesture(s, 1);
     r = await rest(page);
@@ -686,7 +686,7 @@ for (const size of sizes) {
     await s.ctx.close();
   }
 
-  // ---- the keys (plan 2.10) ----
+  // ---- the keys ----
   if (part('keys')) {
     const s = await open(size);
     const { page } = s;
@@ -747,7 +747,7 @@ for (const size of sizes) {
     await page.waitForTimeout(600);
     r = await rest(page);
     check('front-ArrowUp-to-row', atRow(r), r);
-    // End pages to the lineup (plan 2.10, work package 4)
+    // End pages to the lineup
     r = await key(page, 'End');
     check(
       'row-End-to-lineup',
@@ -791,7 +791,7 @@ for (const size of sizes) {
     r = await nativeKey(page, 'PageUp');
     check('free-PageUp-native', !r.cancelled && r.y < y2 - 100, r);
     // End is the browser's: it lands past Last's top, so the page wraps to
-    // the row (plan 2.7: the wrap applies to End at Last; work package 7)
+    // the row (the wrap applies to End at Last)
     const endLog = await nativeKey(page, 'End');
     await page.waitForTimeout(1500);
     r = await rest(page);
@@ -834,7 +834,7 @@ for (const size of sizes) {
     await s.ctx.close();
   }
 
-  // ---- the review fixes (work package 3c) ----
+  // ---- the review fixes ----
   if (part('wp3c')) {
     // the focused view's chunk cannot be had: the page reads as plain
     // scrolling and the sections below are reached
@@ -1161,9 +1161,8 @@ for (const size of sizes) {
           : 'a tap lands on the hidden panel'),
     );
 
-    // the free part draws nothing and keeps only the chosen pack (full-flow
-    // plan 1.1a, work package 6: trimmed, not sent away), and the lineup's
-    // packs come back on the way up
+    // the free part draws nothing and keeps only the chosen pack (trimmed,
+    // not sent away), and the lineup's packs come back on the way up
     const vh = page.viewportSize().height;
     const trimY = t.rise ? (t.exitEnd + t.rise.start) / 2 : t.exitEnd + vh;
     await page.evaluate((v) => window.scrollTo(0, v), trimY);
@@ -1217,7 +1216,7 @@ for (const size of sizes) {
     await s.ctx.close();
   }
 
-  // ---- Closing to the lineup and back (work package 4) ----
+  // ---- Closing to the lineup and back ----
   if (part('lineup')) {
     const s = await open(size);
     const { page } = s;
@@ -1350,8 +1349,7 @@ for (const size of sizes) {
     // when the others come into frame, from the move's own start (its first
     // frame with the hand-off under way; the recording starts before the
     // gesture), counting a pack once it is in frame at 25% opacity or more
-    // (the reference: 1 to the full row between 25% and 74% of the move
-    // [measured D §C])
+    // (the reference: 1 to the full row between 25% and 74% of the move)
     {
       const i0 = Math.max(0, down.findIndex((f) => f.spin > 0) - 1);
       const t0 = down[i0].t;
@@ -1458,8 +1456,8 @@ for (const size of sizes) {
     await s.ctx.close();
   }
 
-  // ---- a reload at three rests (plan 2.8: a reload starts at the row) ----
-  // ---- the second review's fixes and the lineup exit (work package 4b) ----
+  // ---- a reload at three rests (a reload starts at the row) ----
+  // ---- the second review's fixes and the lineup exit ----
   if (part('wp4b')) {
     const chipState = (page) =>
       page.evaluate(() => {
@@ -1480,7 +1478,7 @@ for (const size of sizes) {
         };
       });
     // Back, then Forward during the leave: the focus comes back with the
-    // address, and Back from there unfocuses (review finding 1)
+    // address, and Back from there unfocuses
     {
       const s = await open(size);
       const { page } = s;
@@ -1560,7 +1558,7 @@ for (const size of sizes) {
       );
       await s.ctx.close();
     }
-    // Back after a lap still unfocuses (review finding 6)
+    // Back after a lap still unfocuses
     {
       const s = await open(size);
       const { page } = s;
@@ -1602,7 +1600,7 @@ for (const size of sizes) {
       await s.ctx.close();
     }
     // a stalled chunk: plain scrolling after the deadline, the flow back on
-    // at the row once it loads (review findings 3, 4 and 5)
+    // at the row once it loads
     {
       const s = await open(size);
       const { page } = s;
@@ -1695,7 +1693,7 @@ for (const size of sizes) {
       );
       await s.ctx.close();
     }
-    // a held PageDown pages once (review finding 7), and the lineup exit
+    // a held PageDown pages once, and the lineup exit
     // starts on the gesture's first frame (open point 2), and the two chips
     // stay hidden from Closing to the exit's end (open point 4)
     {
@@ -2142,7 +2140,7 @@ for (const size of sizes) {
     await s.ctx.close();
   }
 
-  // ---- The rise, the return and the wrap (work packages 6 and 7) ----
+  // ---- The rise, the return and the wrap ----
   if (part('wp67')) {
     const s = await open(size);
     const { page } = s;

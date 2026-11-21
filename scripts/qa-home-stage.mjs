@@ -1,6 +1,5 @@
 // scripts/qa-home-stage.mjs
-// QA for the homepage pack stage's 3D layer on /home-preview (plan section 9,
-// docs/research/home-3d/pack-stage/plan.md), on top of the flat-page checks.
+// QA for the homepage pack stage's 3D layer on /home-preview, on top of the flat-page checks.
 //
 // Runs against an ALREADY-RUNNING production server (`next build` then
 // `HOME_PREVIEW=1 next start`); it never starts one.
@@ -70,7 +69,7 @@ const HEADED_ARGS =
 const ONLY = new Set((process.env.ONLY ?? '').split(',').filter(Boolean));
 const WANT_SHOTS = process.env.SHOTS !== '0';
 const WANT_VIDEO = process.env.VIDEO !== '0';
-/** Alignment tolerance, CSS px (plan section 8 risk 5). */
+/** Alignment tolerance, CSS px. */
 const TOL = 4;
 /** Plan section 4: GPU estimate caps. */
 const CAPS = { phone: 40e6, desktop: 96e6 };
@@ -2811,7 +2810,7 @@ async function recordFilter(label, profile, { jp = false } = {}) {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// The page below the stage (full-flow plan 1, WP1): the section order and one
+// The page below the stage: the section order and one
 // footer, at rest, under reduced motion and while a pack is focused.
 
 /** What the page below the stage shows (run in the page). */
@@ -2872,8 +2871,8 @@ async function checkSections(label, profile) {
         `${r.feet} visible site footer(s); the one in the Telegram section shown: ${r.footInTelegram}`,
       );
       if (reduced) continue;
-      // Focused: the page below stays laid out over the pinned panel (full-flow
-      // WP3a), so the footer is still the Telegram section's one.
+      // Focused: the page below stays laid out over the pinned panel, so the
+      // footer is still the Telegram section's one.
       await page.waitForFunction(
         () =>
           window.__packStage?.ready?.() &&

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { poseAt, restState, stageOpacity } from '../stage-pose';
 import { composePose } from '../stage-pose-compose';
-import { ciaoOpacity, ciaoPose } from '../stage-spin';
+import { lineupOpacity, lineupPose } from '../stage-spin';
 import { LEAN } from '../stage-spin-math';
 import type { ComposeCtx, StageLayout } from '../contract';
 
@@ -13,10 +13,10 @@ describe('poseAt with the lineup row injected', () => {
       count: 11,
       turn: 0,
       lean: LEAN,
-      spinPose: ciaoPose,
+      spinPose: lineupPose,
       panel: { w: 390, h: 710, anchorY: 330 / 710, viewH: 844 },
     },
-    spinOpacity: ciaoOpacity,
+    spinOpacity: lineupOpacity,
     compose: composePose,
   };
 
@@ -39,7 +39,7 @@ describe('poseAt with the lineup row injected', () => {
     expect(p.rotZ).not.toBe(0);
     expect(p.fy).not.toBe(0);
     expect(stageOpacity(st, 2, false, 11, ctx)).toBeCloseTo(
-      ciaoOpacity(st, 2, false, 11),
+      lineupOpacity(st, 2, false, 11),
       12,
     );
   });

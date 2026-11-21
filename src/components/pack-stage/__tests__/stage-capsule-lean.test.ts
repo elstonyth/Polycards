@@ -24,7 +24,12 @@ import { FOCUS_TERM } from '../stage-compose';
 import { focusKeys } from '../stage-focus-keys';
 import { poseAt, restState } from '../stage-pose';
 import { composePose } from '../stage-pose-compose';
-import { CIAO_ROW, ciaoCopies, ciaoOpacity, ciaoPose } from '../stage-spin';
+import {
+  LINEUP_ROW,
+  lineupCopies,
+  lineupOpacity,
+  lineupPose,
+} from '../stage-spin';
 
 const SIZES = [
   {
@@ -57,8 +62,8 @@ function within(p: { rotX: number; rotY: number }, what: string) {
 describe('capsule lean limits', () => {
   it('the limits are the owner rulings', () => {
     expect(CAPSULE_LIMITS.yaw).toBeCloseTo((25 * Math.PI) / 180, 12);
-    expect(CAPSULE_LIMITS.tipAway).toBe(CIAO_ROW.capsuleTipAway);
-    expect(CAPSULE_LIMITS.tipToward).toBe(CIAO_ROW.capsuleTipToward);
+    expect(CAPSULE_LIMITS.tipAway).toBe(LINEUP_ROW.capsuleTipAway);
+    expect(CAPSULE_LIMITS.tipToward).toBe(LINEUP_ROW.capsuleTipToward);
     expect(CAPSULE_LIMITS.tipAway).toBeLessThanOrEqual(CAPSULE_LIMITS.yaw);
   });
 
@@ -84,13 +89,13 @@ describe('capsule lean limits', () => {
         count: N,
         turn: 0,
         lean: CAPSULE_LIMITS.yaw,
-        spinPose: ciaoPose,
+        spinPose: lineupPose,
         exit,
         panel,
         capsule: true,
         copy,
       },
-      spinOpacity: ciaoOpacity,
+      spinOpacity: lineupOpacity,
       compose: composePose,
     });
 
@@ -119,7 +124,7 @@ describe('capsule lean limits', () => {
             const spin = k / 20;
             for (const exit of spin === 1 ? [0, 0.25, 0.5, 0.75, 1] : [0]) {
               const s: StageState = { ...restState(track), spin, exit };
-              for (const copy of ciaoCopies(i, track, N, desktop))
+              for (const copy of lineupCopies(i, track, N, desktop))
                 within(
                   poseAt(s, i, l, desktop, false, spinCtx(exit, copy)),
                   `spin=${spin} exit=${exit} i=${i} copy=${copy}`,

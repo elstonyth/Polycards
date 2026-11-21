@@ -101,7 +101,7 @@ function handoffOf(
 
 /**
  * A pack's whole opacity, the hand-off included (the runtime and the CSS
- * tiles draw with it). `copy`: a repeat of the row (`ciaoCopies`), whose
+ * tiles draw with it). `copy`: a repeat of the row (`lineupCopies`), whose
  * category fade the caller adds. In the hand-off the chosen pack stays whole
  * while it is the centred one (moved off centre by the pick, it takes the
  * row's reach as h comes in) and the others (its own repeats included) fade in with h at the row's

@@ -16,7 +16,7 @@ import { CAPSULE_LIMITS, SLEEVE_TILE, capsulePose } from './stage-capsule-lean';
 import { poseAt } from './stage-pose';
 import { composePose } from './stage-pose-compose';
 import { LEAN } from './stage-spin-math';
-import { ciaoOpacity, ciaoPose } from './stage-spin';
+import { lineupOpacity, lineupPose } from './stage-spin';
 
 export type TilePack = { soldOut: boolean; ticket: boolean };
 
@@ -50,13 +50,13 @@ export function tileSpinCtx(
       count,
       turn: 0,
       lean: pack.ticket ? CAPSULE_LIMITS.yaw : LEAN,
-      spinPose: ciaoPose,
+      spinPose: lineupPose,
       soldOut: pack.soldOut,
       exit,
       panel,
       capsule: pack.ticket,
     },
-    spinOpacity: ciaoOpacity,
+    spinOpacity: lineupOpacity,
     compose: composePose,
   };
 }

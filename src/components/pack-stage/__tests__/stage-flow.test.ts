@@ -27,7 +27,7 @@ import {
   type FlowGeometry,
   type FlowTable,
 } from '../stage-flow';
-import { CIAO_EXIT_PANELS } from '../stage-spin';
+import { LINEUP_EXIT_PANELS } from '../stage-spin';
 
 // panel 800 px: one section S = 1000 px, so every rest is a round number
 const GEO: FlowGeometry = {
@@ -48,7 +48,7 @@ const table = (g: Partial<FlowGeometry> = {}): FlowTable => {
 describe('stage flow: the section table', () => {
   it("a section is 1.25 panels, the row exit's length; the lineup exit runs over one", () => {
     expect(FLOW_SECTION_PANELS).toBe(1.25);
-    expect(FLOW_SECTION_PANELS).toBe(CIAO_EXIT_PANELS);
+    expect(FLOW_SECTION_PANELS).toBe(LINEUP_EXIT_PANELS);
     expect(table().section).toBe(1000);
     const t = table();
     expect(t.exitEnd - t.exitStart).toBe(t.section);
