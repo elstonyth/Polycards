@@ -23,7 +23,17 @@ export function packFlowOn(
 }
 
 /** The preview page's QA query, read only there. */
-const QA_SWITCHES = new Set(['soldout', 'jp', 'debug', 'stage', 'loader']);
+const QA_SWITCHES = new Set([
+  'soldout',
+  'jp',
+  'debug',
+  'stage',
+  'loader',
+  'hide',
+  'more',
+  'no3d',
+  'group',
+]);
 
 /**
  * Where the pack's own address (`/slots/<slug>`) opens under the switch: the

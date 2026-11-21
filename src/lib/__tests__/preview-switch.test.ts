@@ -55,7 +55,9 @@ describe("packFlowAddress: where a pack's own address opens under the switch", (
     expect(
       packFlowAddress(
         '151',
-        q('soldout=151&jp=151&debug=1&stage=flat&loader=never&utm_source=ad'),
+        q(
+          'soldout=151&jp=151&debug=1&stage=flat&loader=never&hide=cr&more=4&no3d=151&group=ah&utm_source=ad',
+        ),
       ),
     ).toBe('/home-preview?utm_source=ad&focus=151');
   });
