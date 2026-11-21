@@ -29,7 +29,7 @@
     "dev": "next dev",
     "build": "next build --webpack",
     "start": "next start",
-    "lint": "eslint",
+    "lint": "eslint --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "check": "npm run lint && npm run format:check && npm run typecheck && npm test && npm run build",
     "format": "prettier --write \"**/*.{ts,tsx,mjs,cjs,js,json,yml,yaml,css}\"",
