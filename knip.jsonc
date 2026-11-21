@@ -1,0 +1,62 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  // Storefront only. backend/ is its own yarn workspace and tools/desk-reports
+  // has its own package.json; docs/, .claude/ and generated folders are outside
+  // "project". The Next.js, Vitest, Playwright, ESLint and PostCSS plugins
+  // enable themselves from package.json and add their own entry files (app
+  // routes, instrumentation, proxy, tests, config files).
+  //
+  // A trailing "!" marks production code. `npm run knip:prod` reads only those
+  // files, so code that only tests or scripts reach shows up as unused there.
+  "entry": [
+    // Hand-run node scripts; scripts/lib/ is shared code they import.
+    "scripts/*.{mjs,cjs,js}",
+    "scripts/{capsule-3d,pack-back,showcase}/*.{mjs,cjs,js}",
+    // Run by scripts/run-e2e.ps1 (-Smoke), which knip does not parse.
+    "playwright.prod-smoke.config.ts",
+    // Matched by a regex testMatch the Playwright plugin cannot read.
+    "tests/e2e/auth.setup.ts",
+    // Runs in production: it imports src/lib/security/csp.ts.
+    "next.config.ts!",
+    // Suspended surfaces keep their files on purpose (ADR 0004,
+    // .claude/reference/route-history.md). As entries they are never reported,
+    // and what they import (authed-fetch.ts for daily.ts) stays used.
+    "src/components/rewards/WithdrawForm.tsx!",
+    "src/lib/actions/daily.ts!",
+    "src/app/(account)/vip/vip-benefits.ts!",
+  ],
+  "project": [
+    "src/**/*.{ts,tsx,css}!",
+    // Test support is not production code, wherever it lives.
+    "!src/**/__tests__/**!",
+    "!src/lib/store-memory.ts!",
+    "scripts/**/*.{mjs,cjs,js}",
+    "tests/**/*.ts",
+    // Root files that run in production; the rest are tooling config.
+    "{next.config,sentry.server.config,sentry.edge.config,instrumentation-client}.ts!",
+    "*.{ts,mjs}",
+  ],
+  // An export the module itself uses is live code: only exports that no
+  // production code reads at all are reported (CODING_STANDARDS.md, "Unused
+  // code is deleted": nothing calls it, or only its own tests do).
+  "ignoreExportsUsedInFile": true,
+  // As the Next plugin's config file, next.config.ts would be tooling, and
+  // production mode would drop its imports (buildCsp). It is an entry above.
+  "next": { "config": [] },
+  "ignoreIssues": {
+    // QuickAccessCreditDot is a suspended export (2026-08-11 money-dot removal).
+    "src/components/account/credit-dot.tsx": ["exports"],
+    // voucherLabel is kept for the suspended reward surfaces (route-history.md).
+    // shortcut: this hides every unused export in format.ts; narrow it when the surfaces return or go.
+    "src/lib/format.ts": ["exports"],
+  },
+  "ignoreDependencies": [
+    // Bundled and aliased by Next.js itself, so it is not a package.json dependency.
+    "server-only",
+  ],
+  "ignoreBinaries": [
+    // System tools the media scripts call, not npm packages.
+    "ffmpeg",
+    "ffprobe",
+  ],
+}
