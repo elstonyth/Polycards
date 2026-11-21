@@ -16,14 +16,11 @@ vi.mock('@/components/home/HeroFreePack', () => ({
 vi.mock('@/components/home/PullsMarquee', () => ({
   default: marker('ticker'),
 }));
-vi.mock('@/components/RecentPullsSection', () => ({
-  default: marker('history'),
-}));
 vi.mock('@/components/home/TheGame', () => ({ default: marker('collectors') }));
 
 const { FlowSections } = await import('../FlowSections');
 
-const feed: RecentFeed = { pulls: [] } as unknown as RecentFeed;
+const feed: RecentFeed = { pulls: [], drought: {} };
 const html = renderToStaticMarkup(
   createElement(FlowSections, {
     feed,
@@ -45,8 +42,8 @@ describe('the preview page below the stage', () => {
       'data-mock="offer"',
       'Ships to Malaysia &amp; Singapore',
       'data-flow-section="just-pulled"',
+      'data-jp-drawer',
       'data-mock="ticker"',
-      'data-mock="history"',
       'data-mock="collectors"',
       'data-flow-section="telegram"',
       'href="https://t.me/polycardsgg"',

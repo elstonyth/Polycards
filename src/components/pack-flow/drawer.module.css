@@ -1,0 +1,220 @@
+/*
+ * The Just Pulled drawer (full-flow plan 1.1, work package 11). The base is
+ * the drawer at rest: the front card shows one pull in full, the next pulls
+ * show only their tabs above it (2 on a phone, 3 on desktop), the rest are not
+ * drawn. Scrolling never moves it. The live feed does: a new pull drops in at
+ * the front (data-arrive), the cards behind step back one place (their
+ * data-d changes and the transform eases), and the tab pushed out leaves
+ * (data-leave). The box's height is fixed, so nothing below it moves.
+ *
+ * Under reduced motion it is a plain list of every pull, as it is without
+ * JavaScript (FlowJustPulled's noscript style).
+ *
+ * Numbers: drawer-model.ts DRAWER_GEOMETRY; a test keeps the two in step.
+ */
+
+.box {
+  --card-h: 212px;
+  --tab-h: 38px;
+  --behind: 2;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  height: calc(var(--card-h) + var(--behind) * var(--tab-h));
+  transition: opacity 300ms;
+}
+@media (min-width: 1024px) {
+  .box {
+    --card-h: 316px;
+    --tab-h: 50px;
+    --behind: 3;
+  }
+}
+/* A tab's pulls are on their way (today's dimmed list). */
+.box[aria-busy='true'] {
+  opacity: 0.5;
+}
+
+.stack {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  --d: 0;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--card-h);
+  display: none;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  background: #151515;
+  /* Waiting behind: one tab higher and a little smaller per place. */
+  transform-origin: 50% 0;
+  transform: translateY(calc(var(--d) * var(--tab-h) * -1))
+    scale(calc(1 - var(--d) * 0.045));
+  z-index: calc(10 - var(--d));
+  transition: transform 520ms var(--ease);
+}
+.card[data-d='0'],
+.card[data-d='1'],
+.card[data-d='2'],
+.card[data-leave] {
+  display: block;
+}
+.card[data-d='1'] {
+  --d: 1;
+}
+.card[data-d='2'] {
+  --d: 2;
+}
+.card[data-d='3'] {
+  --d: 3;
+}
+@media (min-width: 1024px) {
+  .card[data-d='3'] {
+    display: block;
+  }
+}
+/* Only the front card takes a tap; the tabs behind are a picture of what
+   is next. */
+.card:not([data-d='0']) {
+  pointer-events: none;
+}
+/* A new pull drops in, the front first and each tab after it. */
+.card[data-arrive] {
+  animation: jp-drop 520ms var(--ease) backwards;
+  animation-delay: calc(var(--d) * 90ms);
+}
+/* The tab pushed out lifts away and fades, under the others. */
+.card[data-leave] {
+  z-index: 0;
+  animation: jp-leave 480ms var(--ease) forwards;
+}
+/* Opaque early, so the card it covers does not show through for long. */
+@keyframes jp-drop {
+  from {
+    opacity: 0;
+    translate: 0 -22px;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+@keyframes jp-leave {
+  to {
+    opacity: 0;
+    translate: 0 calc(var(--tab-h) * -1);
+  }
+}
+
+.chase {
+  border-color: rgba(var(--t), 0.55);
+  box-shadow: 0 0 30px -12px rgba(var(--t), 0.7);
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 46px;
+  padding: 0 14px 0 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: linear-gradient(#222, #191919);
+}
+
+.body {
+  display: flex;
+  gap: 14px;
+  padding: 14px;
+}
+
+.art {
+  width: 96px;
+  height: 134px;
+  flex: none;
+  border-radius: 6px;
+  object-fit: cover;
+  box-shadow: 0 12px 24px -12px rgba(var(--t), 0.8);
+}
+
+@media (min-width: 1024px) {
+  .tab {
+    height: 58px;
+    padding-inline: 16px;
+  }
+  .body {
+    gap: 24px;
+    padding: 22px;
+  }
+  .art {
+    width: 150px;
+    height: 210px;
+  }
+}
+
+/* PullHistory's empty tier line, in the front card's place. */
+.empty {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--card-h);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.03);
+  text-align: center;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* Reduced motion: the plain list, every pull a whole card, nothing moves. */
+@media (prefers-reduced-motion: reduce) {
+  .box {
+    height: auto;
+    transition: none;
+  }
+  .stack {
+    position: static;
+    display: grid;
+    gap: 10px;
+  }
+  .card {
+    position: static;
+    display: block;
+    height: auto;
+    transform: none;
+    transition: none;
+    animation: none;
+  }
+  .card:not([data-d='0']) {
+    pointer-events: auto;
+  }
+  .card[data-leave] {
+    display: none;
+  }
+  .art {
+    width: 72px;
+    height: 100px;
+  }
+  .empty {
+    position: static;
+    height: auto;
+    padding: 40px 16px;
+  }
+}
+@media (prefers-reduced-motion: reduce) and (min-width: 1024px) {
+  .stack {
+    grid-template-columns: 1fr 1fr;
+  }
+}
