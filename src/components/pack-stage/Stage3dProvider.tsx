@@ -66,6 +66,7 @@ import {
   STAGE_DESKTOP_QUERY,
   browserGateEnv,
   createFrameWatchdog,
+  stepDownAllowed,
   gateStage,
   type StageOverride,
 } from './stage-gate';
@@ -266,6 +267,8 @@ export class StageEngine {
   private prefetching = false;
   private watchdog = createFrameWatchdog();
   private watchdogOn = true;
+  /** A too-slow verdict that came while a pack was held: applied at the row. */
+  private stepDownDue = false;
 
   private inView = true;
   /** The flow's say: false while nothing of the stage can be seen (past Closing). */
@@ -886,9 +889,18 @@ export class StageEngine {
     const now = data.timestamp;
     if (this.prevTs !== null) {
       const dt = now - this.prevTs;
-      if (this.watchdogOn && this.watchdog.sample(dt, now)) {
-        this.fail('too-slow');
-        return;
+      if (this.stepDownDue) {
+        if (stepDownAllowed(this.state)) {
+          this.stepDownDue = false;
+          this.fail('too-slow');
+          return;
+        }
+      } else if (this.watchdogOn && this.watchdog.sample(dt, now)) {
+        if (stepDownAllowed(this.state)) {
+          this.fail('too-slow');
+          return;
+        }
+        this.stepDownDue = true;
       }
       this.advanceIdle(dt, now);
     }

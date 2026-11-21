@@ -13,6 +13,7 @@ import {
   readCheapSignals,
   stagePrepaintExpression,
   stepDown,
+  stepDownAllowed,
   type GateEnv,
   type StageSignals,
 } from '../stage-gate';
@@ -344,5 +345,31 @@ describe('frame watchdog', () => {
   it('steps 3d -> lite -> flat', () => {
     expect(stepDown('3d')).toBe('lite');
     expect(stepDown('lite')).toBe('flat');
+  });
+});
+
+describe('stepDownAllowed: a too-slow verdict rebuilds only where no pack is held', () => {
+  const at = (
+    o: Partial<{
+      focus: number;
+      spin: number;
+      exit: number;
+      lap: { rise: number; ret: number; free: boolean; trim: boolean } | null;
+    }>,
+  ) => stepDownAllowed({ focus: 0, spin: 0, exit: 0, lap: null, ...o });
+  it('the row at rest and the free span: now', () => {
+    expect(at({})).toBe(true);
+    expect(at({ lap: { rise: 0, ret: 0, free: true, trim: false } })).toBe(
+      true,
+    );
+  });
+  it('a focused pack, a move into it, the lineup, its exit, the rise: later', () => {
+    expect(at({ focus: 3 })).toBe(false);
+    expect(at({ focus: 0.2 })).toBe(false);
+    expect(at({ spin: 0.5 })).toBe(false);
+    expect(at({ exit: 0.1 })).toBe(false);
+    expect(at({ lap: { rise: 0.4, ret: 0, free: false, trim: false } })).toBe(
+      false,
+    );
   });
 });

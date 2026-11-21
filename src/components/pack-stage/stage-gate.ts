@@ -276,6 +276,22 @@ export function createFrameWatchdog(
   };
 }
 
+/**
+ * Whether a too-slow verdict may rebuild the runtime now: only at the row at
+ * rest or in the free span, where no pack is held. A rebuild while a pack is
+ * focused, in the lineup, its exit or the rise would drop the drawn pack (and
+ * its printed back) mid-flow, so the verdict waits for the row.
+ */
+export function stepDownAllowed(s: {
+  focus: number;
+  spin: number;
+  exit: number;
+  lap?: { free: boolean } | null;
+}): boolean {
+  if (s.focus > 0 || s.spin > 0 || s.exit > 0) return false;
+  return !s.lap || s.lap.free;
+}
+
 /** Where a too-slow verdict takes the stage. */
 export function stepDown(mode: '3d' | 'lite'): 'lite' | 'flat' {
   return mode === '3d' ? 'lite' : 'flat';
