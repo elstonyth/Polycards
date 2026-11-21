@@ -1080,3 +1080,29 @@ describe('flow input: the end (the footer, the chosen pack, the row back)', () =
     expect(p.input.measure({ ...grown, view: 700 }, 11500)).toBe(11600);
   });
 });
+
+describe('flow input: a re-measure in Just Pulled never lands past the footer rest', () => {
+  it('a resize that would put the kept place past the new footer rest stops at that rest', () => {
+    const geo = (viewport: number) => ({
+      ...GEO,
+      viewport,
+      riseSection: { top: 11600, bottom: 12000 },
+      ret: { top: 12000, height: 1000 },
+      last: { top: 13000, height: 801 },
+      sections: [
+        { top: 8000, height: 3600 },
+        { top: 11600, height: 400 },
+        { top: 12000, height: 1000 },
+        { top: 13000, height: 801 },
+      ],
+    });
+    const p = page();
+    p.input.measure(geo(800), 0);
+    // in Just Pulled, just above the footer rest (11200)
+    p.input.frame(11150, 0);
+    // a taller viewport: the same place under the middle is past the new rest (11000)
+    const y = p.input.measure(geo(1000), 11150);
+    expect(p.input.table()!.ends[0]).toBe(11000);
+    expect(y).toBe(11000);
+  });
+});

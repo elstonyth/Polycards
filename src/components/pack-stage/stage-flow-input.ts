@@ -417,7 +417,11 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
         was.zone === 'free' && was.span !== 'exit' && from?.length && to?.length
           ? freeAnchor(y0, from, oldGeo!.viewport)
           : null;
-      const y = a ? freeAnchorY(a, to!, g!.viewport) : flowPosition(was, table);
+      let y = a ? freeAnchorY(a, to!, g!.viewport) : flowPosition(was, table);
+      // a place in Just Pulled stays in it: never past the new footer rest
+      const footer = table.ends[0];
+      const wasAbove = old.ends.length === 0 || y0 < old.ends[0]! - SAME_PX;
+      if (a && footer !== undefined && wasAbove) y = Math.min(y, footer);
       lastY = y;
       return Math.abs(y - scrollY) >= SAME_PX ? y : null;
     },
