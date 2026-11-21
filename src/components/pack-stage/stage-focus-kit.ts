@@ -187,7 +187,14 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
   let kinds: FocusStopKind[] = [];
   let decl: StageFocusOn | null = null;
   let seed: FlowSeed | null = null;
-  const addr = createFocusAddress(window.history, () => window.location);
+  const addr = createFocusAddress(
+    window.history,
+    () => window.location,
+    (ms, fn) => {
+      const id = window.setTimeout(fn, ms);
+      return () => window.clearTimeout(id);
+    },
+  );
   /** The page has left the details downwards (last frame). */
   let past = false;
   let desktop = false;
@@ -275,11 +282,17 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
     past = false;
     seed = null;
     d.ended();
+    // browser Forward during the leave brought the pack's entry back: the
+    // page follows the address and resumes it (as Forward does at the row)
+    if (addr.strayed()) window.setTimeout(resumeEntry, 0);
   };
 
   const onPop = () => {
-    // our own step back (the address leaving with the pack)
-    if (addr.popped()) return;
+    // our own step (the address leaving with the pack, or back onto it)
+    if (addr.popped()) {
+      if (!on && addr.strayed()) resumeEntry();
+      return;
+    }
     if (on) {
       // past the details the address is the base path: Back leaves the
       // page, and Forward to the pack's entry is stepped back again, so the

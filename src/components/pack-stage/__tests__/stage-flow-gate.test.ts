@@ -4,13 +4,16 @@ import { createFlowInput, type FlowInput } from '../stage-flow-input';
 import { focusStops } from '../stage-focus-keys';
 import {
   createFocusLoad,
+  HOLD_MAX_MS,
+  LOAD_DEADLINE_MS,
+  holdStands,
   createTouchGate,
   FOCUS_RETRY_MS,
   flowSwitch,
   panelState,
 } from '../stage-flow-gate';
 
-// panel 800: S = 1000; rests 1000..6000, RL 7000, edge 7500, exit 8000 to 9000
+// panel 800: S = 1000; rests 1000..6000, RL 7000, edge 7500, exit 7000 to 9000
 const GEO = { top: 0, panel: 800, viewport: 800 };
 const SLEEVE = focusStops('sleeve');
 
@@ -134,16 +137,30 @@ describe("focus load: the focused view's chunk (review finding 1)", () => {
   function loader() {
     const loads: ReturnType<typeof deferred<string | null>>[] = [];
     const events: string[] = [];
+    const timers: { ms: number; fn: () => void; cancelled: boolean }[] = [];
     const l = createFocusLoad<string>({
       load: () => {
         const d = deferred<string | null>();
         loads.push(d);
         return d.promise;
       },
-      ready: (v, down) => events.push(`ready ${v}${down ? ' +down' : ''}`),
+      ready: (v, held) =>
+        events.push(`ready ${v}${held ? ` +down ${held.where}` : ''}`),
       failed: () => events.push('failed'),
+      after: (ms, fn) => {
+        const t = { ms, fn, cancelled: false };
+        timers.push(t);
+        return () => {
+          t.cancelled = true;
+        };
+      },
     });
-    return { l, loads, events };
+    /** The deadline of the latest load passes (if it is still armed). */
+    const deadline = () => {
+      const t = timers.at(-1);
+      if (t && !t.cancelled) t.fn();
+    };
+    return { l, loads, events, timers, deadline };
   }
   const tick = () => new Promise((r) => setTimeout(r, 0));
 
@@ -194,22 +211,64 @@ describe("focus load: the focused view's chunk (review finding 1)", () => {
   it('a down gesture held while loading is handed over once with the value', async () => {
     const { l, loads, events } = loader();
     void l.get(0);
-    l.holdDown();
+    l.holdDown(100, 'tab:2');
     loads[0]!.resolve('run');
     await tick();
-    expect(events).toEqual(['ready run +down']);
+    expect(events).toEqual(['ready run +down tab:2']);
   });
 
   it('a held down gesture is dropped when the load fails', async () => {
     const { l, loads, events } = loader();
     void l.get(0);
-    l.holdDown();
+    l.holdDown(100, 'tab:2');
     loads[0]!.reject(new Error('chunk'));
     await tick();
     void l.get(FOCUS_RETRY_MS + 10);
     loads[1]!.resolve('run');
     await tick();
     expect(events).toEqual(['failed', 'ready run']);
+  });
+
+  it('a load that stalls past its deadline counts as failed; when it lands later the value is taken', async () => {
+    const { l, loads, events, timers, deadline } = loader();
+    void l.get(0);
+    expect(timers[0]!.ms).toBe(LOAD_DEADLINE_MS);
+    expect(LOAD_DEADLINE_MS).toBe(2500);
+    expect(l.failed()).toBe(false);
+    deadline();
+    expect(l.failed()).toBe(true);
+    expect(events).toEqual(['failed']);
+    // the same request goes on: no second one meanwhile
+    void l.get(LOAD_DEADLINE_MS + 50);
+    expect(loads).toHaveLength(1);
+    loads[0]!.resolve('run');
+    await tick();
+    expect(l.failed()).toBe(false);
+    expect(events).toEqual(['failed', 'ready run']);
+  });
+
+  it('a down gesture held through the deadline is dropped', async () => {
+    const { l, loads, events, deadline } = loader();
+    void l.get(0);
+    l.holdDown(100, 'tab:2');
+    deadline();
+    loads[0]!.resolve('run');
+    await tick();
+    expect(events).toEqual(['failed', 'ready run']);
+  });
+
+  it('the deadline is disarmed when the load settles, and by stop()', async () => {
+    const { l, loads, events, timers, deadline } = loader();
+    void l.get(0);
+    loads[0]!.resolve('run');
+    await tick();
+    expect(timers[0]!.cancelled).toBe(true);
+    deadline();
+    expect(events).toEqual(['ready run']);
+    const b = loader();
+    void b.l.get(0);
+    b.l.stop();
+    expect(b.timers[0]!.cancelled).toBe(true);
   });
 
   it('a load with nothing to show yet (null) is neither kept nor a failure', async () => {
@@ -221,6 +280,19 @@ describe("focus load: the focused view's chunk (review finding 1)", () => {
     expect(l.failed()).toBe(false);
     void l.get(1);
     expect(loads).toHaveLength(2);
+  });
+});
+
+describe('a held down gesture (review finding 7)', () => {
+  it('stands only at the same place, and never later than 3 s after it was made', () => {
+    expect(HOLD_MAX_MS).toBe(3000);
+    const hold = { at: 1000, where: 'tab:poly|151' };
+    expect(holdStands(hold, 1000, 'tab:poly|151')).toBe(true);
+    expect(holdStands(hold, 4000, 'tab:poly|151')).toBe(true);
+    expect(holdStands(hold, 4001, 'tab:poly|151')).toBe(false);
+    expect(holdStands(hold, 1500, 'tab:poly|cr')).toBe(false);
+    expect(holdStands(hold, 1500, 'tab:sets|151')).toBe(false);
+    expect(holdStands(null, 1500, 'tab:poly|151')).toBe(false);
   });
 });
 

@@ -39,6 +39,13 @@
 //   peak against the cap; the back let go past Closing + 0.5 and printed
 //   again only at rest; a tap mid-move either way lands on its stop; (phone)
 //   diagonal swipes at the lineup end on a rest.
+// - (wp4b, the second review and the lineup exit) Back then Forward during a
+//   leave; a scroll entry right after a leave (its step back held 400 ms);
+//   Back after a lap unfocuses; a stalled focus chunk (plain scrolling after
+//   the deadline, the page's own scroll restoration while off, the flow back
+//   on at the row once it loads); a held PageDown pages once; the lineup
+//   exit moves on the gesture's first frame; neither floating chip shows
+//   from Closing to the exit's end, and both are back in the free part.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 
@@ -48,7 +55,7 @@ const BASE =
   process.env.PW_BASE ??
   'http://localhost:4300';
 const ONLY = (args.find((a) => a.startsWith('--only=')) ?? '=').split('=')[1];
-/** --part=pass,motion,nav,keys,reload,wp3c,lineup: run only these groups. */
+/** --part=pass,motion,nav,keys,reload,wp3c,lineup,wp4b: run only these groups. */
 const PARTS = (args.find((a) => a.startsWith('--part=')) ?? '=')
   .split('=')[1]
   .split(',')
@@ -1426,6 +1433,406 @@ for (const size of sizes) {
   }
 
   // ---- a reload at three rests (plan 2.8: a reload starts at the row) ----
+  // ---- the second review's fixes and the lineup exit (work package 4b) ----
+  if (part('wp4b')) {
+    const chipState = (page) =>
+      page.evaluate(() => {
+        const one = (sel) => {
+          const el = document.querySelector(sel);
+          if (!el) return 'absent';
+          const cs = getComputedStyle(el);
+          const b = el.getBoundingClientRect();
+          return cs.visibility !== 'hidden' &&
+            Number(cs.opacity) > 0.02 &&
+            b.width > 0
+            ? 'visible'
+            : 'hidden';
+        };
+        return {
+          free: one("[data-testid='free-pack-badge']"),
+          telegram: one('[data-telegram-banner]'),
+        };
+      });
+    // Back, then Forward during the leave: the focus comes back with the
+    // address, and Back from there unfocuses (review finding 1)
+    {
+      const s = await open(size);
+      const { page } = s;
+      await page.goto(BASE + '/about', { waitUntil: 'load' });
+      await reject(page);
+      await load(s);
+      const s0 = await snap(page);
+      await tapCentre(page);
+      await rest(page);
+      await page.goBack();
+      await page.waitForTimeout(350);
+      const mid = await snap(page);
+      await page.goForward();
+      await page.waitForTimeout(400);
+      let r = await rest(page, 8000);
+      const resumed = r.on && r.path === '/slots/' + SLUG && r.focus === 1;
+      await page.goBack();
+      await page.waitForTimeout(400);
+      r = await rest(page, 8000);
+      const unfocused = !r.on && r.path === PREVIEW && r.idx === s0.idx;
+      report(
+        'back-forward-during-leave-' + size,
+        mid.on && mid.busy && resumed && unfocused,
+        'Back started the leave ' +
+          (mid.on && mid.busy) +
+          '; Forward during it resumes the pack on Front with its address ' +
+          resumed +
+          '; Back then unfocuses at the row with the base path ' +
+          unfocused +
+          ' (' +
+          r.path +
+          ', entry ' +
+          r.idx +
+          ')',
+      );
+      await s.ctx.close();
+    }
+    // a scroll entry before the leave's step back has landed (review
+    // finding 2): the step back is held 400 ms here to open the window
+    {
+      const s = await open(size);
+      const { page } = s;
+      await page.goto(BASE + '/about', { waitUntil: 'load' });
+      await reject(page);
+      await load(s);
+      await tapCentre(page);
+      await rest(page);
+      await page.evaluate(() => {
+        const b = history.back.bind(history);
+        history.back = () => setTimeout(b, 400);
+      });
+      await page.keyboard.press('Escape');
+      await page.waitForFunction(() => !window.__packStage.focus()?.on, null, {
+        timeout: 8000,
+        polling: 'raf',
+      });
+      await gesture(s, 1);
+      let r = await rest(page, 8000);
+      const entered = r.on && r.path === '/slots/' + SLUG;
+      for (const k of ['End', 'ArrowUp']) {
+        await page.keyboard.press(k);
+        await page.waitForTimeout(200);
+        await rest(page);
+      }
+      await page.keyboard.press('Home');
+      await page.waitForTimeout(300);
+      r = await rest(page, 9000);
+      await page.waitForTimeout(600);
+      r = await snap(page);
+      report(
+        'scroll-entry-right-after-leave-' + size,
+        entered && !r.on && r.path === PREVIEW,
+        'entered by scroll before the step back landed ' +
+          entered +
+          '; after a lap and Home the row shows ' +
+          r.path,
+      );
+      await s.ctx.close();
+    }
+    // Back after a lap still unfocuses (review finding 6)
+    {
+      const s = await open(size);
+      const { page } = s;
+      await page.goto(BASE + '/about', { waitUntil: 'load' });
+      await reject(page);
+      await load(s);
+      const s0 = await snap(page);
+      await tapCentre(page);
+      await rest(page);
+      for (const k of ['End', 'ArrowUp']) {
+        await page.keyboard.press(k);
+        await page.waitForTimeout(200);
+        await rest(page);
+      }
+      await page.waitForTimeout(300);
+      const atClosing = await snap(page);
+      await page.goBack();
+      await page.waitForTimeout(600);
+      await page.waitForLoadState('load').catch(() => {});
+      const where = new URL(page.url()).pathname;
+      const r = where === PREVIEW ? await rest(page, 8000) : null;
+      report(
+        'back-after-a-lap-unfocuses-' + size,
+        atClosing.path === '/slots/' + SLUG &&
+          atClosing.idx === s0.idx + 1 &&
+          !!r &&
+          !r.on &&
+          r.path === PREVIEW,
+        'at Closing after the lap: ' +
+          atClosing.path +
+          ' entry ' +
+          atClosing.idx +
+          ' (row ' +
+          s0.idx +
+          '); Back lands on ' +
+          where +
+          (r ? ', focused ' + r.on : ''),
+      );
+      await s.ctx.close();
+    }
+    // a stalled chunk: plain scrolling after the deadline, the flow back on
+    // at the row once it loads (review findings 3, 4 and 5)
+    {
+      const s = await open(size);
+      const { page } = s;
+      let release = null;
+      const gate = new Promise((r) => (release = r));
+      await page.route(/pack-stage-focus\.[^/]*\.js/, async (r) => {
+        await gate;
+        await r.continue().catch(() => {});
+      });
+      await page.goto(BASE + PREVIEW + '?stage=3d&debug=1&loader=never', {
+        waitUntil: 'load',
+      });
+      await reject(page);
+      await page.waitForFunction(
+        () =>
+          window.__packStage?.ready?.() && window.__packStage.flow?.().bound,
+        null,
+        { timeout: 40000 },
+      );
+      const early = await page.evaluate(() => ({
+        on: window.__packStage.flow().on,
+        restoration: history.scrollRestoration,
+      }));
+      await page.waitForTimeout(5500);
+      const off = await page.evaluate(() => ({
+        on: window.__packStage.flow().on,
+        failed: window.__packStage.flow().focusFailed,
+        restoration: history.scrollRestoration,
+      }));
+      const y0 = await page.evaluate(() => scrollY);
+      await gesture(s, 1);
+      await page.waitForTimeout(700);
+      const y1 = await page.evaluate(() => scrollY);
+      // well away from the row (more than half a panel) when it lands
+      await page.evaluate(() => window.scrollTo(0, 1500));
+      await page.waitForTimeout(300);
+      release();
+      await page.waitForFunction(
+        () => window.__packStage.focus() !== null,
+        null,
+        {
+          timeout: 20000,
+        },
+      );
+      await page.waitForTimeout(300);
+      const away = await page.evaluate(() => window.__packStage.flow().on);
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.waitForTimeout(800);
+      const back = await page.evaluate(() => ({
+        on: window.__packStage.flow().on,
+        restoration: history.scrollRestoration,
+      }));
+      report(
+        'stalled-chunk-' + size,
+        early.on &&
+          early.restoration === 'manual' &&
+          !off.on &&
+          off.failed &&
+          off.restoration === 'auto' &&
+          y1 > y0 + 50 &&
+          !away &&
+          back.on &&
+          back.restoration === 'manual',
+        'before the deadline flow on ' +
+          early.on +
+          ' (' +
+          early.restoration +
+          '); after it flow on ' +
+          off.on +
+          ', failed ' +
+          off.failed +
+          ', restoration ' +
+          off.restoration +
+          '; one gesture scrolled plainly ' +
+          Math.round(y0) +
+          ' to ' +
+          Math.round(y1) +
+          '; loaded away from the row: flow on ' +
+          away +
+          '; back at the row: flow on ' +
+          back.on +
+          ' (' +
+          back.restoration +
+          ')',
+      );
+      report(
+        'errors-stalled-' + size,
+        page.errors.length === 0,
+        page.errors.join(' | '),
+      );
+      await s.ctx.close();
+    }
+    // a held PageDown pages once (review finding 7), and the lineup exit
+    // starts on the gesture's first frame (open point 2), and the two chips
+    // stay hidden from Closing to the exit's end (open point 4)
+    {
+      const s = await open(size);
+      const { page } = s;
+      await load(s);
+      await page.evaluate(() => document.activeElement?.blur());
+      await page.evaluate(() => {
+        window.__repeats = 0;
+        addEventListener('keydown', (e) => {
+          if (e.repeat) window.__repeats++;
+        });
+      });
+      // held for 2.6 s: well past the 1.5 s move, so a repeat could page again
+      await page.keyboard.down('PageDown');
+      for (let i = 0; i < 65; i++) {
+        await page.waitForTimeout(40);
+        await page.keyboard.down('PageDown'); // a held key repeats
+      }
+      await page.keyboard.up('PageDown');
+      let r = await rest(page, 8000);
+      const repeats = await page.evaluate(() => window.__repeats);
+      report(
+        'held-pagedown-pages-once-' + size,
+        repeats >= 60 && r.on && near(r.y, r.stops[1]),
+        'a PageDown held 2.6 s (' +
+          repeats +
+          ' repeats) rests on ' +
+          r.y +
+          ' (Front ' +
+          r.stops[1] +
+          ', focus ' +
+          r.focus +
+          ')',
+      );
+      // to Closing, then down through the hand-off, the lineup and its exit,
+      // the chips read every frame
+      await page.keyboard.press('End');
+      await page.waitForTimeout(200);
+      await rest(page);
+      await page.keyboard.press('ArrowUp');
+      await page.waitForTimeout(200);
+      await rest(page);
+      await page.evaluate(() => {
+        window.__chipLog = [];
+        window.__chipOn = true;
+        // the chip's opacity (0 when hidden, -1 when not on the page)
+        const vis = (sel) => {
+          const el = document.querySelector(sel);
+          if (!el) return -1;
+          const cs = getComputedStyle(el);
+          return cs.visibility === 'hidden' ? 0 : Number(cs.opacity);
+        };
+        const f = () => {
+          if (!window.__chipOn) return;
+          window.__chipLog.push([
+            Math.round(scrollY),
+            vis("[data-testid='free-pack-badge']"),
+            vis('[data-telegram-banner]'),
+          ]);
+          requestAnimationFrame(f);
+        };
+        requestAnimationFrame(f);
+      });
+      await gesture(s, 1);
+      r = await rest(page);
+      const lineupY = r.y;
+      const t = await page.evaluate(() => window.__packStage.flow().table);
+      // the exit: frames from the gesture, scroll and the stage's exit value
+      const rec = page.evaluate(
+        () =>
+          new Promise((done) => {
+            const o = [];
+            const t0 = performance.now();
+            const f = () => {
+              o.push([scrollY, window.__packStage.state.exit]);
+              if (performance.now() - t0 < 1700) requestAnimationFrame(f);
+              else done(o);
+            };
+            requestAnimationFrame(f);
+          }),
+      );
+      await page.waitForTimeout(60);
+      await gesture(s, 1);
+      const frames = await rec;
+      r = await rest(page);
+      const trace = await page.evaluate(() => window.__packStage.spinTrace());
+      const i = frames.findIndex((v) => Math.abs(v[0] - frames[0][0]) >= 0.5);
+      const firstMove = i >= 0 ? frames[i] : null;
+      // the driver's own stamps: the gesture, then the first frame after
+      // the one it ran in (the gesture's own frame is the move's start)
+      const g = trace.gestures.at(-1) ?? null;
+      const f1 = g === null ? null : trace.trace.find((v) => v[0] > g + 0.5);
+      const firstFrameMoved = !!f1 && f1[1] > t.rl + 0.5;
+      report(
+        'exit-starts-at-once-' + size,
+        near(lineupY, t.rl) &&
+          firstFrameMoved &&
+          !!firstMove &&
+          firstMove[1] > 0 &&
+          near(r.y, t.exitEnd),
+        'from the lineup (' +
+          lineupY +
+          '): the first driver frame after the gesture (' +
+          (f1 && g !== null ? Math.round(f1[0] - g) + ' ms after it' : 'none') +
+          ') is at scroll ' +
+          (f1 ? Math.round(f1[1]) : null) +
+          '; the first frame that moved (scroll ' +
+          (firstMove ? Math.round(firstMove[0]) : null) +
+          ') has exit ' +
+          (firstMove ? firstMove[1].toFixed(4) : null) +
+          '; landed ' +
+          r.y +
+          ' (exit end ' +
+          t.exitEnd +
+          ')',
+      );
+      await page.waitForTimeout(700);
+      await page.evaluate(() => (window.__chipOn = false));
+      const log = await page.evaluate(() => window.__chipLog);
+      const shownPast = log.filter(
+        ([y, a, b]) => y < t.exitEnd - 0.5 && (a > 0.02 || b > 0.02),
+      );
+      // in the free part each chip passes through in-between opacities (a fade, not a cut)
+      const after = log.filter(([y]) => y >= t.exitEnd - 0.5);
+      const fades = [1, 2].map((k) =>
+        after.some((v) => v[k] > 0.05 && v[k] < 0.95),
+      );
+      const free = await chipState(page);
+      await page.screenshot({
+        path: OUT + '/' + size + '-wp4b-free-chips.png',
+      });
+      report(
+        'chips-hidden-closing-to-exit-end-' + size,
+        log.length > 60 &&
+          shownPast.length === 0 &&
+          fades[0] &&
+          fades[1] &&
+          free.free === 'visible' &&
+          free.telegram === 'visible',
+        log.length +
+          ' frames from Closing to the exit end, ' +
+          shownPast.length +
+          ' with a chip shown' +
+          (shownPast[0] ? ' (first at ' + shownPast[0][0] + ')' : '') +
+          '; faded in (in-between opacities seen): free pack ' +
+          fades[0] +
+          ', Telegram ' +
+          fades[1] +
+          '; in the free part: free pack ' +
+          free.free +
+          ', Telegram ' +
+          free.telegram,
+      );
+      report(
+        'errors-wp4b-' + size,
+        page.errors.length === 0,
+        page.errors.join(' | '),
+      );
+      await s.ctx.close();
+    }
+  }
+
   if (part('reload')) {
     const s = await open(size);
     const { page } = s;

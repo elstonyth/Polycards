@@ -93,27 +93,56 @@ export function flowSwitch(o: {
 
 /** A failed load is tried again by a call this long after it at the earliest [ours]. */
 export const FOCUS_RETRY_MS = 1000;
+/**
+ * A load still running this long after it began counts as failed: the flow
+ * switches off (plain scrolling) while the request goes on, and comes back
+ * when it lands [ours, review finding 3].
+ */
+export const LOAD_DEADLINE_MS = 2500;
+/** A down gesture held for the chunk is replayed at most this long after it was made [ours]. */
+export const HOLD_MAX_MS = 3000;
+
+/** A down gesture kept for the chunk: when it was made and where (the tab and the centred pack). */
+export type FocusHold = { at: number; where: string };
+
+/** Whether a held gesture still stands: the same tab and centred pack, within HOLD_MAX_MS. */
+export function holdStands(
+  hold: FocusHold | null,
+  now: number,
+  where: string,
+): boolean {
+  return !!hold && hold.where === where && now - hold.at <= HOLD_MAX_MS;
+}
 
 export type FocusLoad<T> = {
   /** The value, loading it (again, after a failure) when needed; null: not now. */
   get(now: number): Promise<T | null>;
   value(): T | null;
-  /** A load failed and none has succeeded since (a retry in flight included). */
+  /**
+   * A load failed, or has run past its deadline, and none has succeeded
+   * since (a retry in flight included).
+   */
   failed(): boolean;
   /** A down gesture at the row came before the value: hand it over with it. */
-  holdDown(): void;
+  holdDown(at: number, where: string): void;
+  /** The deadline is disarmed (the driver stops). */
+  stop(): void;
 };
 
 /**
- * The focused view's chunk: one load at a time; a failure is reported (the
- * flow switches off) and never cached, so a later gesture tries again; a down
- * gesture made while it loads is kept (one) and handed to `ready`.
+ * The focused view's chunk: one load at a time; a failure, or a load still
+ * running at its deadline, is reported (the flow switches off) and never
+ * cached, so a later gesture tries again, and a stalled load that lands
+ * later is still taken; a down gesture made while it loads is kept (one,
+ * the latest) and handed to `ready`, unless the deadline passed first.
  * `load` resolving null means nothing to show yet (the flow is unbound).
+ * `after` arms the deadline (the window's timer; none: no deadline).
  */
 export function createFocusLoad<T>(d: {
   load(): Promise<T | null>;
-  ready(value: T, down: boolean): void;
+  ready(value: T, held: FocusHold | null): void;
   failed(): void;
+  after?(ms: number, fn: () => void): () => void;
 }): FocusLoad<T> {
   let value: T | null = null;
   let running: Promise<T | null> | null = null;
@@ -121,7 +150,12 @@ export function createFocusLoad<T>(d: {
   let failedAt: number | null = null;
   /** The chunk cannot be had: true from a failure until a load succeeds. */
   let unavailable = false;
-  let down = false;
+  let held: FocusHold | null = null;
+  let disarm: (() => void) | null = null;
+  const settle = () => {
+    disarm?.();
+    disarm = null;
+  };
   return {
     get(now) {
       if (value !== null) return Promise.resolve(value);
@@ -132,31 +166,42 @@ export function createFocusLoad<T>(d: {
       const p = d.load().then(
         (v) => {
           running = null;
+          settle();
           if (v === null) return null;
           value = v;
           unavailable = false;
-          const held = down;
-          down = false;
-          d.ready(v, held);
+          const h = held;
+          held = null;
+          d.ready(v, h);
           return v;
         },
         () => {
           running = null;
+          settle();
           failedAt = now;
           unavailable = true;
-          down = false;
+          held = null;
           d.failed();
           return null;
         },
       );
       running = p;
+      disarm =
+        d.after?.(LOAD_DEADLINE_MS, () => {
+          disarm = null;
+          if (running !== p || unavailable) return;
+          unavailable = true;
+          held = null;
+          d.failed();
+        }) ?? null;
       return p;
     },
     value: () => value,
     failed: () => unavailable,
-    holdDown() {
-      if (value === null) down = true;
+    holdDown(at, where) {
+      if (value === null && !unavailable) held = { at, where };
     },
+    stop: settle,
   };
 }
 

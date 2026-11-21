@@ -40,9 +40,11 @@ import {
   type FlowInputFrame,
 } from './stage-flow-input';
 import {
+  HOLD_MAX_MS,
   createFocusLoad,
   createTouchGate,
   flowSwitch,
+  holdStands,
   panelState,
 } from './stage-flow-gate';
 
@@ -293,6 +295,7 @@ export function startSpin(host: SpinHost): SpinControl {
     if (on !== was) {
       src.flow.toggleAttribute('data-flow-on', on);
       if (!on) clearPast(src);
+      restore(on);
     }
     // the Exit spacer, measured: its bottom is where the free part starts
     const ex = on
@@ -449,9 +452,19 @@ export function startSpin(host: SpinHost): SpinControl {
   const retry = () => {
     if (!focus && fload.failed()) void loadFocus();
   };
+  /** Where a held gesture was made: the shown tab and its centred pack. */
+  const where = (): string => {
+    const panel = src?.panel.querySelector<HTMLElement>(
+      '[data-stage-panel]:not([hidden])',
+    );
+    const tile = panel?.querySelector<HTMLElement>(
+      `[data-stage-tile][data-index="${centre()}"]`,
+    );
+    return `${panel?.dataset.stagePanel ?? ''}|${tile?.dataset.packId ?? ''}`;
+  };
   /** A down gesture at the row before the focused view has loaded: kept for it. */
   const downHeld = () => {
-    if (!focus && input.refused()) fload.holdDown();
+    if (!focus && input.refused()) fload.holdDown(now(), where());
   };
   const onWheel = (e: WheelEvent) => {
     if (e.ctrlKey) return;
@@ -513,7 +526,7 @@ export function startSpin(host: SpinHost): SpinControl {
   window.addEventListener('touchmove', onTouchMove, active);
   window.addEventListener('touchend', onTouchEnd, quiet);
   window.addEventListener('touchcancel', onTouchEnd, quiet);
-  window.addEventListener('scroll', wake, quiet);
+  window.addEventListener('scroll', onScroll, quiet);
   window.addEventListener('resize', measure, quiet);
   rmq.addEventListener('change', measure);
 
@@ -578,13 +591,25 @@ export function startSpin(host: SpinHost): SpinControl {
           },
         });
       }),
-    ready: (f, down) => {
+    ready: (f, held) => {
       focus = f;
-      // back from a failure: the flow switches on again (at the row only)
+      // back from a failure: the flow switches on again (at the row only;
+      // further away, the scroll checks again once the page is back near it)
       if (!flowOn()) measure();
-      if (down && atRow() && f.kindsAt(centre()) !== null) go(1);
+      // a gesture kept for the chunk: only where and soon after it was made
+      if (
+        holdStands(held, now(), where()) &&
+        atRow() &&
+        f.kindsAt(centre()) !== null
+      )
+        go(1);
     },
+    // a failure, or a load still running at its deadline: plain scrolling
     failed: () => measure(),
+    after: (ms, fn) => {
+      const id = window.setTimeout(fn, ms);
+      return () => window.clearTimeout(id);
+    },
   });
   const loadFocus = (): Promise<FocusRun | null> => fload.get(now());
   /** The page rests on the row (where a tap on the centred pack focuses it). */
@@ -612,9 +637,21 @@ export function startSpin(host: SpinHost): SpinControl {
     e.stopPropagation();
     if (tapping) return;
     tapping = true;
+    const at = now();
+    const id = tile.dataset.packId;
     void loadFocus().then((f) => {
       tapping = false;
       if (f?.active()) return;
+      // a slow load: only if the visitor is still at the row, on the same
+      // centred pack, and soon after the tap
+      if (
+        f &&
+        (!atRow() ||
+          centre() !== index ||
+          where().split('|')[1] !== id ||
+          now() - at > HOLD_MAX_MS)
+      )
+        return;
       // not focusable (no data for it): today's pack page
       if (!f || !f.enter(index)) {
         const a = tile.querySelector<HTMLAnchorElement>('a[href]');
@@ -641,10 +678,8 @@ export function startSpin(host: SpinHost): SpinControl {
       document.querySelector('[role="dialog"][aria-modal="true"]')
     )
       return;
-    if (
-      e.key === ' ' &&
-      t?.closest('button,a[href],[role="button"],summary,label')
-    )
+    // a link does not take Space (the page scrolls), so it pages here
+    if (e.key === ' ' && t?.closest('button,[role="button"],summary,label'))
       return;
     // the leave is under way: every key waits for it
     if (held()) {
@@ -653,16 +688,18 @@ export function startSpin(host: SpinHost): SpinControl {
     }
     // a key at the row before the focused view has loaded: load it
     if (!focus) void loadFocus();
-    const r = input.key(intent, window.scrollY, now());
+    // one page per press: a held key pages once
+    const r = input.key(intent, window.scrollY, now(), e.repeat);
     downHeld();
     if (r === 'free') return;
     e.preventDefault();
     if (r === 'leave') focus?.leave();
     wake();
   };
-  // Keyboard users keep every control (nothing is inert): focus landing in
-  // the row's own UI while the page is off the row brings it back there (a
-  // focused pack leaves; past the details nothing is focusable in the panel).
+  // Keyboard users keep the row's controls in the paged part: focus landing
+  // in the row's own UI while the page is off the row brings it back there
+  // (a focused pack leaves). From the hand-off on the panel is inert, so
+  // nothing in it takes focus there.
   const onFocusIn = (e: FocusEvent) => {
     const t = e.target instanceof Element ? e.target : null;
     if (
@@ -687,8 +724,42 @@ export function startSpin(host: SpinHost): SpinControl {
       '__flow' in st
     );
   };
-  /** The page's own restoration mode, put back when the flow unbinds. */
+  /** The page's own restoration mode, put back while the flow is off. */
   let restoration: ScrollRestoration | null = null;
+  /** Manual restoration while the flow runs (a reload starts at the row); the page's own otherwise. */
+  function restore(flowRuns: boolean) {
+    if (flowRuns) {
+      if (restoration !== null) return;
+      restoration = window.history.scrollRestoration;
+      window.history.scrollRestoration = 'manual';
+    } else if (restoration !== null) {
+      window.history.scrollRestoration = restoration;
+      restoration = null;
+    }
+  }
+  /**
+   * The scroll: wakes the loop; while the flow is off with the focused view
+   * in hand (a load that failed or stalled, then landed), the flow switch is
+   * checked again, at most once a frame, so it comes back near the row.
+   */
+  let switchCheck = false;
+  function onScroll() {
+    if (
+      !switchCheck &&
+      src &&
+      !flowOn() &&
+      fload.value() !== null &&
+      !rmq.matches &&
+      !src.empty
+    ) {
+      switchCheck = true;
+      requestAnimationFrame(() => {
+        switchCheck = false;
+        if (!flowOn()) measure();
+      });
+    }
+    wake();
+  }
   /** The document's load was looked at once (a reload starts at the row). */
   let loadSeen = false;
   const startAtRow = (s: StageSpinSource) => {
@@ -708,10 +779,7 @@ export function startSpin(host: SpinHost): SpinControl {
     if (next === src) return;
     unbindPage?.();
     unbindPage = null;
-    if (!next && restoration !== null) {
-      window.history.scrollRestoration = restoration;
-      restoration = null;
-    }
+    if (!next) restore(false);
     if (src) {
       src.flow.removeAttribute('data-flow-on');
       clearPast(src);
@@ -719,10 +787,8 @@ export function startSpin(host: SpinHost): SpinControl {
     src = next;
     if (next) {
       // no restored scroll: a reload or a history load starts at the row
-      if (restoration === null) {
-        restoration = window.history.scrollRestoration;
-        window.history.scrollRestoration = 'manual';
-      }
+      // (the page's own mode comes back if the flow does not switch on)
+      restore(true);
       startAtRow(next);
       const ro = new ResizeObserver(measure);
       ro.observe(next.flow);
@@ -739,6 +805,7 @@ export function startSpin(host: SpinHost): SpinControl {
         next.panel.removeEventListener('pointerdown', preload);
       };
       measure();
+      restore(flowOn());
     } else input.measure(null, window.scrollY);
     wake();
   };
@@ -771,6 +838,7 @@ export function startSpin(host: SpinHost): SpinControl {
     wake,
     stop() {
       clearTimeout(idleLoad);
+      fload.stop();
       focus?.stop();
       window.removeEventListener('keydown', onKey);
       bind(null);
@@ -780,7 +848,7 @@ export function startSpin(host: SpinHost): SpinControl {
       window.removeEventListener('touchmove', onTouchMove);
       window.removeEventListener('touchend', onTouchEnd);
       window.removeEventListener('touchcancel', onTouchEnd);
-      window.removeEventListener('scroll', wake);
+      window.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', measure);
       rmq.removeEventListener('change', measure);
     },

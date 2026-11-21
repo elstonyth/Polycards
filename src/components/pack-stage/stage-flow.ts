@@ -5,9 +5,10 @@
  *
  * The page is one table of scroll positions. The paged part: the row rest
  * R0, the focused pack's stops spread over a band of six sections, and the
- * lineup rest RL. The free part: the lineup holding through its own section
- * (the Lineup spacer), the lineup exit (the Exit spacer, ending where the
- * opening line's top meets the viewport top), the free content, the rise
+ * lineup rest RL. The free part: the lineup exit, from the lineup rest over
+ * both the Lineup and the Exit spacers (ending where the opening line's top
+ * meets the viewport top), so the row starts leaving on the first pixel of
+ * scroll below RL; then the free content, the rise
  * (keyed to the Telegram section), Return and Last. One value, the flow
  * position P, is read from the scroll; every pose and text switch is a
  * function of P only, so scrolling back retraces the way down exactly.
@@ -20,7 +21,7 @@ import { power1InOut } from './stage-focus';
 import { easeOutCubic } from './stage-spin-driver';
 import { clamp01 } from './stage-spin-math';
 
-/** One section: 1.25 panels (min-height 125svh) [code, D §A; P §A]. Equals CIAO_EXIT_PANELS [ours]. */
+/** One section: 1.25 panels (min-height 125svh) [code, D §A; P §A]. Equals CIAO_EXIT_PANELS [ours]; the lineup exit runs over two sections. */
 export const FLOW_SECTION_PANELS = 1.25;
 /** The detail band: six slots, Front to Closing, for every variant [ours, plan 2.1]. */
 export const FLOW_DETAIL_SLOTS = 6;
@@ -49,8 +50,9 @@ export type FlowGeometry = {
   viewport: number;
   /**
    * The Exit spacer (plan 2.1: after Row S, the band 6 S and Lineup S); its
-   * bottom is the opening line's top, where the free part starts. Absent or
-   * zero height: computed as RL + S to RL + 2 S, the spacers' CSS heights.
+   * bottom is the opening line's top, where the free part starts (the exit
+   * itself runs from RL to there). Absent or zero height: the end is
+   * computed as RL + 2 S, from the spacers' CSS heights.
    * Same origin as `top` (document scroll pixels, as the caller derives R0).
    */
   exit?: { top: number; height: number } | null;
@@ -73,7 +75,7 @@ export type FlowTable = {
   rl: number;
   /** The paged stops [R0, rests..., RL], built once per table. */
   stops: readonly number[];
-  /** The lineup exit starts here (the Exit spacer's top). */
+  /** The lineup exit starts here: the lineup rest RL. */
   exitStart: number;
   /** The end of the lineup exit (the free part starts). */
   exitEnd: number;
@@ -85,8 +87,7 @@ export type FlowTable = {
   lastHeight: number;
 };
 
-/** `lineup`: the lineup at rest through its own section, before the exit. */
-export type FlowSpan = 'lineup' | 'exit' | 'free' | 'rise' | 'ret' | 'last';
+export type FlowSpan = 'exit' | 'free' | 'rise' | 'ret' | 'last';
 
 /** The flow position: paged (P, 0 = row, 1..n stops, n + 1 = lineup) or a free span's progress. */
 export type FlowAt =
@@ -116,7 +117,7 @@ export function flowTable(g: FlowGeometry): FlowTable | null {
   const rl = Math.round(r0 + FLOW_LINEUP_SLOT * S);
   // the layout is the source of truth; the CSS heights are the fallback
   const measured = !!g.exit && g.exit.height > 0;
-  const exitStart = measured ? Math.max(rl, g.exit!.top) : Math.round(rl + S);
+  const exitStart = rl;
   const exitEnd = measured
     ? Math.max(exitStart, g.exit!.top + g.exit!.height)
     : Math.round(rl + 2 * S);
@@ -186,12 +187,6 @@ const progress = (y: number, a: number, b: number): number =>
 /** The flow position at a scroll. */
 export function flowAt(scrollY: number, t: FlowTable): FlowAt {
   if (scrollY <= t.rl) return { zone: 'paged', p: indexAt(scrollY, t.stops) };
-  if (scrollY <= t.exitStart)
-    return {
-      zone: 'free',
-      span: 'lineup',
-      t: progress(scrollY, t.rl, t.exitStart),
-    };
   if (scrollY <= t.exitEnd)
     return {
       zone: 'free',
@@ -235,8 +230,6 @@ export function flowPosition(at: FlowAt, t: FlowTable): number {
   const riseStart = t.rise?.start ?? t.exitEnd;
   const riseEnd = t.rise?.end ?? riseStart;
   switch (at.span) {
-    case 'lineup':
-      return along(t.rl, t.exitStart);
     case 'exit':
       return along(t.exitStart, t.exitEnd);
     case 'free':
@@ -334,10 +327,6 @@ export function flowTerms(at: FlowAt, n: number): FlowTerms {
   }
   const x = clamp01(at.t);
   switch (at.span) {
-    case 'lineup':
-      w.lineup = 1;
-      r.exit = 0;
-      return r;
     case 'exit':
       w.lineup = 1;
       r.exit = x;

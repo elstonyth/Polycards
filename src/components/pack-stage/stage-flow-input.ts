@@ -15,7 +15,9 @@
  *   gesture at Closing pages to RL while the focused pack hands over to the
  *   tilted lineup (`handoff`, the local progress, a function of the
  *   scroll); a down gesture at RL pages through the lineup's exit
- *   (`exit`) to the end of the Exit spacer, where the free part starts; a
+ *   (`exit`, from RL over the Lineup and Exit spacers, so it starts on the
+ *   move's first frame) to the end of the Exit spacer, where the free part
+ *   starts; a
  *   pack that cannot be focused keeps the row alone;
  * - a re-measure keeps the flow position P (a rotation never leaves the page
  *   off its section).
@@ -73,7 +75,7 @@ export type FlowInputFrame = FlowPagerFrame & {
    * progress, 0 at Closing and above, 1 at RL and below (the pose eases it).
    */
   handoff: number;
-  /** The lineup's exit over the Exit spacer: 0 above it, 1 at its end and below. */
+  /** The lineup's exit from RL to the Exit spacer's end: 0 at RL and above, 1 at its end and below. */
   exit: number;
   /**
    * The page has left the details downwards: the free part, or past the
@@ -161,8 +163,17 @@ export interface FlowInput {
   ): boolean;
   /** Straight to stop k (the exit end is the index after the last stop). */
   goTo(k: number, scrollY: number, now: number, ms?: number): boolean;
-  /** A key: a move, swallowed, the browser's own, or the focused view's leave. */
-  key(intent: FlowKeyIntent, scrollY: number, now: number): FlowKeyOutcome;
+  /**
+   * A key: a move, swallowed, the browser's own, or the focused view's leave.
+   * `repeat`: the key is held down; in the paged part a held paging key is
+   * swallowed (one page per press).
+   */
+  key(
+    intent: FlowKeyIntent,
+    scrollY: number,
+    now: number,
+    repeat?: boolean,
+  ): FlowKeyOutcome;
   /** `strip`: a sideways touch here belongs to what it started on. */
   touchStart(
     x: number,
@@ -262,11 +273,12 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
       entered();
       return ok;
     },
-    key(intent, scrollY, now) {
+    key(intent, scrollY, now, repeat = false) {
       arm();
       if (!table) return 'free';
       if (pager.busy()) return 'swallowed';
       if (pager.zone(scrollY) === 'free') return 'free';
+      if (repeat && intent !== 'escape') return 'swallowed';
       const s = stops();
       let k = 0;
       for (let j = 1; j < s.length; j++)
@@ -357,7 +369,7 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
         if (at.zone === 'paged') handoff = clamp01(at.p - n);
         else {
           handoff = 1;
-          exit = at.span === 'lineup' ? 0 : at.span === 'exit' ? at.t : 1;
+          exit = at.span === 'exit' ? at.t : 1;
         }
       }
       const past = at.zone === 'free' || blockAt(at.p, n + 1) > n;

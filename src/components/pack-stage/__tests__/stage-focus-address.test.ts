@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createFocusAddress } from '../stage-focus-address';
+import { FOCUS_STEP_MS, createFocusAddress } from '../stage-focus-address';
 
 type Entry = { url: string; state: unknown };
 
@@ -88,7 +88,7 @@ describe('focus address: leaving the details downwards', () => {
     expect(b.length()).toBe(1);
   });
 
-  it('coming back up into Closing replaces /slots/<id> again (no new entry)', () => {
+  it("coming back up into Closing steps forward onto the tap's entry (no new entry)", () => {
     const b = browser();
     const a = createFocusAddress(b.h, b.loc);
     a.enter('151', 'tap', '151:1');
@@ -96,9 +96,22 @@ describe('focus address: leaving the details downwards', () => {
     b.deliver();
     a.popped();
     a.show(true);
+    b.deliver();
+    expect(a.popped()).toBe(true);
+    expect(b.url()).toBe('/slots/151');
+    expect(b.index()).toBe(1);
+    expect(b.length()).toBe(2);
+  });
+
+  it('coming back up into Closing from a scrolled entry replaces /slots/<id> again', () => {
+    const b = browser();
+    const a = createFocusAddress(b.h, b.loc);
+    a.enter('151', 'scroll', '151:1');
+    a.show(false);
+    a.show(true);
     expect(b.url()).toBe('/slots/151');
     expect(b.index()).toBe(0);
-    expect(b.length()).toBe(2);
+    expect(b.length()).toBe(1);
   });
 
   it('down then up before the step back has landed: the address ends on the pack', () => {
@@ -110,8 +123,11 @@ describe('focus address: leaving the details downwards', () => {
     expect(b.url()).toBe('/slots/151');
     b.deliver();
     expect(a.popped()).toBe(true);
+    // landed on the row: one step forward onto the pack's entry again
+    b.deliver();
+    expect(a.popped()).toBe(true);
     expect(b.url()).toBe('/slots/151');
-    expect(b.index()).toBe(0);
+    expect(b.index()).toBe(1);
   });
 
   it('a lap (down, up, down, up, then the row) never grows the history', () => {
@@ -192,5 +208,298 @@ describe('focus address: popstate', () => {
     b.deliver();
     expect(a.popped()).toBe(false);
     expect(a.onPack()).toBe(false);
+  });
+});
+
+describe('focus address: Back then Forward during the leave (review 1)', () => {
+  it('the entry Forward brought back is reported as strayed once the focus has ended', () => {
+    const b = browser('/elsewhere');
+    b.h.pushState(null, '', '/home-preview');
+    const a = createFocusAddress(b.h, b.loc);
+    a.enter('151', 'tap', '151:1');
+    // browser Back: the page starts its leave and forgets the entry
+    b.h.back();
+    b.deliver();
+    expect(a.popped()).toBe(false);
+    a.forget();
+    // Forward during the leave brings the pack's entry back
+    b.h.forward();
+    b.deliver();
+    expect(a.popped()).toBe(false);
+    // the leave lands at the row
+    a.end();
+    expect(b.url()).toBe('/slots/151');
+    expect(a.strayed()).toBe(true);
+    // the page resumes that entry (a new focus), and its end steps back
+    a.enter('151', 'resume', '151:1');
+    expect(a.strayed()).toBe(false);
+    a.end();
+    b.deliver();
+    expect(a.popped()).toBe(true);
+    expect(b.url()).toBe('/home-preview');
+    expect(b.index()).toBe(1);
+  });
+
+  it('an ordinary end is never strayed (its step back is pending, or the base path is back)', () => {
+    const b = browser();
+    const a = createFocusAddress(b.h, b.loc);
+    a.enter('151', 'tap', '151:1');
+    a.end();
+    expect(a.strayed()).toBe(false);
+    b.deliver();
+    a.popped();
+    expect(a.strayed()).toBe(false);
+    const c = browser();
+    const s = createFocusAddress(c.h, c.loc);
+    s.enter('151', 'scroll', '151:2');
+    s.end();
+    expect(s.strayed()).toBe(false);
+  });
+});
+
+describe('focus address: a new focus before the step back has landed (review 2)', () => {
+  it('keeps the base path and writes once the step back lands', () => {
+    const b = browser();
+    const a = createFocusAddress(b.h, b.loc);
+    a.enter('151', 'tap', '151:1');
+    a.end(); // the leave landed: one step back, not yet arrived
+    a.enter('151', 'scroll', '151:2'); // a wheel notch focuses again
+    // nothing is written while the step back is pending
+    expect(b.url()).toBe('/slots/151');
+    expect(b.index()).toBe(1);
+    b.deliver();
+    expect(a.popped()).toBe(true);
+    // the row's own entry now shows the pack (a scroll entry: replaced)
+    expect(b.index()).toBe(0);
+    expect(b.url()).toBe('/slots/151');
+    // a lap and the end: the base path, never the pack's
+    a.show(false);
+    expect(b.url()).toBe('/home-preview');
+    a.show(true);
+    expect(b.url()).toBe('/slots/151');
+    a.end();
+    expect(b.url()).toBe('/home-preview');
+  });
+
+  it('a tap that lands before the step back pushes once it has', () => {
+    const b = browser();
+    const a = createFocusAddress(b.h, b.loc);
+    a.enter('151', 'tap', '151:1');
+    a.end();
+    a.enter('151', 'tap', '151:2');
+    expect(b.index()).toBe(1);
+    b.deliver();
+    expect(a.popped()).toBe(true);
+    expect(b.index()).toBe(1);
+    expect(b.url()).toBe('/slots/151');
+    a.end();
+    b.deliver();
+    expect(a.popped()).toBe(true);
+    expect(b.url()).toBe('/home-preview');
+    expect(b.index()).toBe(0);
+  });
+
+  it('a new focus left again before the step back lands writes nothing', () => {
+    const b = browser();
+    const a = createFocusAddress(b.h, b.loc);
+    a.enter('151', 'tap', '151:1');
+    a.end();
+    a.enter('151', 'scroll', '151:2');
+    a.show(false);
+    b.deliver();
+    expect(a.popped()).toBe(true);
+    expect(b.url()).toBe('/home-preview');
+    expect(b.index()).toBe(0);
+  });
+});
+
+describe('focus address: Back after a lap still unfocuses (review 6)', () => {
+  it('coming back up steps forward onto the pushed entry instead of replacing the row', () => {
+    const b = browser('/elsewhere');
+    b.h.pushState(null, '', '/home-preview');
+    const a = createFocusAddress(b.h, b.loc);
+    a.enter('151', 'tap', '151:1');
+    a.show(false);
+    b.deliver();
+    expect(a.popped()).toBe(true);
+    expect(b.index()).toBe(1);
+    a.show(true);
+    b.deliver();
+    expect(a.popped()).toBe(true);
+    expect(b.url()).toBe('/slots/151');
+    expect(b.index()).toBe(2);
+    expect(b.length()).toBe(3);
+    // browser Back from here lands on the row, not before the page
+    b.h.back();
+    b.deliver();
+    expect(a.popped()).toBe(false);
+    expect(b.url()).toBe('/home-preview');
+  });
+
+  it('down again before the step forward lands: the address ends on the base path', () => {
+    const b = browser();
+    const a = createFocusAddress(b.h, b.loc);
+    a.enter('151', 'tap', '151:1');
+    a.show(false);
+    b.deliver();
+    a.popped();
+    a.show(true); // forward pending
+    a.show(false);
+    b.deliver();
+    expect(a.popped()).toBe(true);
+    // landed on the pack: stepped back again
+    b.deliver();
+    expect(a.popped()).toBe(true);
+    expect(b.url()).toBe('/home-preview');
+    expect(b.index()).toBe(0);
+  });
+
+  it('the end while the step forward is pending: the address ends on the base path', () => {
+    const b = browser();
+    const a = createFocusAddress(b.h, b.loc);
+    a.enter('151', 'tap', '151:1');
+    a.show(false);
+    b.deliver();
+    a.popped();
+    a.show(true);
+    a.end();
+    expect(a.entry()).toBeNull();
+    b.deliver();
+    expect(a.popped()).toBe(true);
+    b.deliver();
+    expect(a.popped()).toBe(true);
+    expect(b.url()).toBe('/home-preview');
+    expect(b.index()).toBe(0);
+  });
+
+  it('a pop that is not ours in between: replaces instead (the forward entry is not known)', () => {
+    const b = browser();
+    const a = createFocusAddress(b.h, b.loc);
+    a.enter('151', 'tap', '151:1');
+    a.show(false);
+    b.deliver();
+    a.popped();
+    // the visitor goes Forward and Back themselves
+    b.h.forward();
+    b.deliver();
+    expect(a.popped()).toBe(false);
+    a.show(false);
+    b.deliver();
+    a.popped();
+    b.h.pushState(null, '', '/home-preview?x=1'); // something pushed: the forward entry is gone
+    b.h.back();
+    b.deliver();
+    expect(a.popped()).toBe(false);
+    a.show(true);
+    // replaced at once: no step forward that could never arrive
+    expect(b.url()).toBe('/slots/151');
+    expect(b.length()).toBe(2);
+  });
+
+  it('after a forget or in a new document nothing is stepped forward', () => {
+    const b = browser();
+    const a = createFocusAddress(b.h, b.loc);
+    a.enter('151', 'tap', '151:1');
+    a.show(false);
+    b.deliver();
+    a.popped();
+    const r = createFocusAddress(b.h, b.loc);
+    r.enter('151', 'tap', '151:2');
+    // the new document's own entry: pushed fresh, no forward step
+    expect(b.index()).toBe(1);
+    expect(b.length()).toBe(2);
+    r.forget();
+    r.show(true);
+    expect(b.index()).toBe(1);
+  });
+});
+
+describe('focus address: a step forward that never lands', () => {
+  it('another script pushed meanwhile (no popstate): after the time limit the address is replaced instead', () => {
+    const b = browser();
+    const timers: (() => void)[] = [];
+    const a = createFocusAddress(b.h, b.loc, (_ms, fn) => {
+      timers.push(fn);
+      return () => {};
+    });
+    a.enter('151', 'tap', '151:1');
+    a.show(false);
+    b.deliver();
+    a.popped();
+    // something pushes an entry of its own: the forward entry is gone
+    b.h.pushState({ other: true }, '', '/home-preview');
+    a.show(true); // a step forward is asked for; it can never arrive
+    b.deliver();
+    expect(b.url()).toBe('/home-preview');
+    // the time limit passes: the pack's address is written in place
+    timers.at(-1)!();
+    expect(b.url()).toBe('/slots/151');
+    // the address keeps working: down again replaces the base path back
+    a.show(false);
+    expect(b.url()).toBe('/home-preview');
+    // and the visitor's own Back is never taken for ours
+    b.h.back();
+    b.deliver();
+    expect(a.popped()).toBe(false);
+  });
+
+  it('a step forward that lands in time disarms the time limit', () => {
+    const b = browser();
+    const timers: { fn: () => void; off: boolean }[] = [];
+    const a = createFocusAddress(b.h, b.loc, (ms, fn) => {
+      expect(ms).toBe(FOCUS_STEP_MS);
+      const t = { fn, off: false };
+      timers.push(t);
+      return () => {
+        t.off = true;
+      };
+    });
+    a.enter('151', 'tap', '151:1');
+    a.show(false);
+    b.deliver();
+    a.popped();
+    a.show(true);
+    b.deliver();
+    expect(a.popped()).toBe(true);
+    expect(timers.at(-1)!.off).toBe(true);
+    expect(b.index()).toBe(1);
+  });
+});
+
+describe('focus address: guards', () => {
+  it('a cleanup after a link navigation never steps back off the new page', () => {
+    const b = browser();
+    const a = createFocusAddress(b.h, b.loc);
+    a.enter('151', 'tap', '151:1');
+    b.h.pushState(null, '', '/about'); // a link opened another page
+    a.end();
+    b.deliver();
+    expect(b.url()).toBe('/about');
+    expect(b.length()).toBe(3);
+  });
+
+  it('an entry at the pack path that is not ours is replaced, never stepped back', () => {
+    const b = browser();
+    const a = createFocusAddress(b.h, b.loc);
+    a.enter('151', 'tap', '151:1');
+    b.h.replaceState({ __flow: 'other', __flowPushed: true }, '', '/slots/151');
+    a.show(false);
+    b.deliver();
+    expect(b.url()).toBe('/home-preview');
+    expect(b.index()).toBe(1);
+  });
+
+  it('after browser Back the forgotten focus writes nothing more', () => {
+    const b = browser();
+    const a = createFocusAddress(b.h, b.loc);
+    a.enter('151', 'tap', '151:1');
+    b.h.back();
+    b.deliver();
+    a.popped();
+    a.forget();
+    a.show(false);
+    a.show(true);
+    expect(b.url()).toBe('/home-preview');
+    expect(b.length()).toBe(2);
   });
 });

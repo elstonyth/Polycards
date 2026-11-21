@@ -95,6 +95,27 @@
   visibility: hidden;
 }
 
+/* The site's floating chips (the free pack, Telegram) over the flow: hidden
+   from Closing through the hand-off, the lineup and its exit (the address is
+   the pack's at the stops, which keeps them off there already), and faded
+   back in once the free part starts. Browsers without :has() show them. */
+:global(body):has(.flow[data-flow-on]) :global([data-testid='free-pack-badge']),
+:global(body):has(.flow[data-flow-on]) :global([data-telegram-banner]) {
+  transition-property: background-color, transform, opacity, visibility;
+  transition-duration: 150ms, 150ms, 0.35s, 0s;
+  transition-timing-function: ease-out;
+}
+
+:global(body):has(.spinWrap[data-focus-on]):not(:has(.flow[data-flow-free]))
+  :global([data-testid='free-pack-badge']),
+:global(body):has(.spinWrap[data-focus-on]):not(:has(.flow[data-flow-free]))
+  :global([data-telegram-banner]) {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: none;
+}
+
 /* The row's own UI leaves with the tap's move (its first 40%, as the
    neighbours do), and comes back over 0.45 s once the pack has landed
    (data-focus-off, set for that while by the focus chunk). */

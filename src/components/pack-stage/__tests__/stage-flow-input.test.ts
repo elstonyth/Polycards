@@ -8,7 +8,7 @@ import {
 } from '../stage-flow-input';
 import { focusStops } from '../stage-focus-keys';
 
-// panel 800: S = 1000; rests 1000..6000, RL 7000, edge 7500, exit 8000 to 9000
+// panel 800: S = 1000; rests 1000..6000, RL 7000, edge 7500, exit 7000 to 9000
 const GEO = { top: 0, panel: 800, viewport: 800 };
 const SLEEVE = focusStops('sleeve');
 
@@ -186,16 +186,15 @@ describe('flow input: Closing to the free part', () => {
     let y = run(p.input, p.y, 2016, 3600);
     expect(y).toBe(7000);
     p.input.wheel(100, 0, false, y, 3800);
-    // the lineup holds through its own section, then the exit plays
-    const hold = p.input.frame(y, 3850);
-    expect(hold.handoff).toBe(1);
-    expect(hold.exit).toBe(0);
-    y = run(p.input, y, 3866, 4400);
+    // the exit starts on the move's first frame, over both sections
+    const first = p.input.frame(y, 3816);
+    expect(first.handoff).toBe(1);
+    expect(first.scrollTo).toBeGreaterThan(7000);
+    expect(first.exit).toBeGreaterThan(0);
+    expect(first.exit).toBeCloseTo(((first.scrollTo ?? y) - 7000) / 2000, 6);
+    y = run(p.input, first.scrollTo ?? y, 3832, 4400);
     const mid = p.input.frame(y, 4416);
-    expect(mid.exit).toBeCloseTo(
-      Math.max(0, ((mid.scrollTo ?? y) - 8000) / 1000),
-      6,
-    );
+    expect(mid.exit).toBeCloseTo(((mid.scrollTo ?? y) - 7000) / 2000, 6);
     y = run(p.input, mid.scrollTo ?? y, 4432, 5400);
     expect(y).toBe(9000);
     const free = p.input.frame(y, 5416);
@@ -362,6 +361,50 @@ describe('flow input: keys (plan 2.10)', () => {
     const p = atStop(6);
     for (const k of ['next', 'prev', 'first', 'last', 'escape'] as const)
       expect(p.input.key(k, 9000, 2000)).toBe('free');
+  });
+});
+
+describe('flow input: End at the row with a pack that cannot be focused', () => {
+  it('is swallowed, nothing is entered and nothing moves', () => {
+    const p = page(null);
+    expect(p.input.key('last', 0, 0)).toBe('swallowed');
+    expect(p.calls).toEqual([]);
+    expect(p.input.busy()).toBe(false);
+    expect(run(p.input, 0, 16, 2000)).toBe(0);
+  });
+});
+
+describe('flow input: a held key (review finding 7: one page per press)', () => {
+  /** Focused and resting on Closing (6000). */
+  function atClosing() {
+    const p = page();
+    p.input.wheel(100, 0, false, 0, 0);
+    run(p.input, 0, 16, 1600);
+    const y = 6000;
+    p.input.frame(y, 1700);
+    p.input.frame(y, 1716);
+    return { ...p, y };
+  }
+
+  it('a repeated paging key moves nothing in the paged part, and is still cancelled there', () => {
+    const p = atClosing();
+    for (const k of ['next', 'prev', 'first', 'last'] as const)
+      expect(p.input.key(k, p.y, 2000, true), k).toBe('swallowed');
+    expect(p.input.busy()).toBe(false);
+    // at the row too: a held key never enters
+    const r = page();
+    expect(r.input.key('next', 0, 0, true)).toBe('swallowed');
+    expect(r.input.busy()).toBe(false);
+  });
+
+  it('in the free part a repeated key is the browser own', () => {
+    const p = atClosing();
+    expect(p.input.key('next', 9000, 2000, true)).toBe('free');
+  });
+
+  it('the first press still pages', () => {
+    const p = atClosing();
+    expect(p.input.key('next', p.y, 2000, false)).toBe('moved');
   });
 });
 

@@ -41,10 +41,12 @@ const table = (g: Partial<FlowGeometry> = {}): FlowTable => {
 };
 
 describe('stage flow: the section table', () => {
-  it('a section is 1.25 panels, the same length as the lineup exit', () => {
+  it('a section is 1.25 panels (CIAO_EXIT_PANELS); the lineup exit runs over two', () => {
     expect(FLOW_SECTION_PANELS).toBe(1.25);
     expect(FLOW_SECTION_PANELS).toBe(CIAO_EXIT_PANELS);
     expect(table().section).toBe(1000);
+    const t = table();
+    expect(t.exitEnd - t.exitStart).toBe(2 * t.section);
   });
 
   it('sleeve: the row, six stops one section apart, the lineup, the exit', () => {
@@ -52,8 +54,9 @@ describe('stage flow: the section table', () => {
     expect(t.r0).toBe(0);
     expect(t.rests).toEqual([1000, 2000, 3000, 4000, 5000, 6000]);
     expect(t.rl).toBe(7000);
-    // the Lineup spacer (RL to RL + S), then the Exit spacer (to RL + 2 S)
-    expect(t.exitStart).toBe(8000);
+    // the exit starts at the lineup rest and plays over the Lineup spacer
+    // (RL to RL + S) and the Exit spacer (to RL + 2 S)
+    expect(t.exitStart).toBe(7000);
     expect(t.exitEnd).toBe(9000);
     expect(t.edge).toBe(7500);
     expect(flowStops(t)).toEqual([0, 1000, 2000, 3000, 4000, 5000, 6000, 7000]);
@@ -67,8 +70,9 @@ describe('stage flow: the section table', () => {
 
   it('a measured Exit spacer sets the exit; the computed one is only the fallback', () => {
     const m = table({ exit: { top: 8100, height: 1100 } });
-    expect(m.exitStart).toBe(8100);
+    expect(m.exitStart).toBe(7000);
     expect(m.exitEnd).toBe(9200);
+    expect(flowAt(8100, m)).toEqual({ zone: 'free', span: 'exit', t: 0.5 });
     expect(m.rise!.start).toBe(10720);
     // the free part starts at the measured end
     expect(flowAt(9200, m)).toEqual({ zone: 'free', span: 'exit', t: 1 });
@@ -84,7 +88,7 @@ describe('stage flow: the section table', () => {
     ]);
     // a spacer with no height yet (the flag is off): the fallback
     const z = table({ exit: { top: 8100, height: 0 } });
-    expect([z.exitStart, z.exitEnd]).toEqual([8000, 9000]);
+    expect([z.exitStart, z.exitEnd]).toEqual([7000, 9000]);
     // never above the lineup rest
     const up = table({ exit: { top: 6000, height: 500 } });
     expect(up.exitStart).toBe(7000);
@@ -182,10 +186,13 @@ describe('stage flow: the flow position P', () => {
   });
 
   it('free: the named spans with their progress', () => {
-    // the lineup holds through its own section, then the exit plays
-    expect(flowAt(7500, t)).toEqual({ zone: 'free', span: 'lineup', t: 0.5 });
-    expect(flowAt(8000, t)).toEqual({ zone: 'free', span: 'lineup', t: 1 });
-    expect(flowAt(8500, t)).toEqual({ zone: 'free', span: 'exit', t: 0.5 });
+    // the exit starts at the lineup rest and plays over both sections
+    expect(flowAt(7001, t).zone === 'free' && flowAt(7001, t)).toMatchObject({
+      span: 'exit',
+    });
+    expect(flowAt(7500, t)).toEqual({ zone: 'free', span: 'exit', t: 0.25 });
+    expect(flowAt(8000, t)).toEqual({ zone: 'free', span: 'exit', t: 0.5 });
+    expect(flowAt(8500, t)).toEqual({ zone: 'free', span: 'exit', t: 0.75 });
     expect(flowAt(9000, t)).toEqual({ zone: 'free', span: 'exit', t: 1 });
     const free = flowAt(9860, t);
     expect(free.zone === 'free' && free.span).toBe('free');
@@ -228,7 +235,6 @@ describe('stage flow: the flow position P', () => {
       { zone: 'paged', p: 3 },
       { zone: 'paged', p: 4.4 },
       { zone: 'paged', p: 7 },
-      { zone: 'free', span: 'lineup', t: 0.4 },
       { zone: 'free', span: 'exit', t: 0.3 },
       { zone: 'free', span: 'free', t: 0.5 },
       { zone: 'free', span: 'rise', t: 0.25 },
@@ -371,13 +377,13 @@ describe('stage flow: term weights', () => {
 
   it('free spans: exit on the lineup term, nothing drawn in free, then rise and return', () => {
     expect(flowTerms(flowAt(7600, t), 6)).toMatchObject({
-      exit: 0,
+      exit: 0.3,
       handoff: 1,
       spread: 1,
       weights: { lineup: 1 },
     });
     expect(flowTerms(flowAt(8600, t), 6)).toMatchObject({
-      exit: 0.6,
+      exit: 0.8,
       weights: { lineup: 1 },
     });
     expect(flowTerms(flowAt(9500, t), 6).weights.empty).toBe(1);
