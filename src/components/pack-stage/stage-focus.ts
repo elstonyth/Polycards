@@ -22,8 +22,6 @@ import { smoothstep } from './stage-spin-math';
 
 const DEG = Math.PI / 180;
 
-/** The tap into the Front stop, and the return to the row (Ciao's 1.5 s page). */
-export const FOCUS_MS = 1500;
 /** The active block fades before "All packs" jumps back to the Front stop. */
 export const LEAVE_FADE_MS = 250;
 /** A back uploaded after the pack reached its stop turns over this long. */

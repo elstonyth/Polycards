@@ -188,18 +188,6 @@ export function passBand(phi: number): number {
   return (base + out) * DEG + 0;
 }
 
-/** Own-axis turn angle before the turn weight: passBand(-K d' + 2 pi ce). */
-export function spinTheta(
-  s: number,
-  i: number,
-  track: number,
-  count: number,
-  desktop: boolean,
-): number {
-  const dp = spinRowPosition(s, i, track, count, desktop);
-  return passBand(-K * dp + TAU * spinPhase(s));
-}
-
 /** Row step in host px: GAP * S * artW. */
 export function spinRowStep(
   l: Readonly<StageLayout>,
@@ -737,36 +725,12 @@ export function spinOpacity(
   );
 }
 
-/** Whether pack i is drawn at all at this spin (its turn weight may flip only when it is not). */
-export function spinInView(
-  st: Readonly<StageState>,
-  i: number,
-  desktop: boolean,
-  count: number,
-): boolean {
-  return spinOpacity(st, i, desktop, count) > 0;
-}
-
 /**
  * `data-spinning` toggle (10.3): on above 0.02, off below 0.015 (hysteresis
  * 0.005), so a follow settling near the edge never flickers.
  */
 export function spinningFlag(prev: boolean, s: number): boolean {
   return prev ? s > SPIN_LOCK - SPIN_LOCK_HYSTERESIS : s >= SPIN_LOCK;
-}
-
-/**
- * The full-or-lean switch, per tile (10.7): full only for a 3D-drawn pack
- * with `art3d`, `canTurn` and its spin back uploaded, and never under the
- * `tip` variant. Otherwise lean.
- */
-export function spinTurnTarget(t: {
-  drawn3d: boolean;
-  canTurn: boolean;
-  backReady: boolean;
-  variant: 'paged' | 'free' | 'tip';
-}): 0 | 1 {
-  return t.drawn3d && t.canTurn && t.backReady && t.variant !== 'tip' ? 1 : 0;
 }
 
 /** Turn weight tween length (10.7). */

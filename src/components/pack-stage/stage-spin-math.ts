@@ -4,8 +4,7 @@
  * so the first load, which imports that module, never carries them: only the
  * lazily loaded chunks (spin, runtime, focus) reach this one. Pure.
  */
-import type { SpinRange } from './contract';
-import { SPIN_LOCK, slotIntroLinear } from './stage-pose';
+import { slotIntroLinear } from './stage-pose';
 
 const DEG = Math.PI / 180;
 
@@ -50,56 +49,4 @@ export function dampedFollow(
  */
 export function introOpacity(intro: number, d: number): number {
   return smoothstep(0, 0.35, slotIntroLinear(intro, d));
-}
-
-/** The pin's length after the panel (Ciao: one more section of 1.25 screens per move). */
-export const SPIN_PIN_PANELS = 1.75;
-/** The exit after the pin: Ciao's camera move, scrubbed over one section. */
-export const SPIN_EXIT_PANELS = 1.25;
-/** Text over the stage changes once a move is this far (Ciao: 20% of a section). */
-export const SPIN_TEXT_AT = 0.2;
-const SPIN_TEXT_HYSTERESIS = 0.01;
-/**
- * The stage heading fades as the exit starts (in 150 ms, CSS), so it is gone
- * before the leaving row climbs through it.
- */
-export const SPIN_HEAD_AT = 0.01;
-const SPIN_LOCK_HYSTERESIS = 0.005;
-
-/**
- * The pin's scroll range (document px, whole numbers): the scrollY at which
- * the panel starts sticking, the pin's length and the exit's.
- */
-export function spinRangeOf(
-  wrapDocTop: number,
-  flowTop: number,
-  panel: number,
-): SpinRange | null {
-  if (!(panel > 0)) return null;
-  return {
-    start: Math.max(0, Math.round(wrapDocTop - flowTop)),
-    length: Math.round(SPIN_PIN_PANELS * panel),
-    exit: Math.round(SPIN_EXIT_PANELS * panel),
-  };
-}
-
-export type SpinFlags = { spinning: boolean; text: boolean; head: boolean };
-
-/** The flags the stage's CSS reads (data attributes), with hysteresis: lock, text, header. */
-export function spinFlags(
-  prev: SpinFlags,
-  spin: number,
-  exit: number,
-): SpinFlags {
-  return {
-    spinning: prev.spinning
-      ? spin > SPIN_LOCK - SPIN_LOCK_HYSTERESIS
-      : spin >= SPIN_LOCK,
-    text: prev.text
-      ? spin > SPIN_TEXT_AT - SPIN_TEXT_HYSTERESIS
-      : spin >= SPIN_TEXT_AT,
-    head: prev.head
-      ? exit > SPIN_HEAD_AT - SPIN_LOCK_HYSTERESIS
-      : exit >= SPIN_HEAD_AT,
-  };
 }

@@ -16,17 +16,6 @@ import type { PackBackDetails } from '@/components/pack-3d/pack-print';
  *  `pullOdds`; the existing parser's output, never derived). */
 export type FlowPullOdds = PackPullOdds;
 
-/** One chapter stop, in page scroll pixels (section 2 "Mapping"): the scrollY
- *  at which that chapter rests. Same shape as the contract's `StageStop`. */
-export type FlowStopKind = 'back' | 'tier' | 'odds';
-export type FlowStop = { y: number; kind: FlowStopKind };
-
-/** What the stage binds to (`stage3d.bindScroll(source)`). Same shape as the
- *  contract's `StageScrollSource`. */
-export interface FlowScrollSource {
-  stops(): readonly FlowStop[] | null;
-}
-
 /** 'sleeve' for a card pack, 'capsule' for a ticket capsule (isTicketPack). */
 export type FlowPackShape = 'sleeve' | 'capsule';
 

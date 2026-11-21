@@ -28,11 +28,6 @@ export function worldPerPixel(hostH: number): number {
   return hostH > 0 ? (2 * CAMERA_DISTANCE * HALF_FOV_TAN) / hostH : 0;
 }
 
-/** The CSS `perspective` (px) that matches the camera: D / k. */
-export function cssPerspective(hostH: number): number {
-  return hostH / (2 * HALF_FOV_TAN);
-}
-
 export function dprCap(tier: 'full' | 'lite'): number {
   return tier === 'lite' ? DPR_CAP_LITE : DPR_CAP_FULL;
 }
