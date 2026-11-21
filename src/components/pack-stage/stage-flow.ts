@@ -390,6 +390,13 @@ export function flowTerms(at: FlowAt, n: number): FlowTerms {
  */
 export const BACK_RELEASE_AT = 0.5;
 
+/**
+ * The focused back is printed once the pack has rested at a stop this long:
+ * the print (a 60-90 ms canvas job and upload) then never lands on a move's
+ * last frame, nor between the gestures of a quick run through the stops.
+ */
+export const BACK_PRINT_REST_MS = 300;
+
 /** Whether the focused pack's back is wanted at hand-off progress x (0 at Closing). */
 export function focusBackWanted(x: number): boolean {
   return !(x >= BACK_RELEASE_AT);

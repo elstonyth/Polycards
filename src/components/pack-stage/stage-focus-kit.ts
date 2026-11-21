@@ -32,7 +32,7 @@ import type {
   StageState,
 } from './contract';
 import { FOCUS_TERM } from './stage-compose';
-import { focusBackWanted } from './stage-flow';
+import { BACK_PRINT_REST_MS, focusBackWanted } from './stage-flow';
 import { spotAt } from './stage-focus';
 import {
   focusKeys,
@@ -273,6 +273,8 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
    * and an upload) must never land inside the tap's zoom.
    */
   let settled = false;
+  /** Since when the pack has rested at a stop with its back not yet let through (null: not resting). */
+  let restingSince: number | null = null;
   const publish = () => {
     if (!decl) return;
     d.state.focusOn =
@@ -558,8 +560,11 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
         settled = false;
         publish();
       }
-      if (f.idle && !settled && f.focus >= 1 - 1e-3 && !(handoff > 0)) {
+      const resting = f.idle && f.focus >= 1 - 1e-3 && !(handoff > 0);
+      restingSince = resting && !settled ? (restingSince ?? t) : null;
+      if (restingSince !== null && t - restingSince >= BACK_PRINT_REST_MS) {
         settled = true;
+        restingSince = null;
         publish();
       }
       if (entryCover && f.idle && f.focus >= 1 - 1e-3) {
@@ -579,7 +584,8 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
           }
         }
       }
-      return f.idle && !leaving;
+      // awake while the back waits out its rest
+      return f.idle && !leaving && restingSince === null;
     },
     resume: (instant) => resumeEntry(instant),
     debug: () => ({
