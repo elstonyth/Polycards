@@ -224,7 +224,8 @@ export interface FlowInput {
     y: number,
     scrollY: number,
     now: number,
-    o?: { strip?: boolean; at?: number },
+    at: number,
+    o?: { strip?: boolean },
   ): void;
   /** True: the caller cancels the touchmove. */
   touchMove(
@@ -232,14 +233,14 @@ export interface FlowInput {
     y: number,
     scrollY: number,
     now: number,
-    at?: number,
+    at: number,
   ): boolean;
   /**
    * The scroll the last free-part touchmove asks for (the page follows the
    * finger): the caller writes it at once. Read once; null: nothing to write.
    */
   follow(): number | null;
-  touchEnd(scrollY: number, now: number, at?: number): void;
+  touchEnd(scrollY: number, now: number, at: number): void;
   /** The touch's tracking is dropped: nothing pages, the snap and the idle report come back. */
   touchCancel(): void;
   /** A mouse press (desktop); true: the lineup's drag may follow (the caller cancels it). */
@@ -483,13 +484,13 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
       entered();
       return r;
     },
-    touchStart(x, y, scrollY, now, o) {
+    touchStart(x, y, scrollY, now, at, o) {
       arm();
       followTo = null;
       // a finger that lands during a move (one crossing the paged edge
       // included) is ignored by the pager: the move always lands
       lineTouch = lineLive(scrollY) ? { x0: x } : null;
-      pager.touchStart(x, y, scrollY, now, o);
+      pager.touchStart(x, y, scrollY, now, at, o);
     },
     touchMove(x, y, scrollY, now, at) {
       const r = pager.touchMove(x, y, scrollY, now, at);

@@ -41,14 +41,17 @@ export type TouchGate = {
   cancel(): void;
 };
 
+/** How far an event time may run ahead of its handling and still fit: Safari rounds timeStamp to whole ms. */
+const EVENT_CLOCK_SLACK_MS = 1;
+
 /**
  * Whether a touch event's own time can time the release speed: on
  * performance.now()'s clock, which the frame loop and `now` use (every
- * current browser), so never in the future. An old browser's epoch time is
- * not: that touch is timed by when it was handled instead.
+ * current browser), so positive and never in the future. An old browser's
+ * epoch time is not: that touch is timed by when it was handled instead.
  */
-export function eventClockFits(at: number | undefined, now: number): boolean {
-  return at !== undefined && at > 0 && at <= now + 1;
+function eventClockFits(at: number | undefined, now: number): boolean {
+  return at !== undefined && at > 0 && at <= now + EVENT_CLOCK_SLACK_MS;
 }
 
 /**
@@ -75,7 +78,9 @@ export function createTouchGate(
       }
       touching = true;
       eventClock = eventClockFits(o?.at, now);
-      input.touchStart(x, y, scrollY, now, { ...o, at: timeOf(o?.at, now) });
+      input.touchStart(x, y, scrollY, now, timeOf(o?.at, now), {
+        strip: o?.strip,
+      });
       return true;
     },
     move(fingers, x, y, scrollY, now, at) {

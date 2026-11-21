@@ -1,15 +1,18 @@
 // qa-home-flick.mjs: a finger flick in the free part of /home-preview (phone).
 // Replaces the old "flick-across-last-wraps-once" check, which released in the
 // same task as the last move and so never saw a frame between them.
-//   Claim 1: released one frame after the last move, the page glides on, as
-//            far as the finger's speed says: first to last over the moves made
-//            in the 100 ms before the lift, timed by the touch events' own
-//            times (not when the page handled them).
+//   Claim 1: three 32 px moves about 16 ms apart and the lift right behind
+//            them, all sent under a 400 ms long task (several times the
+//            gesture, so the two clocks differ) and handled in a burst:
+//            the glide matches the finger's speed by the touch events' own
+//            times, and is far from what the times they were handled at
+//            would give (the sample is invalid unless the two differ).
 //   Claim 2: started close above Last's top, the glide crosses it and the page
 //            wraps once, ending at the row.
 //   Claim 3: a finger held still 200 ms before lifting does not glide.
-// CDP touch moves arrive every 62 to 94 ms in headless Chrome, so each flick
-// is three moves of 150 px (about 27 to 40 px per 60 Hz frame).
+// Claims 2 and 3: CDP touch moves awaited one by one arrive every 62 to 94 ms
+// in headless Chrome, so each flick is three moves of 150 px (about 27 to 40
+// px per 60 Hz frame).
 // Run from a worktree root, through the queue (timing: exclusive):
 //   node <tools>/qa-with-lock.mjs --exclusive --runner=<lane> -- node scripts/qa-home-flick.mjs --base=URL
 import * as qa from './lib/qa-kit.mjs';
@@ -19,7 +22,15 @@ qa.deadline(170000);
 const FRAME_MS = 1000 / 60;
 const POWER = 1.7;
 const HOLD_MS = 100;
+const BURST_MS = 4;
 const MOVES = 3;
+const BURST_MOVES = 3;
+const BURST_STEP = 32;
+const BURST_GAP_MS = 16;
+const LONG_TASK_MS = 400;
+/** The event clock fits when an event's time is at most this ahead of its handling (the gate's slack). */
+const CLOCK_SLACK_MS = 1;
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const STEP = 150;
 const X = 200;
 const Y0 = 700;
@@ -81,26 +92,58 @@ async function flick(s, holdMs = 0, liftNow = false) {
 }
 
 /**
- * The glide the finger asked for, from the touch events' own times: none when
- * the last move was made more than 100 ms before the lift; else first to last
- * over the moves within 100 ms of the last one (the last two when they are
- * sparser). `late`: how long after its own time the lift was handled.
+ * Claim 1's flick: the touchstart, then a 400 ms long task on the page; under
+ * it three 32 px moves about 16 ms apart and the lift right behind the last,
+ * sent without waiting for the page (it is busy), so it handles them in a
+ * burst. The task outlasts the gesture several times over: a gesture as long
+ * as the task reads the same speed on both clocks.
  */
-function expected(log) {
+async function burstFlick(s) {
+  await send(s, 'touchStart', [[X, Y0]]);
+  const busy = s.page.evaluate((ms) => {
+    const t = performance.now();
+    while (performance.now() - t < ms);
+  }, LONG_TASK_MS);
+  await wait(5);
+  const sent = [];
+  for (let i = 1; i <= BURST_MOVES; i++) {
+    if (i > 1) await wait(BURST_GAP_MS);
+    sent.push(send(s, 'touchMove', [[X, Y0 - BURST_STEP * i]]));
+  }
+  sent.push(send(s, 'touchEnd', []));
+  await Promise.all([busy, ...sent]);
+}
+
+/**
+ * The glide the pager's rule gives on one clock of the log (`col` 0: the
+ * touch events' own times; 1: when the page handled them). Mirrors
+ * releaseSpeed() and glideDistance() in
+ * src/components/pack-stage/stage-flow-pager.ts: keep the two in step. None
+ * when the last move was made more than 100 ms before the lift; else first
+ * to last over the moves within 100 ms of the last one (the last two when
+ * they are sparser); moves spanning under 4 ms (a burst) are measured from
+ * the newest move at least 4 ms before the last (none: no glide). `late`:
+ * how long after its own time the lift was handled.
+ */
+function expected(log, col = 0) {
   const m = log.moves;
-  const at = log.end[0];
-  const late = log.end[1] - at;
+  const at = log.end[col];
+  const late = log.end[1] - log.end[0];
   const b = m.at(-1);
-  const gap = b ? at - b[0] : null;
-  const recent = b ? m.filter((s) => b[0] - s[0] <= HOLD_MS) : [];
-  const a = recent.length >= 2 ? recent[0] : m.at(-2);
-  if (!a || !b || b[0] <= a[0] || gap > HOLD_MS)
+  const gap = b ? at - b[col] : null;
+  const recent = b ? m.filter((s) => b[col] - s[col] <= HOLD_MS) : [];
+  let a = recent.length >= 2 ? recent[0] : m.at(-2);
+  if (a && b && b[col] - a[col] < BURST_MS)
+    a = m.slice(0, -1).findLast((s) => b[col] - s[col] >= BURST_MS);
+  if (!a || !b || gap > HOLD_MS)
     return { glide: 0, gap, span: null, v: null, late, n: recent.length };
-  const span = b[0] - a[0];
+  const span = b[col] - a[col];
   const v = ((b[2] - a[2]) * FRAME_MS) / span;
   const glide = Math.sign(v) * Math.abs(v) ** POWER;
   return { glide, gap, span, v, late, n: recent.length };
 }
+/** The flick check's tolerance around an expected glide. */
+const tolerance = (glide) => 0.15 * Math.abs(glide) + 4;
 const r1 = (n) => (n === null ? 'null' : Math.round(n * 10) / 10);
 
 const browser = await qa.launch();
@@ -124,47 +167,64 @@ try {
       await s.page.waitForTimeout(600);
     };
 
-    // Claim 1: a glide after one frame between the last move and the release
+    // Claim 1: moves handled in a burst glide by the events' own times
     const mid = Math.round(t.exitEnd + 200);
     await place(mid);
     await arm(s);
-    await flick(s);
+    await burstFlick(s);
     await s.settle({ quiet: 400, timeout: 6000 });
     let log = await read(s);
     let e = expected(log);
+    const h = expected(log, 1);
     let end = await s.page.evaluate(() => scrollY);
     let glide = end - log.end[2];
-    await s.capture('flick from ' + mid + ': glide ' + Math.round(glide));
-    // the page falls back to its handling clock for event times that do not fit it
+    await s.capture('burst flick from ' + mid + ': glide ' + Math.round(glide));
+    const tol = tolerance(e.glide);
+    // the page falls back to its handling clock for event times that do not
+    // fit it; the sample counts only when the two clocks ask different glides
+    const clockFits =
+      log.end[0] > 0 && log.end[0] <= log.end[1] + CLOCK_SLACK_MS;
     const valid1 =
-      e.gap !== null && e.gap < HOLD_MS && e.late >= -1 && e.late < 1000;
+      clockFits &&
+      e.gap !== null &&
+      e.gap < HOLD_MS &&
+      e.glide > 100 &&
+      Math.abs(e.glide - h.glide) > 2 * tol;
+    const times = log.moves
+      .map((m) => r1(m[0]) + '/+' + r1(m[1] - m[0]))
+      .join(', ');
     check(
-      'flick-glides-after-a-frame [phone]',
+      'burst-flick-glides-by-event-times [phone]',
       valid1 &&
-        e.glide > 100 &&
-        Math.abs(glide - e.glide) <= 0.15 * e.glide + 4,
+        Math.abs(glide - e.glide) <= tol &&
+        Math.abs(glide - h.glide) > tol,
       (valid1
         ? ''
-        : 'INVALID SAMPLE (release ' +
-          r1(e.gap) +
-          ' ms after the last move, handled ' +
-          r1(e.late) +
-          ' ms after it was made); ') +
-        log.moves.length +
-        ' touch events, ' +
-        e.n +
-        ' in the last 100 ms spanning ' +
-        r1(e.span) +
-        ' ms by their own times (' +
-        r1(e.v) +
-        ' px per 60 Hz frame); release ' +
-        r1(e.gap) +
-        ' ms after the last move, handled ' +
-        r1(e.late) +
-        ' ms after it was made; glide ' +
+        : 'INVALID SAMPLE (the event and handling clocks must ask glides more than ' +
+          r1(2 * tol) +
+          ' px apart, the lift under 100 ms after the last move, an event clock that fits); ') +
+        'glide ' +
         r1(glide) +
-        ' px, the finger asked for ' +
-        r1(e.glide),
+        ' px; by event times ' +
+        r1(e.glide) +
+        ' (' +
+        e.n +
+        ' events in the last 100 ms spanning ' +
+        r1(e.span) +
+        ' ms, ' +
+        r1(e.v) +
+        ' px per 60 Hz frame, lift ' +
+        r1(e.gap) +
+        ' ms after the last move), by handling times ' +
+        r1(h.glide) +
+        ' (spanning ' +
+        r1(h.span) +
+        ' ms); events made/handled +ms: ' +
+        times +
+        '; lift ' +
+        r1(log.end[0]) +
+        '/+' +
+        r1(e.late),
     );
 
     // Claim 2: close above Last's top, the glide crosses it: one wrap, to the row

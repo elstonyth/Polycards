@@ -91,49 +91,49 @@ describe('flow input: the band reached with no pack focused', () => {
 describe('flow input: touch', () => {
   it('a swipe at the row enters, and a touch during the move is ignored', () => {
     const p = page();
-    p.input.touchStart(200, 600, 0, 0);
-    expect(p.input.touchMove(200, 560, 0, 16)).toBe(true);
-    p.input.touchEnd(0, 32);
+    p.input.touchStart(200, 600, 0, 0, 0);
+    expect(p.input.touchMove(200, 560, 0, 16, 16)).toBe(true);
+    p.input.touchEnd(0, 32, 32);
     expect(p.calls).toEqual(['enter']);
     let y = run(p.input, 0, 48, 400);
     // a second swipe, upwards, mid-move
-    p.input.touchStart(200, 300, y, 416);
-    p.input.touchMove(200, 400, y, 432);
-    p.input.touchEnd(y, 448);
+    p.input.touchStart(200, 300, y, 416, 416);
+    p.input.touchMove(200, 400, y, 432, 432);
+    p.input.touchEnd(y, 448, 448);
     y = run(p.input, y, 464, 1700);
     expect(y).toBe(1000);
   });
 
   it("a sideways touch on the row at rest is the row's own", () => {
     const p = page();
-    p.input.touchStart(300, 400, 0, 0, { strip: true });
-    expect(p.input.touchMove(200, 402, 0, 16)).toBe(false);
+    p.input.touchStart(300, 400, 0, 0, 0, { strip: true });
+    expect(p.input.touchMove(200, 402, 0, 16, 16)).toBe(false);
   });
 
   it("a vertical touch in the free part is the flow's: the page follows the finger 1:1; a sideways one stays the browser's", () => {
     const p = page();
-    p.input.touchStart(200, 600, 9000, 0);
-    expect(p.input.touchMove(200, 500, 9000, 16)).toBe(true);
+    p.input.touchStart(200, 600, 9000, 0, 0);
+    expect(p.input.touchMove(200, 500, 9000, 16, 16)).toBe(true);
     expect(p.input.follow()).toBe(9100);
     expect(p.input.follow()).toBeNull(); // read once
-    p.input.touchEnd(9100, 32);
-    p.input.touchStart(200, 600, 9100, 100);
-    expect(p.input.touchMove(100, 598, 9100, 116)).toBe(false);
+    p.input.touchEnd(9100, 32, 32);
+    p.input.touchStart(200, 600, 9100, 100, 100);
+    expect(p.input.touchMove(100, 598, 9100, 116, 116)).toBe(false);
     expect(p.input.follow()).toBeNull();
   });
 
   it('a free flick glides on after the release (sign * |v|^1.7)', () => {
     const p = page();
     let y = 9000;
-    p.input.touchStart(200, 600, y, 0);
+    p.input.touchStart(200, 600, y, 0, 0);
     p.input.frame(y, 0);
     for (let i = 1; i <= 3; i++) {
-      p.input.touchMove(200, 600 - 32 * i, y, i * 16);
+      p.input.touchMove(200, 600 - 32 * i, y, i * 16, i * 16);
       y = p.input.follow() ?? y;
       p.input.frame(y, i * 16);
     }
     expect(y).toBe(9096);
-    p.input.touchEnd(y, 50);
+    p.input.touchEnd(y, 50, 50);
     const end = run(p.input, y, 64, 3000);
     expect(end).toBeGreaterThan(9096 + 300);
   });
@@ -284,9 +284,9 @@ describe('flow input: the wrap', () => {
     p.input.frame(12990, 0);
     let y = p.input.frame(13030, 16).scrollTo!;
     expect(p.input.wheel(100, 0, false, y, 100)).toBe(true);
-    p.input.touchStart(200, 600, y, 120);
-    p.input.touchMove(200, 400, y, 136);
-    p.input.touchEnd(y, 150);
+    p.input.touchStart(200, 600, y, 120, 120);
+    p.input.touchMove(200, 400, y, 136, 136);
+    p.input.touchEnd(y, 150, 150);
     expect(p.input.key('next', y, 160)).toBe('swallowed');
     y = run(p.input, y, 32, 1400);
     expect(y).toBe(0);
@@ -615,9 +615,9 @@ describe('flow input: a touch during a move across the paged edge', () => {
     // 0.9 s in: past the edge (7500), the move still running
     const y = run(p.input, 7000, 3816, 4700);
     expect(y).toBeGreaterThan(7500);
-    p.input.touchStart(200, 600, y, 4710);
-    expect(p.input.touchMove(200, 500, y, 4726)).toBe(true);
-    p.input.touchEnd(y, 4742);
+    p.input.touchStart(200, 600, y, 4710, 4710);
+    expect(p.input.touchMove(200, 500, y, 4726, 4726)).toBe(true);
+    p.input.touchEnd(y, 4742, 4742);
     expect(run(p.input, y, 4758, 5800)).toBe(9000);
   });
 
@@ -634,9 +634,9 @@ describe('flow input: a touch during a move across the paged edge', () => {
     // the first frame of the move: still below the edge
     y = run(p.input, 7560, 5804, 5804);
     expect(y).toBeGreaterThan(7500);
-    p.input.touchStart(200, 300, y, 5910);
-    expect(p.input.touchMove(200, 400, y, 5926)).toBe(true);
-    p.input.touchEnd(y, 5942);
+    p.input.touchStart(200, 300, y, 5910, 5910);
+    expect(p.input.touchMove(200, 400, y, 5926, 5926)).toBe(true);
+    p.input.touchEnd(y, 5942, 5942);
     expect(run(p.input, y, 5958, 7500)).toBe(7000);
   });
 });
@@ -648,7 +648,7 @@ describe('flow input: a touch that is dropped', () => {
     let y = run(p.input, 0, 16, 1600);
     expect(y).toBe(1000);
     // a finger lands, then its tracking is dropped (a second finger, say)
-    p.input.touchStart(200, 600, y, 1700);
+    p.input.touchStart(200, 600, y, 1700, 1700);
     p.input.touchCancel();
     // a pinch left the page off its rest
     y = 1180;
@@ -660,7 +660,7 @@ describe('flow input: a touch that is dropped', () => {
 
   it('a cancelled touch in the free part hands the frame back to the pager', () => {
     const p = page();
-    p.input.touchStart(200, 600, 9000, 0);
+    p.input.touchStart(200, 600, 9000, 0, 0);
     p.input.touchCancel();
     expect(p.input.frame(9000, 16).idle).toBe(true);
   });
@@ -671,9 +671,9 @@ describe('flow input: a down gesture refused at the row', () => {
     const p = page(null);
     expect(p.input.wheel(100, 0, false, 0, 0)).toBe(true);
     expect(p.input.refused()).toBe(true);
-    p.input.touchStart(200, 600, 0, 3000);
-    p.input.touchMove(200, 500, 0, 3016);
-    p.input.touchEnd(0, 3032);
+    p.input.touchStart(200, 600, 0, 3000, 3000);
+    p.input.touchMove(200, 500, 0, 3016, 3016);
+    p.input.touchEnd(0, 3032, 3032);
     expect(p.input.refused()).toBe(true);
     expect(p.input.key('next', 0, 6000)).toBe('swallowed');
     expect(p.input.refused()).toBe(true);
@@ -752,13 +752,14 @@ describe('flow input: the endless pick at the lineup', () => {
       },
       /** A swipe of (dx, dy) px from (200, 600) at 16 ms per move, then the release. */
       swipe(dx: number, dy: number, y: number, t0: number) {
-        input.touchStart(200, 600, y, t0);
+        input.touchStart(200, 600, y, t0, t0);
         let consumed = true;
         for (let k = 1; k <= 8; k++) {
           const c = input.touchMove(
             200 + (dx * k) / 8,
             600 + (dy * k) / 8,
             y,
+            t0 + 16 * k,
             t0 + 16 * k,
           );
           consumed = consumed && c;
@@ -770,7 +771,7 @@ describe('flow input: the endless pick at the lineup', () => {
           const f = input.frame(y, t0 + 16 * k);
           if (f.line) track = f.line.track;
         }
-        input.touchEnd(y, t0 + 16 * 17);
+        input.touchEnd(y, t0 + 16 * 17, t0 + 16 * 17);
         return consumed;
       },
     };
@@ -948,9 +949,9 @@ describe('flow input: the endless pick at the lineup', () => {
 
   it('a cancelled sideways touch still comes to rest on a pack', () => {
     const p = lineup();
-    p.input.touchStart(200, 600, 7000, 4000);
+    p.input.touchStart(200, 600, 7000, 4000, 4000);
     for (let k = 1; k <= 4; k++) {
-      p.input.touchMove(200 - 35 * k, 600, 7000, 4000 + 16 * k);
+      p.input.touchMove(200 - 35 * k, 600, 7000, 4000 + 16 * k, 4000 + 16 * k);
       p.go(7000, 4000 + 16 * k, 4000 + 16 * k);
     }
     p.input.touchCancel();

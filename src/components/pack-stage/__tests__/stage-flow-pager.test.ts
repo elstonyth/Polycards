@@ -72,16 +72,16 @@ function flick(
   let y = y0;
   let now = 0;
   let finger = 600;
-  p.touchStart(200, finger, y, now);
+  p.touchStart(200, finger, y, now, now);
   p.frame(y, now);
   while (now + dt <= ms) {
     now += dt;
     finger -= (speed * dt) / 1000;
-    y = p.touchMove(200, finger, y, now).scrollTo ?? y;
+    y = p.touchMove(200, finger, y, now, now).scrollTo ?? y;
     p.frame(y, now);
   }
   const release = y;
-  p.touchEnd(y, now);
+  p.touchEnd(y, now, now);
   const seen: [number, number][] = [];
   for (let t = now + dt; t <= now + 8000; t += dt) {
     const f = p.frame(y, t);
@@ -101,10 +101,10 @@ function swipe(
   dy: number,
   o?: { strip?: boolean },
 ) {
-  p.touchStart(200, 400, y, now, o);
-  const a = p.touchMove(200 + dx / 2, 400 + dy / 2, y, now + 16);
-  const b = p.touchMove(200 + dx, 400 + dy, y, now + 32);
-  p.touchEnd(y, now + 48);
+  p.touchStart(200, 400, y, now, now, o);
+  const a = p.touchMove(200 + dx / 2, 400 + dy / 2, y, now + 16, now + 16);
+  const b = p.touchMove(200 + dx, 400 + dy, y, now + 32, now + 32);
+  p.touchEnd(y, now + 48, now + 48);
   return [a, b];
 }
 const fromDeg = (deg: number, len = 80) => {
@@ -159,8 +159,8 @@ describe('flow pager: zone', () => {
     p.setTable(tableFor());
     p.setTable(null);
     expect(p.wheel(100, 0, false, 0, 0)).toBe(false);
-    p.touchStart(0, 0, 0, 0);
-    expect(p.touchMove(0, 50, 0, 16).consumed).toBe(false);
+    p.touchStart(0, 0, 0, 0, 0);
+    expect(p.touchMove(0, 50, 0, 16, 16).consumed).toBe(false);
     expect(p.frame(0, 0).scrollTo).toBeNull();
   });
 });
@@ -348,12 +348,12 @@ describe('flow pager: touch in the paged zone', () => {
     const p = make();
     p.wheel(100, 0, false, 1000, 0);
     let y = run(p, 1000, 0, 300);
-    p.touchStart(200, 400, y, 300); // a tap
-    p.touchEnd(y, 340);
+    p.touchStart(200, 400, y, 300, 300); // a tap
+    p.touchEnd(y, 340, 340);
     y = run(p, y, 304, 700);
-    p.touchStart(200, 400, y, 700); // a swipe the other way
-    expect(p.touchMove(200, 480, y, 716).consumed).toBe(true);
-    p.touchEnd(y, 732);
+    p.touchStart(200, 400, y, 700, 700); // a swipe the other way
+    expect(p.touchMove(200, 480, y, 716, 716).consumed).toBe(true);
+    p.touchEnd(y, 732, 732);
     y = run(p, y, 716, 1600);
     expect(y).toBe(2000);
     expect(p.busy()).toBe(false);
@@ -365,12 +365,12 @@ describe('flow pager: touch in the paged zone', () => {
     const p = make();
     p.wheel(100, 0, false, 2000, 0); // 1.5 s to 3000
     let y = run(p, 2000, 0, 1392);
-    p.touchStart(200, 400, y, 1400);
-    p.touchMove(200, 340, y, 1416);
+    p.touchStart(200, 400, y, 1400, 1400);
+    p.touchMove(200, 340, y, 1416, 1416);
     y = run(p, y, 1408, 1592);
     expect(y).toBe(3000);
-    p.touchMove(200, 300, y, 1596);
-    p.touchEnd(y, 1600);
+    p.touchMove(200, 300, y, 1596, 1596);
+    p.touchEnd(y, 1600, 1600);
     expect(run(p, y, 1600, 3500)).toBe(3000);
     expect(p.busy()).toBe(false);
   });
@@ -427,8 +427,8 @@ describe('flow pager: touch in the paged zone', () => {
 
   it('before the axis locks (under 6 px) the move is consumed', () => {
     const p = make();
-    p.touchStart(200, 400, 2000, 0);
-    expect(p.touchMove(203, 403, 2000, 16)).toMatchObject({
+    p.touchStart(200, 400, 2000, 0, 0);
+    expect(p.touchMove(203, 403, 2000, 16, 16)).toMatchObject({
       consumed: true,
       axis: null,
     });
@@ -464,7 +464,7 @@ describe('flow pager: the snap invariant', () => {
     p.frame(7450, 200);
     expect(run(p, 7450, 200, 900)).toBe(7000);
     const q = make();
-    q.touchStart(200, 400, 2300, 0);
+    q.touchStart(200, 400, 2300, 0, 0);
     q.frame(2300, 0);
     q.frame(2300, 400);
     expect(q.busy()).toBe(false);
@@ -493,16 +493,16 @@ describe('flow pager: free touch and glide', () => {
 
   it('the page follows the finger 1:1, vertical moves consumed, sideways ones left alone', () => {
     const p = make();
-    p.touchStart(200, 600, 9000, 0);
-    expect(p.touchMove(200, 500, 9000, 16)).toMatchObject({
+    p.touchStart(200, 600, 9000, 0, 0);
+    expect(p.touchMove(200, 500, 9000, 16, 16)).toMatchObject({
       consumed: true,
       axis: 'y',
       scrollTo: 9100,
     });
-    expect(p.touchMove(200, 450, 9100, 32).scrollTo).toBe(9150);
+    expect(p.touchMove(200, 450, 9100, 32, 32).scrollTo).toBe(9150);
     const q = make();
-    q.touchStart(200, 600, 9000, 0);
-    expect(q.touchMove(300, 590, 9000, 16)).toMatchObject({
+    q.touchStart(200, 600, 9000, 0, 0);
+    expect(q.touchMove(300, 590, 9000, 16, 16)).toMatchObject({
       consumed: false,
       axis: 'x',
       scrollTo: null,
@@ -512,14 +512,14 @@ describe('flow pager: free touch and glide', () => {
   it('a flick glides on with lerp 0.075 per 60 Hz frame; a finger that stops first gets no glide', () => {
     const p = make();
     let y = 9000;
-    p.touchStart(200, 600, y, 0);
+    p.touchStart(200, 600, y, 0, 0);
     for (let i = 1; i <= 5; i++) {
-      const m = p.touchMove(200, 600 - 32 * i, y, i * 16);
+      const m = p.touchMove(200, 600 - 32 * i, y, i * 16, i * 16);
       y = m.scrollTo ?? y;
       p.frame(y, i * 16);
     }
     expect(y).toBe(9160);
-    p.touchEnd(y, 90);
+    p.touchEnd(y, 90, 90);
     // 32 px per 16 ms is 2000 px/s: 33.3 px per 60 Hz frame, gliding about 388 px
     const glide = 388;
     // first frame of the glide: 7.5% of the way
@@ -532,12 +532,12 @@ describe('flow pager: free touch and glide', () => {
 
     const q = make();
     y = 9000;
-    q.touchStart(200, 600, y, 0);
-    y = q.touchMove(200, 500, y, 16).scrollTo!;
+    q.touchStart(200, 600, y, 0, 0);
+    y = q.touchMove(200, 500, y, 16, 16).scrollTo!;
     q.frame(y, 16);
     // the finger held still for 150 ms (past the 100 ms hold), frames running
     for (let now = 32; now <= 160; now += 16) q.frame(y, now);
-    q.touchEnd(y, 166);
+    q.touchEnd(y, 166, 166);
     expect(run(q, y, 176, 1000)).toBe(9100);
   });
 
@@ -569,13 +569,13 @@ describe('flow pager: free touch and glide', () => {
       const p = make();
       let y = 9000;
       let finger = 600;
-      p.touchStart(200, finger, y, 0);
+      p.touchStart(200, finger, y, 0, 0);
       for (let now = 16; now <= 96; now += 16) {
         finger -= 30.72;
-        y = p.touchMove(200, finger, y, now).scrollTo ?? y;
+        y = p.touchMove(200, finger, y, now, now).scrollTo ?? y;
         p.frame(y, now);
       }
-      p.touchEnd(y, 96);
+      p.touchEnd(y, 96, 96);
       y = run(p, y, 112, 240);
       if (g) p.setTable(tableFor(g));
       return run(p, y + (g?.top ?? 0), 256, 6000);
@@ -590,10 +590,10 @@ describe('flow pager: free touch and glide', () => {
     // the paged part changed (a new panel height): the glide stops
     const p = make();
     let y = 9000;
-    p.touchStart(200, 600, y, 0);
-    y = p.touchMove(200, 552, y, 16).scrollTo!;
+    p.touchStart(200, 600, y, 0, 0);
+    y = p.touchMove(200, 552, y, 16, 16).scrollTo!;
     p.frame(y, 16);
-    p.touchEnd(y, 20);
+    p.touchEnd(y, 20, 20);
     y = run(p, y, 32, 100);
     p.setTable(tableFor({ panel: 400 }));
     expect(p.frame(y, 116).scrollTo).toBeNull();
@@ -602,28 +602,28 @@ describe('flow pager: free touch and glide', () => {
   it('a touch during the glide stops it', () => {
     const p = make();
     let y = 9000;
-    p.touchStart(200, 600, y, 0);
-    y = p.touchMove(200, 552, y, 16).scrollTo!;
+    p.touchStart(200, 600, y, 0, 0);
+    y = p.touchMove(200, 552, y, 16, 16).scrollTo!;
     p.frame(y, 16);
-    p.touchEnd(y, 20);
+    p.touchEnd(y, 20, 20);
     y = run(p, y, 32, 200);
-    p.touchStart(200, 600, y, 210);
+    p.touchStart(200, 600, y, 210, 210);
     expect(p.frame(y, 226).scrollTo).toBeNull();
-    p.touchEnd(y, 240);
+    p.touchEnd(y, 240, 240);
     expect(run(p, y, 256, 1000)).toBe(y);
   });
 
   it('an up glide from the free part stops at RL, never past it', () => {
     const p = make();
     let y = 8000;
-    p.touchStart(200, 300, y, 0);
+    p.touchStart(200, 300, y, 0, 0);
     for (let i = 1; i <= 6; i++) {
-      const m = p.touchMove(200, 300 + 48 * i, y, i * 16);
+      const m = p.touchMove(200, 300 + 48 * i, y, i * 16, i * 16);
       y = m.scrollTo ?? y;
       p.frame(y, i * 16);
     }
     expect(y).toBe(7712);
-    p.touchEnd(y, 100);
+    p.touchEnd(y, 100, 100);
     let min = y;
     for (let now = 112; now < 4000; now += 16) {
       const f = p.frame(y, now);
@@ -637,12 +637,12 @@ describe('flow pager: free touch and glide', () => {
   it('an up glide that reaches the edge pages to the lineup at once', () => {
     const p = make();
     let y = 8000;
-    p.touchStart(200, 300, y, 0);
+    p.touchStart(200, 300, y, 0, 0);
     for (let i = 1; i <= 6; i++) {
-      y = p.touchMove(200, 300 + 48 * i, y, i * 16).scrollTo ?? y;
+      y = p.touchMove(200, 300 + 48 * i, y, i * 16, i * 16).scrollTo ?? y;
       p.frame(y, i * 16);
     }
-    p.touchEnd(y, 100);
+    p.touchEnd(y, 100, 100);
     let near: number | null = null;
     let landed: number | null = null;
     for (let now = 112; now < 4000; now += 16) {
@@ -661,19 +661,19 @@ describe('flow pager: free touch and glide', () => {
 
   it('released within a few px of the edge with an up flick: pages to the lineup on release', () => {
     const p = make();
-    p.touchStart(200, 300, 7600, 0);
-    const y = p.touchMove(200, 397, 7600, 16).scrollTo!;
+    p.touchStart(200, 300, 7600, 0, 0);
+    const y = p.touchMove(200, 397, 7600, 16, 16).scrollTo!;
     p.frame(y, 16);
     expect(y).toBe(7503);
-    p.touchEnd(y, 20);
+    p.touchEnd(y, 20, 20);
     expect(p.busy()).toBe(true);
     expect(run(p, y, 32, 1000)).toBe(7000);
   });
 
   it('the finger itself is held at the paged edge', () => {
     const p = make();
-    p.touchStart(200, 300, 7600, 0);
-    expect(p.touchMove(200, 600, 7600, 16).scrollTo).toBe(7500);
+    p.touchStart(200, 300, 7600, 0, 0);
+    expect(p.touchMove(200, 600, 7600, 16, 16).scrollTo).toBe(7500);
   });
 
   it('wheel and touch are swallowed during the exit move', () => {
@@ -682,12 +682,12 @@ describe('flow pager: free touch and glide', () => {
     const y = run(p, 7000, 0, 1000);
     expect(p.zone(y)).toBe('free');
     expect(p.wheel(-100, 0, false, y, 1010)).toBe(true);
-    p.touchStart(200, 400, y, 1020);
-    expect(p.touchMove(200, 300, y, 1036)).toMatchObject({
+    p.touchStart(200, 400, y, 1020, 1020);
+    expect(p.touchMove(200, 300, y, 1036, 1036)).toMatchObject({
       consumed: true,
       scrollTo: null,
     });
-    p.touchEnd(y, 1050);
+    p.touchEnd(y, 1050, 1050);
     expect(run(p, y, 1016, 1600)).toBe(9000);
   });
 });
@@ -844,17 +844,17 @@ describe('flow pager: a flick whose last move and release land in the same frame
   it('still glides, on the last move not yet sampled by a frame', () => {
     const p = make();
     let y = 9500;
-    p.touchStart(200, 600, y, 0);
+    p.touchStart(200, 600, y, 0, 0);
     p.frame(y, 0);
     // moves on every other frame (the frame between sees no movement)
     for (let i = 1; i <= 3; i++) {
-      y = p.touchMove(200, 600 - 32 * i, y, i * 32).scrollTo ?? y;
+      y = p.touchMove(200, 600 - 32 * i, y, i * 32, i * 32).scrollTo ?? y;
       p.frame(y, i * 32);
       p.frame(y, i * 32 + 16);
     }
     // the fourth move and the release, with no frame between them
-    y = p.touchMove(200, 600 - 32 * 4, y, 128).scrollTo ?? y;
-    p.touchEnd(y, 130);
+    y = p.touchMove(200, 600 - 32 * 4, y, 128, 128).scrollTo ?? y;
+    p.touchEnd(y, 130, 130);
     // 32 px per 32 ms is 16.7 px per 60 Hz frame: about 119 px of glide
     const end = run(p, y, 144, 3000);
     expect(end).toBeGreaterThan(y + 110);
@@ -882,14 +882,14 @@ function cadenceFlick(
   let lastMove = 0;
   let next = moveMs;
   let moves = 0;
-  p.touchStart(200, finger, y, 0);
+  p.touchStart(200, finger, y, 0, 0);
   p.frame(y, 0);
   while (moves < 6) {
     now += frameMs;
     if (now >= next - 1e-6) {
       finger -= (speed * moveMs) / 1000;
       lastMove = now - 0.5;
-      y = p.touchMove(200, finger, y, lastMove).scrollTo ?? y;
+      y = p.touchMove(200, finger, y, lastMove, lastMove).scrollTo ?? y;
       next += moveMs;
       moves++;
     }
@@ -900,7 +900,7 @@ function cadenceFlick(
     p.frame(y, now);
   }
   const release = y;
-  p.touchEnd(y, lastMove + still);
+  p.touchEnd(y, lastMove + still, lastMove + still);
   let wraps = 0;
   for (let t = now + frameMs; t <= now + 6000; t += frameMs) {
     const f = p.frame(y, t);
@@ -929,7 +929,7 @@ describe('flow pager: the release speed comes from the moves, not the frames', (
   it('moves handled back to back (a busy page) are timed by their own event times: the true glide', () => {
     const p = make();
     let y = 9000;
-    p.touchStart(200, 700, y, 0);
+    p.touchStart(200, 700, y, 0, 0);
     p.frame(y, 0);
     // a long task: five moves made 16 ms apart, all handled at 90 ms, within 0.5 ms
     for (let i = 1; i <= 5; i++)
@@ -969,7 +969,7 @@ function timedFlick(
   const p = make();
   let y = 9000;
   let frameAt = 0;
-  p.touchStart(200, 700, y, 0);
+  p.touchStart(200, 700, y, 0, 0);
   p.frame(y, 0);
   let t = 0;
   for (let i = 1; i <= 12; i++) {
@@ -993,7 +993,7 @@ describe('flow pager: the release speed is timed by the touch events themselves'
   it('a touchend handled 150 ms late, made 10 ms after the last move, still glides', () => {
     const p = make();
     let y = 9000;
-    p.touchStart(200, 700, y, 0, { at: 0 });
+    p.touchStart(200, 700, y, 0, 0);
     p.frame(y, 0);
     for (let i = 1; i <= 5; i++) {
       y = p.touchMove(200, 700 - 32 * i, y, i * 16, i * 16).scrollTo ?? y;
@@ -1008,7 +1008,7 @@ describe('flow pager: the release speed is timed by the touch events themselves'
   it('a 300 ms press, then a flick, glides: the moves before the axis lock keep the speed current', () => {
     const p = make();
     let y = 9000;
-    p.touchStart(200, 700, y, 0);
+    p.touchStart(200, 700, y, 0, 0);
     p.frame(y, 0);
     // the finger creeps up 1 px at a time while pressing (under the 6 px lock)
     for (let i = 1; i <= 3; i++) {
@@ -1029,7 +1029,7 @@ describe('flow pager: the release speed is timed by the touch events themselves'
     for (const last of ['sideways', 'rollback'] as const) {
       const p = make();
       let y = 9000;
-      p.touchStart(200, 700, y, 0);
+      p.touchStart(200, 700, y, 0, 0);
       p.frame(y, 0);
       for (let i = 1; i <= 5; i++) {
         y = p.touchMove(200, 700 - 32 * i, y, i * 16, i * 16).scrollTo ?? y;
@@ -1038,16 +1038,18 @@ describe('flow pager: the release speed is timed by the touch events themselves'
       const fy = last === 'sideways' ? 700 - 32 * 5 : 700 - 32 * 5 + 1;
       y = p.touchMove(210, fy, y, 96, 96).scrollTo ?? y;
       p.touchEnd(y, 98, 98);
+      // over the whole 96 ms from the start: 160 px (159 rolled back) is
+      // 27.8 (27.6) px per 60 Hz frame, about 285 (281) px of glide
       const glide = run(p, y, 112, 6000) - y;
-      expect(glide, last).toBeGreaterThan(250);
-      expect(glide, last).toBeLessThan(420);
+      expect(glide, last).toBeGreaterThan(278);
+      expect(glide, last).toBeLessThan(290);
     }
   });
 
   it('moves 80 ms apart (a slow touch rate) still glide, timed over the last two', () => {
     const p = make();
     let y = 9000;
-    p.touchStart(200, 700, y, 0);
+    p.touchStart(200, 700, y, 0, 0);
     p.frame(y, 0);
     for (let i = 1; i <= 3; i++) {
       y = p.touchMove(200, 700 - 150 * i, y, i * 80, i * 80).scrollTo ?? y;
@@ -1063,7 +1065,7 @@ describe('flow pager: the release speed is timed by the touch events themselves'
   it('a finger resting 150 ms before the lift gets no glide, whenever the lift is handled', () => {
     const p = make();
     let y = 9000;
-    p.touchStart(200, 700, y, 0);
+    p.touchStart(200, 700, y, 0, 0);
     p.frame(y, 0);
     for (let i = 1; i <= 5; i++) {
       y = p.touchMove(200, 700 - 32 * i, y, i * 16, i * 16).scrollTo ?? y;
@@ -1094,15 +1096,15 @@ describe('flow pager: an up drag held at the paged edge', () => {
   it('pages to the lineup even when the browser rounds the scroll just past the edge', () => {
     const p = make();
     let y = 7540;
-    p.touchStart(200, 300, y, 0);
+    p.touchStart(200, 300, y, 0, 0);
     p.frame(y, 0);
     for (let i = 1; i <= 6; i++) {
-      y = p.touchMove(200, 300 + 40 * i, y, i * 16).scrollTo ?? y;
+      y = p.touchMove(200, 300 + 40 * i, y, i * 16, i * 16).scrollTo ?? y;
       p.frame(y, i * 16);
     }
     expect(y).toBe(7500); // the follow stops at the edge
     // the device-pixel grid leaves the page a fraction above it
-    p.touchEnd(7500.4, 120);
+    p.touchEnd(7500.4, 120, 120);
     expect(run(p, 7500.4, 136, 1200)).toBe(7000);
   });
 });
@@ -1110,12 +1112,12 @@ describe('flow pager: an up drag held at the paged edge', () => {
 describe('flow pager: a touch on a sideways scroller in the free part', () => {
   it('is the browser own in every direction: never consumed, no follow, no glide', () => {
     const p = make();
-    p.touchStart(200, 600, 9500, 0, { strip: true });
-    expect(p.touchMove(202, 598, 9500, 16).consumed).toBe(false);
-    const m = p.touchMove(200, 400, 9500, 32);
+    p.touchStart(200, 600, 9500, 0, 0, { strip: true });
+    expect(p.touchMove(202, 598, 9500, 16, 16).consumed).toBe(false);
+    const m = p.touchMove(200, 400, 9500, 32, 32);
     expect(m.consumed).toBe(false);
     expect(m.scrollTo).toBeNull();
-    p.touchEnd(9500, 48);
+    p.touchEnd(9500, 48, 48);
     expect(run(p, 9500, 64, 1000)).toBe(9500);
   });
 });
@@ -1124,13 +1126,13 @@ describe('flow pager: the wrap', () => {
   it("a flick across Last's top wraps once to the overshoot, then the 1.2 s lock eases to the row", () => {
     const p = make();
     let y = 12800;
-    p.touchStart(200, 600, y, 0);
+    p.touchStart(200, 600, y, 0, 0);
     for (let i = 1; i <= 3; i++) {
-      y = p.touchMove(200, 600 - 48 * i, y, i * 16).scrollTo ?? y;
+      y = p.touchMove(200, 600 - 48 * i, y, i * 16, i * 16).scrollTo ?? y;
       p.frame(y, i * 16);
     }
     expect(y).toBe(12944);
-    p.touchEnd(y, 50);
+    p.touchEnd(y, 50, 50);
     let wraps = 0;
     let wrappedAt: number | null = null;
     let after: number[] = [];
@@ -1172,22 +1174,22 @@ describe('flow pager: the wrap', () => {
   it('a finger held through the wrap writes nothing, during the lock or after it', () => {
     const p = make();
     let y = 12900;
-    p.touchStart(200, 600, y, 0);
-    y = p.touchMove(200, 550, y, 16).scrollTo!;
+    p.touchStart(200, 600, y, 0, 0);
+    y = p.touchMove(200, 550, y, 16, 16).scrollTo!;
     p.frame(y, 16);
-    y = p.touchMove(200, 480, y, 32).scrollTo!;
+    y = p.touchMove(200, 480, y, 32, 32).scrollTo!;
     expect(y).toBe(13020);
     const w = p.frame(y, 32);
     expect(w.scrollTo).toBe(20);
     y = 20;
-    expect(p.touchMove(200, 400, y, 48).scrollTo).toBeNull();
+    expect(p.touchMove(200, 400, y, 48, 48).scrollTo).toBeNull();
     for (let now = 48; now <= 32 + WRAP_GUARD_MS + 16; now += 16) {
       const f = p.frame(y, now);
       if (f.scrollTo !== null) y = f.scrollTo;
     }
     expect(y).toBe(0);
-    expect(p.touchMove(200, 300, y, 1400).scrollTo).toBeNull();
-    p.touchEnd(y, 1420);
+    expect(p.touchMove(200, 300, y, 1400, 1400).scrollTo).toBeNull();
+    p.touchEnd(y, 1420, 1420);
     expect(run(p, y, 1432, 3000)).toBe(0);
   });
 
@@ -1198,9 +1200,9 @@ describe('flow pager: the wrap', () => {
     expect(p.wheel(100, 0, false, y, 100)).toBe(true);
     expect(p.step(1, y, 120)).toBe('swallowed');
     expect(p.goTo(3, y, 130)).toBe('swallowed');
-    p.touchStart(200, 400, y, 140);
-    p.touchMove(200, 300, y, 156);
-    p.touchEnd(y, 170);
+    p.touchStart(200, 400, y, 140, 140);
+    p.touchMove(200, 300, y, 156, 156);
+    p.touchEnd(y, 170, 170);
     y = run(p, y, 32, 16 + WRAP_GUARD_MS + 16);
     expect(y).toBe(0);
     expect(run(p, y, 1300, 3000)).toBe(0);

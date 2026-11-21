@@ -46,8 +46,8 @@ describe('touch gate: the touch events carry their own time', () => {
     const seen: string[] = [];
     const gate = createTouchGate(
       {
-        touchStart: (_x, _y, _s, now, o) =>
-          void seen.push(`start ${now} ${o?.at}`),
+        touchStart: (_x, _y, _s, now, at) =>
+          void seen.push(`start ${now} ${at}`),
         touchMove: (_x, _y, _s, now, at) => {
           seen.push(`move ${now} ${at}`);
           return true;
@@ -67,7 +67,7 @@ describe('touch gate: the touch events carry their own time', () => {
     const seen: string[] = [];
     const gate = createTouchGate(
       {
-        touchStart: (_x, _y, _s, _now, o) => void seen.push(`start ${o?.at}`),
+        touchStart: (_x, _y, _s, _now, at) => void seen.push(`start ${at}`),
         touchMove: (_x, _y, _s, _now, at) => {
           seen.push(`move ${at}`);
           return true;
@@ -82,6 +82,64 @@ describe('touch gate: the touch events carry their own time', () => {
     gate.move(1, 200, 560, 9000, 120, 106);
     gate.end(9000, 300, epoch + 200);
     expect(seen).toEqual(['start 100', 'move 120', 'end 300']);
+  });
+});
+
+describe('touch gate: which event times fit the frame clock', () => {
+  /** The times the flow is handed for a touch whose start was made at `startAt`. */
+  function times(startAt: number | undefined, moveAt: number) {
+    const seen: string[] = [];
+    const gate = createTouchGate(
+      {
+        touchStart: (_x, _y, _s, _now, at) => void seen.push(`start ${at}`),
+        touchMove: (_x, _y, _s, _now, at) => {
+          seen.push(`move ${at}`);
+          return true;
+        },
+        touchEnd: (_s, _now, at) => void seen.push(`end ${at}`),
+        touchCancel: () => void seen.push('cancel'),
+      },
+      () => false,
+    );
+    gate.start(1, true, 200, 600, 9000, 100, { at: startAt });
+    gate.move(1, 200, 560, 9000, 120, moveAt);
+    return seen;
+  }
+
+  it('an event time up to 1 ms ahead of its handling (a 1 ms rounding) fits, and is capped at the handling time', () => {
+    expect(times(101, 106)).toEqual(['start 100', 'move 106']);
+    expect(times(90, 120.5)).toEqual(['start 90', 'move 120']);
+  });
+
+  it('a start time more than 1 ms ahead, zero or below, or missing: the whole touch is timed by its handling', () => {
+    expect(times(101.01, 106)).toEqual(['start 100', 'move 120']);
+    expect(times(0, 106)).toEqual(['start 100', 'move 120']);
+    expect(times(-5, 106)).toEqual(['start 100', 'move 120']);
+    expect(times(undefined, 106)).toEqual(['start 100', 'move 120']);
+  });
+});
+
+describe('touch gate: the handling clock (event times that do not fit)', () => {
+  it('moves queued behind a long task and handled in a burst give a bounded glide, timed from the move before the burst', () => {
+    const p = atFront();
+    const gate = createTouchGate(p.input, () => false);
+    let y = 9500;
+    // no event times: the gate times the touch by when it was handled
+    gate.start(1, true, 200, 700, y, 0);
+    gate.move(1, 200, 668, y, 16);
+    y = p.input.follow() ?? y;
+    // a 150 ms long task: five 32 px moves handled at 166.1 to 166.5
+    for (let i = 1; i <= 5; i++) {
+      gate.move(1, 200, 668 - 32 * i, y, 166 + i * 0.1);
+      y = p.input.follow() ?? y;
+    }
+    expect(y).toBe(9692);
+    gate.end(y, 166.6);
+    // 160 px over the 150.5 ms from the move before the burst: 17.7 px per
+    // 60 Hz frame, about 133 px of glide (the burst alone would ask 2.2 million)
+    const glide = run(p.input, y, 176, 6000) - y;
+    expect(glide).toBeGreaterThan(125);
+    expect(glide).toBeLessThan(140);
   });
 });
 

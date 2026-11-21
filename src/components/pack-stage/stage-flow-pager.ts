@@ -71,6 +71,8 @@ export const GLIDE_POWER = 1.7;
 export const GLIDE_LERP = 0.075;
 /** The release speed comes from the moves made in this long before the lift; a finger still this long gets no glide. */
 export const RELEASE_HOLD_MS = 100;
+/** Moves closer together than this came in a burst (handled behind a long task), not from the finger. */
+const BURST_MS = 4;
 /** An up glide this close to the paged edge hands over to the move to RL. */
 export const GLIDE_HANDOFF_PX = 4;
 /** Positions this close count as the same. */
@@ -120,15 +122,29 @@ export function glideDistance(v: number): number {
  * RELEASE_HOLD_MS before the lift at `at` (the finger rested); else first
  * to last over the moves within RELEASE_HOLD_MS of the last one, so one
  * stray move (sideways only, a pixel back) cannot stop or turn a flick; with
- * moves sparser than that, over the last two.
+ * moves sparser than that, over the last two. Moves that span under
+ * BURST_MS were handled in a burst behind a long task (the handling clock),
+ * not made that fast: measured from the newest move before the burst
+ * instead; none: no speed.
  */
 function releaseSpeed(samples: readonly TouchSample[], at: number): number {
   const last = samples[samples.length - 1];
-  if (!last || at - last.t > RELEASE_HOLD_MS) return 0;
-  const recent = samples.filter((s) => last.t - s.t <= RELEASE_HOLD_MS);
-  const first = recent.length >= 2 ? recent[0] : samples[samples.length - 2];
-  if (!first || last.t <= first.t) return 0;
-  return ((last.f - first.f) * FRAME_MS) / (last.t - first.t);
+  if (!last || at - last.eventTime > RELEASE_HOLD_MS) return 0;
+  const recent = samples.filter(
+    (s) => last.eventTime - s.eventTime <= RELEASE_HOLD_MS,
+  );
+  let first = recent.length >= 2 ? recent[0] : samples[samples.length - 2];
+  if (first && last.eventTime - first.eventTime < BURST_MS) {
+    first = undefined;
+    for (let j = samples.length - 2; j >= 0 && !first; j--)
+      if (last.eventTime - samples[j]!.eventTime >= BURST_MS)
+        first = samples[j];
+  }
+  if (!first) return 0;
+  return (
+    ((last.follow - first.follow) * FRAME_MS) /
+    (last.eventTime - first.eventTime)
+  );
 }
 
 export type FlowTouchMove = {
@@ -194,24 +210,26 @@ export interface FlowPager {
   /**
    * `strip`: the touch started on the Top Hits strip. `at` (here and on
    * the move and the end): the touch event's own time, on the same clock as
-   * `now` (which is when it was handled); it times the release speed, so
-   * moves queued behind a busy page keep their true spacing. Absent: `now`.
+   * `now` (which is when it was handled; the gate passes `now` when the
+   * event's clock does not fit); it times the release speed, so moves queued
+   * behind a busy page keep their true spacing.
    */
   touchStart(
     x: number,
     y: number,
     scrollY: number,
     now: number,
-    o?: { strip?: boolean; at?: number },
+    at: number,
+    o?: { strip?: boolean },
   ): void;
   touchMove(
     x: number,
     y: number,
     scrollY: number,
     now: number,
-    at?: number,
+    at: number,
   ): FlowTouchMove;
-  touchEnd(scrollY: number, now: number, at?: number): void;
+  touchEnd(scrollY: number, now: number, at: number): void;
   /** The touch's tracking is dropped (a second finger, a release that is not ours): nothing pages. */
   touchCancel(): void;
   frame(scrollY: number, now: number): FlowPagerFrame;
@@ -241,7 +259,7 @@ type Touch = {
    */
   samples: TouchSample[];
 };
-type TouchSample = { t: number; f: number };
+type TouchSample = { eventTime: number; follow: number };
 /** `t0` null: starts on the next frame (that frame reports wrap 0). */
 type Lock = { t0: number | null; from: number; kind: FlowLock };
 
@@ -450,7 +468,7 @@ export function createFlowPager(): FlowPager {
           if (touch && touch.free) {
             touch.start += d;
             touch.follow += d;
-            for (const s of touch.samples) s.f += d;
+            for (const s of touch.samples) s.follow += d;
           }
           if (prevY !== null) prevY += d;
         }
@@ -521,7 +539,7 @@ export function createFlowPager(): FlowPager {
       lock = { t0: null, from: scrollY, kind: 'home' };
       return 'moved';
     },
-    touchStart(x, y, scrollY, now, o) {
+    touchStart(x, y, scrollY, _now, at, o) {
       if (!table) {
         touch = null;
         return;
@@ -537,18 +555,24 @@ export function createFlowPager(): FlowPager {
         free: zoneOf(scrollY) === 'free',
         strip: !!o?.strip,
         follow: scrollY,
-        samples: [{ t: o?.at ?? now, f: scrollY }],
+        samples: [{ eventTime: at, follow: scrollY }],
       };
     },
-    touchMove(x, y, _scrollY, now, at = now) {
+    touchMove(x, y, _scrollY, _now, at) {
       const t = touch;
       if (!t || !table) return { consumed: false, axis: null, scrollTo: null };
       t.y = y;
       // every move counts for the speed, those before the axis locks too, at
       // its own event time
-      t.samples.push({ t: at, f: Math.max(table.edge, t.start + (t.y0 - y)) });
+      t.samples.push({
+        eventTime: at,
+        follow: Math.max(table.edge, t.start + (t.y0 - y)),
+      });
       // the window back from this move, and the one move before it
-      while (t.samples.length > 2 && at - t.samples[1]!.t > RELEASE_HOLD_MS)
+      while (
+        t.samples.length > 2 &&
+        at - t.samples[1]!.eventTime > RELEASE_HOLD_MS
+      )
         t.samples.shift();
       // a sideways scroller in the free part (the live ticker): the
       // browser's own gesture, whichever way it goes
@@ -570,7 +594,7 @@ export function createFlowPager(): FlowPager {
       t.follow = Math.max(table.edge, t.start + (t.y0 - y));
       return { consumed: true, axis: 'y', scrollTo: t.follow };
     },
-    touchEnd(scrollY, now, at = now) {
+    touchEnd(scrollY, now, at) {
       refusedEntry = false;
       const t = touch;
       touch = null;
