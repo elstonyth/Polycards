@@ -291,6 +291,23 @@ export function startSpin(host: SpinHost): SpinControl {
       return true;
     },
     canPick: (i) => !!focus?.kindsAt(i),
+    // the row's spacing on screen at the middle: a drag moves it one pack per spacing
+    pitch: () => {
+      const mid = window.innerWidth / 2;
+      const xs = [
+        ...(src?.panel.querySelectorAll<HTMLElement>(
+          '[data-stage-panel]:not([hidden]) [data-stage-tile] [data-stage-art]',
+        ) ?? []),
+      ]
+        .map((a) => {
+          const b = a.getBoundingClientRect();
+          return b.width > 0 ? b.left + b.width / 2 : Number.NaN;
+        })
+        .filter(Number.isFinite)
+        .sort((a, b) => Math.abs(a - mid) - Math.abs(b - mid));
+      const next = xs.find((x) => Math.abs(x - xs[0]!) > 20);
+      return next === undefined ? null : Math.abs(next - xs[0]!);
+    },
   });
   const flowOn = () => !!src?.flow.hasAttribute('data-flow-on');
 
@@ -1022,8 +1039,7 @@ export function startSpin(host: SpinHost): SpinControl {
     if (loadSeen) return;
     loadSeen = true;
     const nav = performance.getEntriesByType('navigation')[0] as
-      | PerformanceNavigationTiming
-      | undefined;
+      PerformanceNavigationTiming | undefined;
     const y = flowLoadStart(nav?.type, window.scrollY, rowTop(s));
     if (y !== null) window.scrollTo(0, y);
   };

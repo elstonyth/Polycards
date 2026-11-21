@@ -741,7 +741,10 @@ describe('flow input: the endless pick at the lineup', () => {
    * gives each pack's stops (default: all sleeves). The row's track follows
    * the line's frames, as the spin chunk writes it.
    */
-  function lineup(kindsOf: (i: number) => readonly string[] = () => SLEEVE) {
+  function lineup(
+    kindsOf: (i: number) => readonly string[] = () => SLEEVE,
+    pitch?: number,
+  ) {
     let on = false;
     let index = 2;
     let track = 2;
@@ -763,6 +766,7 @@ describe('flow input: the endless pick at the lineup', () => {
         return true;
       },
       canPick: () => true,
+      pitch: pitch === undefined ? undefined : () => pitch,
     });
     input.measure(GEO, 0);
     const go = (y0: number, from: number, to: number): number => {
@@ -818,6 +822,14 @@ describe('flow input: the endless pick at the lineup', () => {
       },
     };
   }
+
+  it('the drag follows the hand: one pack per on-screen spacing the page measures', () => {
+    const p = lineup(undefined, 300);
+    // 600 px left at a 300 px spacing: two packs on (at 100 px it would be six)
+    p.swipe(-600, 0, 7000, 4000);
+    p.go(7000, 4300, 6000);
+    expect(p.picks).toEqual([4]);
+  });
 
   it('a sideways swipe at 46 degrees from vertical drags the row and leaves the page on the lineup', () => {
     const p = lineup();
@@ -900,7 +912,8 @@ describe('flow input: the endless pick at the lineup', () => {
     expect(p.picks).toEqual([3]);
     expect(p.input.key('left', 7000, 6000)).toBe('moved');
     expect(p.input.key('left', 7000, 6050)).toBe('moved');
-    p.go(7000, 6066, 7000);
+    // two packs at the glide's top speed, then the 150 ms rest
+    p.go(7000, 6066, 7100);
     expect(p.picks).toEqual([3, 1]);
     // at Closing and at the row: not ours
     p.input.key('prev', 7000, 8000);

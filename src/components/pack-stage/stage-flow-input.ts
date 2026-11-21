@@ -70,6 +70,8 @@ export type FlowInputDeps = {
   pick?(index: number): boolean;
   /** Whether the pack at `index` can be picked (focused). */
   canPick?(index: number): boolean;
+  /** The row's on-screen spacing at the middle, px (read when a drag starts); null: unknown. */
+  pitch?(): number | null;
 };
 
 /** The live geometry in document scroll pixels. */
@@ -121,13 +123,7 @@ export type FlowInputFrame = FlowPagerFrame & {
 
 /** What a key asks for. */
 export type FlowKeyIntent =
-  | 'next'
-  | 'prev'
-  | 'first'
-  | 'last'
-  | 'escape'
-  | 'left'
-  | 'right';
+  'next' | 'prev' | 'first' | 'last' | 'escape' | 'left' | 'right';
 
 /**
  * What a key did: the pager's result, or `leave`: the caller runs the
@@ -517,7 +513,7 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
         // the lineup follows the finger (from where it landed); the page stays
         if (!line.held()) {
           syncLine();
-          line.grab(lineTouch.x0, now);
+          line.grab(lineTouch.x0, now, d.pitch?.() ?? undefined);
         }
         line.drag(x, now);
         return true;
@@ -562,7 +558,7 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
         m.axis = dx > dy ? 'x' : 'y';
         if (m.axis === 'x') {
           syncLine();
-          line.grab(m.x0, now);
+          line.grab(m.x0, now, d.pitch?.() ?? undefined);
         }
       }
       if (m.axis !== 'x') return false;

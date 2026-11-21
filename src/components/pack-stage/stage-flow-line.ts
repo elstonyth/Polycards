@@ -2,12 +2,15 @@
  * Pack stage: the endless pick in the tilted lineup. Pure: no DOM, no clock (the caller passes the time and
  * the pointer's x, and writes the track it gets back to the row).
  *
- * - A sideways drag moves an unbounded line position at one pack per
- *   100 px on every size, so the row never has an end.
+ * - A sideways drag moves an unbounded line position by one pack per
+ *   on-screen spacing of the row (handed to the grab; 100 px when it cannot
+ *   be measured), so the row follows the hand and never has an end.
  * - On release the position gets 8 times the last frame's movement (read
  *   per 60 Hz frame, so the frame rate cannot change it), capped at half a
  *   lap (floor(n / 2) packs, at least 1), the target rounds
- *   to the nearest pack, and the position eases there at 10 per second.
+ *   to the nearest pack, and the position eases there at 10 per second, never
+ *   faster than 12 packs a second (so a frame never moves the look-alike
+ *   capsules near half a spacing, where the eye reads the motion both ways).
  *   The line always comes to rest on a pack.
  * - Keys and the sideways wheel step one pack (one per wheel gesture; the
  *   wheel is swallowed while the line eases).
@@ -17,8 +20,10 @@
  */
 import { WHEEL_GAP_MS, WHEEL_MIN_DELTA } from './stage-pager';
 
-/** Drag factor: one pack per 100 px, phone and desktop. */
+/** Drag factor when the row's on-screen spacing is unknown: one pack per 100 px. */
 export const LINE_PX_PER_PACK = 100;
+/** The glide's top speed, packs per second: 0.2 of a spacing per 60 Hz frame, 0.4 at 30 Hz. */
+export const LINE_GLIDE_MAX_PER_S = 12;
 /** Release: the last frame's movement times 8. */
 export const LINE_FLING = 8;
 /** The settle: a lerp of 10 per second. */
@@ -45,8 +50,8 @@ export interface FlowLine {
    * when it names the pack the line rests on (the position stays unbounded).
    */
   sync(track: number, count: number): void;
-  /** A finger or the mouse lands at x. */
-  grab(x: number, now: number): void;
+  /** A finger or the mouse lands at x; `pxPerPack`: the row's on-screen spacing. */
+  grab(x: number, now: number, pxPerPack?: number): void;
   drag(x: number, now: number): void;
   /** Let go; `fling` false (a cancelled touch): no fling. */
   release(now: number, fling?: boolean): void;
@@ -72,6 +77,7 @@ export function createFlowLine(
   let held = false;
   let x0 = 0;
   let from = 0;
+  let pxPerPack = LINE_PX_PER_PACK;
   /** Where the line stood when it was grabbed (the way it went, for a skip). */
   let grabbedAt = 0;
   let easing = false;
@@ -123,8 +129,9 @@ export function createFlowLine(
       pos = target = k;
       prevPos = pos;
     },
-    grab(x, now) {
+    grab(x, now, px) {
       void now;
+      pxPerPack = px !== undefined && px > 0 ? px : LINE_PX_PER_PACK;
       held = true;
       easing = false;
       x0 = x;
@@ -135,7 +142,7 @@ export function createFlowLine(
     },
     drag(x) {
       if (!held) return;
-      pos = n <= 1 ? from : from - (x - x0) / LINE_PX_PER_PACK;
+      pos = n <= 1 ? from : from - (x - x0) / pxPerPack;
     },
     release(now, fling = true) {
       void now;
@@ -181,7 +188,10 @@ export function createFlowLine(
         return out();
       }
       if (easing) {
-        pos += (target - pos) * (1 - Math.exp((-LINE_LERP_PER_S * dt) / 1000));
+        const top = (LINE_GLIDE_MAX_PER_S * dt) / 1000;
+        const d =
+          (target - pos) * (1 - Math.exp((-LINE_LERP_PER_S * dt) / 1000));
+        pos += Math.max(-top, Math.min(top, d));
         if (Math.abs(target - pos) < SETTLE) {
           pos = target;
           easing = false;

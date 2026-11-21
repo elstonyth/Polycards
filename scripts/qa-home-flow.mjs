@@ -1993,8 +1993,24 @@ for (const size of sizes) {
     const mod = (a, n) => ((a % n) + n) % n;
     let p0 = await pick();
     const startIndex = p0.index;
-    // two packs on: 200 px (one pack per 100 px)
-    await dragX(-200);
+    // the row follows the hand: one pack per on-screen spacing (the two tiles nearest the middle)
+    const vw = page.viewportSize().width;
+    const pitch = await page.evaluate(() => {
+      const xs = [
+        ...document.querySelectorAll(
+          '[data-stage-panel]:not([hidden]) [data-stage-tile] [data-stage-art]',
+        ),
+      ]
+        .map((a) => a.getBoundingClientRect())
+        .filter((b) => b.width > 0)
+        .map((b) => b.left + b.width / 2)
+        .sort(
+          (a, b) => Math.abs(a - innerWidth / 2) - Math.abs(b - innerWidth / 2),
+        );
+      return Math.abs(xs.find((x) => Math.abs(x - xs[0]) > 20) - xs[0]);
+    });
+    // two packs on: two spacings
+    await dragX(-2 * pitch, { x: vw / 2 + pitch });
     let p = await settled();
     const want2 = mod(startIndex + 2, p.n);
     report(
@@ -2055,12 +2071,14 @@ for (const size of sizes) {
       Math.abs(r.y - lineupY) < 1 && p.track === want2 && p.len === len0,
       `scrollY ${r.y}; track ${p.track}; history ${p.len}; address ${p.path}`,
     );
-    // twelve long drags the same way never reach an end
+    // twelve long drags the same way never reach an end (as many whole
+    // spacings as fit in 80% of the width, at least one)
+    const per = Math.max(1, Math.floor((0.8 * vw) / pitch));
     const before = await pick();
     const tracks = [];
     let gpuMax = before.gpu;
     for (let k = 0; k < 12; k++) {
-      await dragX(-300, { moves: 12 });
+      await dragX(-per * pitch, { moves: 12, x: vw / 2 + (per * pitch) / 2 });
       const q = await settled();
       tracks.push(q.track);
       gpuMax = Math.max(gpuMax, q.gpu);
@@ -2069,10 +2087,10 @@ for (const size of sizes) {
     const travelled = Math.round(after.pos - before.pos);
     report(
       `twelve-drags-no-end-${size}`,
-      travelled === 36 &&
+      travelled === 12 * per &&
         tracks.every((t) => t >= 0 && t < after.n && Number.isInteger(t)) &&
-        after.index === mod(before.index + 36, after.n),
-      `travelled ${travelled} packs (want 36); tracks ${tracks.join(',')}; index ${before.index} -> ${after.index}`,
+        after.index === mod(before.index + 12 * per, after.n),
+      `travelled ${travelled} packs (want ${12 * per}, spacing ${pitch} px); tracks ${tracks.join(',')}; index ${before.index} -> ${after.index}`,
     );
     // flings both ways (released moving): always rests on a pack
     const flings = [];

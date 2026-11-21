@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { createFlowLine, type FlowLine } from '../stage-flow-line';
+import {
+  createFlowLine,
+  LINE_GLIDE_MAX_PER_S,
+  type FlowLine,
+} from '../stage-flow-line';
 
 /** Frames every `dt` ms from `from` to `to`; returns the last frame. */
 function run(l: FlowLine, from: number, to: number, dt = 16) {
@@ -40,7 +44,29 @@ function drag(
 }
 
 describe('flow line: the drag', () => {
-  it('follows the finger at one pack per 100 px', () => {
+  it('follows the hand: one pack per on-screen spacing handed to the grab', () => {
+    for (const px of [330, 247, 180]) {
+      const l = createFlowLine();
+      l.sync(2, 5);
+      l.grab(600, 0, px);
+      l.drag(600 - px / 2, 16);
+      expect(l.frame(16).pos, `spacing ${px}`).toBeCloseTo(2.5, 6);
+      l.drag(600 - 2 * px, 32);
+      expect(l.frame(32).pos, `spacing ${px}`).toBeCloseTo(4, 6);
+    }
+  });
+
+  it('a spacing that cannot be measured falls back to 100 px', () => {
+    for (const px of [0, Number.NaN, -5]) {
+      const l = createFlowLine();
+      l.sync(0, 5);
+      l.grab(300, 0, px);
+      l.drag(200, 16);
+      expect(l.frame(16).pos).toBeCloseTo(1, 6);
+    }
+  });
+
+  it('follows the finger at one pack per 100 px when no spacing is given', () => {
     const l = createFlowLine();
     l.sync(2, 5);
     l.grab(300, 0);
@@ -133,6 +159,32 @@ describe('flow line: the fling', () => {
 });
 
 describe('flow line: the settle', () => {
+  it('the glide never moves more than its top speed in a frame, at 60 and 30 Hz', () => {
+    for (const dt of [16, 33]) {
+      const l = createFlowLine();
+      l.sync(0, 20);
+      // a hard fling: half a lap (10 packs) ahead
+      l.grab(600, 0, 100);
+      l.frame(0);
+      l.drag(400, dt);
+      l.frame(dt);
+      l.release(dt);
+      let prev = l.pos();
+      let f = l.frame(dt);
+      for (let now = 2 * dt; now < 5000; now += dt) {
+        f = l.frame(now);
+        expect(Math.abs(f.pos - prev)).toBeLessThanOrEqual(
+          (LINE_GLIDE_MAX_PER_S * dt) / 1000 + 1e-9,
+        );
+        prev = f.pos;
+      }
+      expect(f.moving).toBe(false);
+      // 2 dragged plus a fling of 8 or more: still a long glide, resting on a pack
+      expect(Number.isInteger(f.pos)).toBe(true);
+      expect(f.pos).toBeGreaterThanOrEqual(10);
+    }
+  });
+
   it('eases at 10 per second: about 90% of the way in 0.23 s', () => {
     const l = createFlowLine();
     l.sync(0, 5);
