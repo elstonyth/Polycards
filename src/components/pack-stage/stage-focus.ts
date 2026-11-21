@@ -161,6 +161,13 @@ export function fitPhoneTextKey(
   return { cy: (top + (foot - top) / 2) / h, long: (foot - top) / h };
 }
 
+/**
+ * Desktop: the stops keep to a box at most this wide (CSS px), centred in the
+ * panel, so on very wide views (3440, a 4K screen at ratio 1) the text column
+ * and the pack stay together. focus.module.css `.over` caps at the same width.
+ */
+export const DESKTOP_MAX_W = 2560;
+
 /** A key as a pose block for the focused pack (`d` slots off the track). */
 function keyBlock(
   key: Readonly<FocusKey>,
@@ -171,9 +178,12 @@ function keyBlock(
   desktop: boolean,
 ): FocusPoseBlock {
   const { w, h } = ctx.panel;
+  // desktop keys are fractions of the centred box (the whole panel up to its cap)
+  const bw = desktop ? Math.min(w, DESKTOP_MAX_W) : w;
+  const x0 = (w - bw) / 2;
   const { cx, long, cy } =
     desktop && key.face === 'back'
-      ? { ...key, ...fitBackKey(key, w, h) }
+      ? { ...key, ...fitBackKey(key, bw, h) }
       : !desktop && (key.kind === 'front' || key.kind === 'closing')
         ? { ...key, ...fitPhoneTextKey(key, w, h) }
         : key;
@@ -190,7 +200,7 @@ function keyBlock(
     rotZ: key.rz * DEG,
     scale: (long * h) / (l.artH * (ctx.fit ?? 1)),
     dim: soldOut ? FOCUS_SOLD_OUT_DIM : 1,
-    fx: w > 0 ? (cx * w - l.cx) / w : 0,
+    fx: w > 0 ? (x0 + cx * bw - l.cx) / w : 0,
     fy: h > 0 ? (cy * h - l.cy) / h : 0,
   };
 }

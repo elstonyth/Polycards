@@ -10,6 +10,9 @@
   inset: 0;
   z-index: 20;
   pointer-events: none;
+  /* very wide views: the stops keep to a centred box (DESKTOP_MAX_W in stage-focus.ts) */
+  max-width: 2560px;
+  margin-inline: auto;
 }
 
 /* a part of the layer that takes taps (the phone's buy dock) */

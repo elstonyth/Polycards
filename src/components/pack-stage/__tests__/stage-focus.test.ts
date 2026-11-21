@@ -5,6 +5,7 @@ import POSES from '../focus-poses.json';
 import {
   blockAt,
   DESKTOP_BACK_LANE,
+  DESKTOP_MAX_W,
   fitBackKey,
   fitPhoneTextKey,
   phoneTextReserve,
@@ -452,14 +453,17 @@ describe('desktop back stops: the pack lies between the text and the icons', () 
     { w: 1920, h: 1011 },
     { w: 2560, h: 1371 },
     { w: 3440, h: 1371 },
+    { w: 3840, h: 2091 },
   ];
   it('every pack, at Pull Odds and Buyback, at every desktop panel', () => {
     for (const slug of SLUGS)
       for (const panel of panels) {
         const l: StageLayout = { ...LAYOUT.desktop, cx: panel.w / 2 };
         const ctx: FocusCtx = { ...ctxFor(slug, true), panel };
-        const left = DESKTOP_BACK_LANE.left * panel.w + DESKTOP_BACK_LANE.gap;
-        const right = DESKTOP_BACK_LANE.right * panel.w - DESKTOP_BACK_LANE.gap;
+        const bw = Math.min(panel.w, DESKTOP_MAX_W);
+        const x0 = (panel.w - bw) / 2;
+        const left = x0 + DESKTOP_BACK_LANE.left * bw + DESKTOP_BACK_LANE.gap;
+        const right = x0 + DESKTOP_BACK_LANE.right * bw - DESKTOP_BACK_LANE.gap;
         ctx.keys.forEach((key, k) => {
           if (key.face !== 'back') return;
           const p = focusPose(
@@ -545,5 +549,34 @@ describe('phone Front and Closing: the pack ends above the text under it', () =>
   it('keeps the reference phone (390 x 710) exactly as the table has it', () => {
     const key = { cx: 0.45, cy: 0.35, long: 0.58 };
     expect(fitPhoneTextKey(key, 390, 710)).toEqual({ cy: 0.35, long: 0.58 });
+  });
+});
+
+describe('very wide desktops: the stops keep to a centred box', () => {
+  it('a 3840 panel places the Front pack in the centred 2560 box', () => {
+    const panel = { w: 3840, h: 2091 };
+    const l: StageLayout = { ...LAYOUT.desktop, cx: panel.w / 2 };
+    const ctx: FocusCtx = { ...ctxFor('151', true), panel };
+    const key = ctx.keys[0]!;
+    const p = focusPose(
+      restBlock(restState(2), 2, l, true, false),
+      1,
+      0,
+      2,
+      2,
+      l,
+      true,
+      false,
+      ctx,
+    );
+    const x0 = (panel.w - DESKTOP_MAX_W) / 2;
+    expect((l.cx / panel.w + p.fx) * panel.w).toBeCloseTo(
+      x0 + key.cx * DESKTOP_MAX_W,
+      6,
+    );
+    expect(p.scale * l.artH).toBeCloseTo(key.long * panel.h, 6);
+  });
+  it('a panel no wider than the box is unchanged', () => {
+    expect(DESKTOP_MAX_W).toBeGreaterThanOrEqual(2560);
   });
 });
