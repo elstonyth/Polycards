@@ -308,6 +308,24 @@ const readLayout = (s) =>
       )
         continue;
       if (getComputedStyle(el).pointerEvents === 'none') continue;
+      // scrolled out of a clipping strip (a row's hidden cards): not on screen
+      const cx = b.left + b.width / 2;
+      const cy = b.top + b.height / 2;
+      let clippedOut = false;
+      for (
+        let e = el.parentElement;
+        e && e !== document.body;
+        e = e.parentElement
+      ) {
+        const cs = getComputedStyle(e);
+        if (cs.overflowX === 'visible' && cs.overflowY === 'visible') continue;
+        const pb = e.getBoundingClientRect();
+        if (cx < pb.left || cx > pb.right || cy < pb.top || cy > pb.bottom) {
+          clippedOut = true;
+          break;
+        }
+      }
+      if (clippedOut) continue;
       const hit = document.elementFromPoint(
         b.left + b.width / 2,
         b.top + b.height / 2,
@@ -628,23 +646,69 @@ async function plainWalk(browser, key, touch) {
     await s.keys('PageDown');
     await s.page.waitForTimeout(500);
   }
-  // turned upright at the top: the flow comes back
-  await s.page.evaluate(() => scrollTo(0, 0));
+  // turned upright down the page (at Just Pulled): the visitor stays where
+  // they were, on the plain page; back at the row, the flow comes back
   const { width, height } = s.page.viewportSize();
+  const mid = await s.page.evaluate(() => {
+    scrollTo(0, Math.round(innerHeight * 1.2));
+    return Math.round(scrollY);
+  });
+  await s.page.waitForTimeout(500);
+  const firstText = () =>
+    s.page.evaluate(() => {
+      const h = [...document.querySelectorAll('h2, h3')].find((e) => {
+        const b = e.getBoundingClientRect();
+        return b.top >= 0 && b.bottom <= innerHeight && b.width > 0;
+      });
+      return h ? h.textContent.trim().slice(0, 30) : '';
+    });
+  const before = await firstText();
   await s.page.setViewportSize({ width: height, height: width });
+  await s.page.waitForTimeout(1500);
+  const down = await s.page.evaluate(() => ({
+    on: window.__packStage?.flow?.()?.on === true,
+    y: Math.round(scrollY),
+  }));
+  const after = await firstText();
+  qa.check(
+    'upright-down-the-page-stays-put ' + key,
+    !down.on && down.y > 0,
+    'flow ' +
+      (down.on ? 'on' : 'off') +
+      ', y ' +
+      mid +
+      ' -> ' +
+      down.y +
+      ', heading in view ' +
+      JSON.stringify(before) +
+      ' -> ' +
+      JSON.stringify(after),
+  );
+  await s.capture('upright-down-the-page');
+  // back to the row: the flow comes back, the 3D draws
+  await s.page.evaluate(() => scrollTo(0, 0));
   const back = await s.page
     .waitForFunction(() => window.__packStage?.flow?.()?.on === true, null, {
       timeout: 8000,
     })
     .then(() => true)
     .catch(() => false);
+  await s.page.waitForTimeout(1500);
+  const M = await packMask(s);
+  const px = M.m.reduce((a, v) => a + v, 0);
   qa.check(
     'flow-back-upright ' + key,
-    back,
-    back ? 'flow on at ' + height + 'x' + width : 'still off',
+    back && px > 2000,
+    (back ? 'flow on' : 'flow still off') +
+      ' at ' +
+      height +
+      'x' +
+      width +
+      ', ' +
+      px +
+      ' canvas pack px',
   );
-  await s.page.waitForTimeout(800);
-  await s.capture('upright');
+  await s.capture('upright-at-the-row');
   dropReportOnlyNotice(s);
   s.checkNoErrors('no-page-errors ' + key);
   return s;
