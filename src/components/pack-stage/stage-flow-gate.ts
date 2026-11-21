@@ -245,16 +245,25 @@ export function createFocusLoad<T>(d: {
  * controls are leaving with their text); the lineup and its exit are drawn;
  * the free span hides the panel (nothing is drawn there; the 3D keeps the
  * chosen pack); from the rise on (`lap`: the rise,
- * Return and Last) it shows again, still taking no taps.
+ * Return and Last) it shows again, still taking no taps. `edge`: the paged
+ * edge for a page no pack is focused on (null: one is); an unfocused page
+ * past it (a jump the focus could not follow) hides the panel up to the rise
+ * too, so the row's UI never sits over the sections below.
  */
 export function panelState(
   handoff: number,
   scrollY: number,
   exitEnd: number,
   riseStart: number | null = null,
+  edge: number | null = null,
 ): { inert: boolean; free: boolean; lap: boolean } {
   const h = Math.round(handoff * 1000) / 1000;
   const below = scrollY >= exitEnd - 0.5;
+  const loose = edge !== null && scrollY > edge;
   const lap = below && riseStart !== null && scrollY >= riseStart;
-  return { inert: below || h > 0, free: below && !lap, lap };
+  return {
+    inert: below || loose || h > 0,
+    free: (below || loose) && !lap,
+    lap,
+  };
 }

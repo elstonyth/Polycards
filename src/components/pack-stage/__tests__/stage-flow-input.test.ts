@@ -95,6 +95,47 @@ describe('flow input: the band reached with no pack focused', () => {
   });
 });
 
+describe('flow input: a scroll the flow did not start (scrollbar, Tab, find, an anchor)', () => {
+  it("a jump from the row into the lineup's exit focuses the centred pack on its first frame, so the exit shows", () => {
+    const p = page();
+    p.input.frame(0, 0);
+    const f = p.input.frame(8000, 16);
+    expect(p.calls).toEqual(['enter']);
+    expect(f.scrollTo).toBeNull();
+    expect(f.handoff).toBe(1);
+    expect(f.exit).toBeCloseTo(0.5, 6);
+    expect(f.past).toBe(true);
+  });
+
+  it('a jump past the exit end leaves the focus alone (the free part reads from the scroll)', () => {
+    const p = page();
+    p.input.frame(0, 0);
+    p.input.frame(9500, 16);
+    expect(p.calls).toEqual([]);
+  });
+
+  it("the flow's own moves into the exit are not jumps: a wheel from the lineup enters once, the wrap and Home enter nothing", () => {
+    const p = page();
+    p.input.wheel(100, 0, false, 0, 0);
+    expect(p.calls).toEqual(['enter']);
+    let y = run(p.input, 0, 16, 1600);
+    p.input.goTo(7, y, 1700);
+    y = run(p.input, y, 1716, 3500);
+    expect(y).toBe(7000);
+    // the lineup's exit, paged by a down notch
+    expect(p.input.wheel(100, 0, false, y, 3600)).toBe(true);
+    y = run(p.input, y, 3616, 5500);
+    expect(y).toBe(9000);
+    expect(p.calls).toEqual(['enter']);
+  });
+
+  it('a pack that cannot be focused is tried, and the page stays where the jump left it', () => {
+    const p = page(null);
+    p.input.frame(0, 0);
+    expect(run(p.input, 8000, 16, 1500)).toBe(8000);
+  });
+});
+
 describe('flow input: touch', () => {
   it('a swipe at the row enters, and a touch during the move is ignored', () => {
     const p = page();

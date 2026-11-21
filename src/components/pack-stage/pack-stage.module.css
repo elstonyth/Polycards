@@ -196,6 +196,18 @@
   transition: opacity 0.45s ease-out;
 }
 
+/* Past the details (data-flow-past) the row's UI is out at once: a jump
+   from the row (the scrollbar, Tab, find-in-page) never fades it over the
+   lineup's exit. A move through the stops has faded it out long before. */
+.flow[data-flow-past] .spinWrap [data-stage-head],
+.flow[data-flow-past] .spinWrap [data-stage-info],
+.flow[data-flow-past] .spinWrap [data-stage-nav],
+.flow[data-flow-past] .spinWrap .label {
+  opacity: 0;
+  pointer-events: none;
+  transition: none;
+}
+
 /* the row takes no swipes or taps while a pack is focused */
 .spinWrap[data-focus-on] .pose,
 .spinWrap[data-focus-on] [data-stage-viewport] {

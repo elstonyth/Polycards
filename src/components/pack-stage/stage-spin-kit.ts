@@ -433,6 +433,9 @@ export function startSpin(host: SpinHost): SpinControl {
       y,
       t.exitEnd,
       t.rise?.start ?? null,
+      // an unfocused page past the paged edge (a jump, the focus not had):
+      // never during a lock, whose release leaves it unfocused on purpose
+      on || f.lock ? null : t.edge,
     );
     // the wrap's lock holds the end of Return (the row at rest exactly), so
     // packs that come back during it fade in rather than cut in
@@ -835,6 +838,8 @@ export function startSpin(host: SpinHost): SpinControl {
       }),
     ready: (f, held) => {
       focus = f;
+      // a scroll that came before it (a jump) is read again with it
+      wake();
       // back from a failure: the flow switches on again (at the row only;
       // further away, the scroll checks again once the page is back near it)
       if (!flowOn()) measure();
@@ -994,6 +999,8 @@ export function startSpin(host: SpinHost): SpinControl {
    */
   let switchCheck = false;
   function onScroll() {
+    // a scroll the flow did not start: the focused view is wanted with it
+    if (!focus && flowOn()) void loadFocus();
     if (
       !switchCheck &&
       src &&

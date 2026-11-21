@@ -578,12 +578,15 @@ export function createFlowInput(d: FlowInputDeps): FlowInput {
       // the band reached with no pack focused, nearer a stop than the row:
       // focus the centred pack. A pack that cannot be focused has no rests
       // in the table (its stops are the row's alone), so the snap brings
-      // the page back to the row unfocused.
+      // the page back to the row unfocused. A scroll the flow did not start
+      // (the scrollbar, Tab, find-in-page) that lands past the paged edge,
+      // in the lineup's exit, focuses it too: what shows there follows the
+      // focus; past the exit end it follows the scroll alone.
       const first = t ? (t.rests[0] ?? t.exitEnd) : 0;
       if (
         t &&
         !d.focused() &&
-        f.zone === 'paged' &&
+        (f.zone === 'paged' || y <= t.exitEnd) &&
         y > (t.r0 + first) / 2 &&
         !(f.animating && f.target === 0) &&
         !f.lock &&

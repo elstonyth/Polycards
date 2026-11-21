@@ -479,6 +479,25 @@ describe('panel state past Closing', () => {
     });
   });
 
+  it('an unfocused page past the paged edge (a jump the focus could not follow) hides the panel until the rise', () => {
+    // edge 7500, exit end 9000, rise from 10720
+    expect(panelState(0, 8000, 9000, 10720, 7500)).toEqual({
+      inert: true,
+      free: true,
+      lap: false,
+    });
+    expect(panelState(0, 7400, 9000, 10720, 7500)).toEqual({
+      inert: false,
+      free: false,
+      lap: false,
+    });
+    expect(panelState(0, 11000, 9000, 10720, 7500)).toEqual({
+      inert: true,
+      free: false,
+      lap: true,
+    });
+  });
+
   it('the free part hides it even with no hand-off (a pack that cannot be focused)', () => {
     expect(panelState(0, 9000, 9000)).toEqual({
       inert: true,
