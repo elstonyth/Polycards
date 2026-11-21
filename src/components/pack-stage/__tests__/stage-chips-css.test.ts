@@ -2,9 +2,10 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-// The site's floating chips (the free pack badge, the Telegram banner) over
-// the home flow: shown at the row only, hidden in every other state of the
-// flow, so they never sit on the page's own content below the lineup.
+// The site's floating chips over the home flow. The Telegram banner shows at
+// the row only and is hidden in every other state of the flow, so it never
+// sits on the page's own content below the lineup. The free pack badge never
+// shows over the flow.
 
 const css = readFileSync(
   join(process.cwd(), 'src/components/pack-stage/pack-stage.module.css'),
@@ -34,6 +35,9 @@ const chips = [
   ":global([data-testid='free-pack-badge'])",
   ':global([data-telegram-banner])',
 ];
+const FREE = chips[0]!;
+/** A selector that holds over the flow in every state (no state attribute). */
+const ALWAYS = /:has\(\.flow\) /;
 /** The selectors that hide this chip. */
 const hidersOf = (chip: string) =>
   hiding.flatMap((r) => r.selectors.filter((s) => s.endsWith(chip)));
@@ -60,11 +64,23 @@ describe('the floating chips over the flow', () => {
         expect(
           /data-focus-on|data-flow-past|data-flow-free|data-flow-lap|data-flow-home/.test(
             s,
-          ),
+          ) ||
+            (chip === FREE && ALWAYS.test(s)),
           s,
         ).toBe(true);
     });
   }
+
+  it('the free pack badge never shows over the flow, at any size', () => {
+    const always = hiding.find(
+      (r) =>
+        /display:\s*none/.test(r.body) &&
+        r.selectors.some((s) => s.endsWith(FREE) && ALWAYS.test(s)),
+    );
+    expect(always).toBeDefined();
+    // the Telegram banner keeps its place at the row on the desktop
+    expect(hidersOf(chips[1]!).some((s) => ALWAYS.test(s))).toBe(false);
+  });
 
   it('fade back in over 0.35 s (with the row UI after the wrap)', () => {
     const t = rules.find((r) =>
