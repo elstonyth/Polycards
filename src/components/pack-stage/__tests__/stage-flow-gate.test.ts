@@ -98,6 +98,29 @@ describe('touch gate: one finger', () => {
   });
 });
 
+describe('touch gate: a touch the system cancels', () => {
+  it('is never a release: a swipe past the threshold, then a touchcancel, pages nothing', () => {
+    const p = atFront();
+    const gate = createTouchGate(p.input, () => false);
+    expect(gate.start(1, true, 200, 600, 1000, 1700)).toBe(true);
+    expect(gate.move(1, 200, 560, 1000, 1716)).toBe(true);
+    expect(gate.move(1, 200, 500, 1000, 1732)).toBe(true);
+    gate.cancel();
+    // the touch is gone: a later end is not ours
+    expect(gate.end(1000, 1748)).toBe(false);
+    const y = run(p.input, 1000, 1764, 3400);
+    expect(y).toBe(1000);
+    expect(p.input.frame(y, 3416).idle).toBe(true);
+  });
+
+  it('a cancel with no touch tracked does nothing', () => {
+    const p = atFront();
+    const gate = createTouchGate(p.input, () => false);
+    gate.cancel();
+    expect(run(p.input, 1000, 1700, 3400)).toBe(1000);
+  });
+});
+
 describe('flow switch: whether the flow runs', () => {
   const at = {
     reduced: false,

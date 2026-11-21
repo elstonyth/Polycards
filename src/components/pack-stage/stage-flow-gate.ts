@@ -29,8 +29,10 @@ export type TouchGate = {
     scrollY: number,
     now: number,
   ): boolean;
-  /** A touchend or touchcancel; true: a release that may page (wake the loop). */
+  /** A touchend; true: a release that may page (wake the loop). */
   end(scrollY: number, now: number): boolean;
+  /** A touchcancel: the system took the touch; never a release, nothing pages. */
+  cancel(): void;
 };
 
 /**
@@ -68,6 +70,11 @@ export function createTouchGate(
       }
       input.touchEnd(scrollY, now);
       return true;
+    },
+    cancel() {
+      if (!touching) return;
+      touching = false;
+      input.touchCancel();
     },
   };
 }

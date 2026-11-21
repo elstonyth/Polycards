@@ -18,7 +18,6 @@
  */
 import type { ReactNode } from 'react';
 import type {
-  ComposeCtx,
   FocusKey,
   SpinPanel,
   StageSpinKit,
@@ -31,9 +30,8 @@ import type { StageTrackHandle } from './StageTrack';
 import { STAGE_DESKTOP_QUERY } from './stage-gate';
 import { stageAnnouncement } from './stage-filter';
 import { tileVars } from './StageTile';
+import { rowTilePacks, tilePose, tileSpinCtx } from './stage-row-tiles';
 import { cancelFrame, frame, type FrameData } from './stage-motion';
-import { poseAt } from './stage-pose';
-import { CAPSULE_LEAN, LEAN } from './stage-spin-math';
 import { composeOpacity, composePose } from './stage-pose-compose';
 import { ciaoCopies, ciaoOpacity, ciaoPose } from './stage-spin';
 import {
@@ -49,6 +47,7 @@ import {
   lapTrim,
   returnProgress,
   riseProgress,
+  sameLap,
 } from './stage-flow';
 import {
   HOLD_MAX_MS,
@@ -125,6 +124,8 @@ function frontKeys(keys: readonly FocusKey[]): FocusKey[] {
   return out;
 }
 
+const SLEEVE_TILE = { soldOut: false, ticket: false } as const;
+
 const fmt = (v: number) => String(Math.round(v * 10000) / 10000);
 
 export const SPIN_KIT: StageSpinKit = {
@@ -141,25 +142,13 @@ export const SPIN_KIT: StageSpinKit = {
     const tiles = row.children;
     for (let i = 0; i < tiles.length; i++) {
       const tile = tiles[i] as HTMLElement;
-      const pack = packs[i];
-      const soldOut = pack?.soldOut ?? false;
+      const pack = packs[i] ?? SLEEVE_TILE;
+      const soldOut = pack.soldOut;
+      const capsule = pack.ticket;
       // step 1's vars for both breakpoints (labels, the other breakpoint)...
-      const vars = tileVars(i, state, soldOut, cyArt);
+      const vars = tileVars(i, state, soldOut, cyArt, capsule);
       // ...then the breakpoint in use posed as the canvas draws it
-      const ctx: ComposeCtx = {
-        spin: {
-          count,
-          turn: 0,
-          lean: pack?.ticket ? CAPSULE_LEAN : LEAN,
-          spinPose: ciaoPose,
-          soldOut,
-          exit: state.exit,
-          panel: g.panel,
-          capsule: !!pack?.ticket,
-        },
-        spinOpacity: ciaoOpacity,
-        compose: composePose,
-      };
+      const ctx = tileSpinCtx(count, pack, state.exit, g.panel);
       // focused: the focus term, keyed to the panel (the picture is the
       // front, so a back stop shows it until the 3D back is drawn)
       const fo = state.focus > 0 ? state.focusOn : null;
@@ -184,7 +173,7 @@ export const SPIN_KIT: StageSpinKit = {
         };
         ctx.focusTerm = fo.term;
       }
-      const pose = poseAt(state, i, lf, g.desktop, soldOut, ctx);
+      const pose = tilePose(state, i, lf, g.desktop, pack, ctx);
       const op = composeOpacity(state, i, g.desktop, count, ctx);
       const k = 1 / g.artH;
       vars[`--${p}-dx`] = fmt((pose.dx + pose.fx * g.panel.w) * k);
@@ -424,16 +413,7 @@ export function startSpin(host: SpinHost): SpinControl {
   };
   /** The lap's state in the stage (the runtime and the tiles redraw on it). */
   const setLap = (next: StageLap | null) => {
-    const cur = stage.state.lap ?? null;
-    if (
-      cur === next ||
-      (cur &&
-        next &&
-        cur.rise === next.rise &&
-        cur.ret === next.ret &&
-        cur.free === next.free)
-    )
-      return;
+    if (sameLap(stage.state.lap ?? null, next)) return;
     stage.state.lap = next;
     stage.wake();
     if (focus) paintRow();
@@ -728,6 +708,11 @@ export function startSpin(host: SpinHost): SpinControl {
     }
     wake();
   };
+  // a touch the system takes (a gesture, a dialog) is dropped, never a release
+  const onTouchCancel = () => {
+    touch.cancel();
+    wake();
+  };
   // The lineup's mouse drag (desktop): the panel is inert there, so the
   // window listens; a press on a control or in a dialog is not a drag.
   const onPointerDown = (e: PointerEvent) => {
@@ -772,7 +757,7 @@ export function startSpin(host: SpinHost): SpinControl {
   window.addEventListener('touchstart', onTouchStart, quiet);
   window.addEventListener('touchmove', onTouchMove, active);
   window.addEventListener('touchend', onTouchEnd, quiet);
-  window.addEventListener('touchcancel', onTouchEnd, quiet);
+  window.addEventListener('touchcancel', onTouchCancel, quiet);
   window.addEventListener('scroll', onScroll, quiet);
   window.addEventListener('resize', measure, quiet);
   rmq.addEventListener('change', measure);
@@ -786,10 +771,11 @@ export function startSpin(host: SpinHost): SpinControl {
     );
     if (!row) return;
     const tiles = Array.from(row.children) as HTMLElement[];
-    const packs = tiles.map((t) => ({
-      soldOut: !!t.getAttribute('aria-label')?.endsWith(', sold out'),
-      ticket: false,
-    }));
+    // the capsule flag from the row on show (the tiles carry only names)
+    const packs = rowTilePacks(
+      tiles.map((t) => t.getAttribute('aria-label')),
+      host.row?.()?.packs,
+    );
     const art = row.querySelector<HTMLElement>('[data-stage-art]');
     const a = art?.getBoundingClientRect();
     const h = panel.getBoundingClientRect();
@@ -1120,7 +1106,7 @@ export function startSpin(host: SpinHost): SpinControl {
       window.removeEventListener('touchstart', onTouchStart);
       window.removeEventListener('touchmove', onTouchMove);
       window.removeEventListener('touchend', onTouchEnd);
-      window.removeEventListener('touchcancel', onTouchEnd);
+      window.removeEventListener('touchcancel', onTouchCancel);
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', measure);
       rmq.removeEventListener('change', measure);

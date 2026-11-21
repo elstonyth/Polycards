@@ -29,6 +29,7 @@ import type {
 import { slotOpacity } from './stage-pose';
 import { SPIN_LOCK } from './stage-pose';
 import { SPIN_GATHER, clamp01, smoothstep } from './stage-spin-math';
+import { CAPSULE_LIMITS } from './stage-capsule-lean';
 
 export { SPIN_LOCK, smoothstep };
 
@@ -340,8 +341,8 @@ export const CIAO_ROW = Object.freeze({
   restLight: 1.12,
   exitLight: 0.85,
   /** Capsules (owner, 2026-11-20): seen tipping away at most 15 deg, toward the viewer at most 25. */
-  capsuleTipAway: 15 * DEG,
-  capsuleTipToward: 25 * DEG,
+  capsuleTipAway: CAPSULE_LIMITS.tipAway,
+  capsuleTipToward: CAPSULE_LIMITS.tipToward,
 });
 
 /** The light multiplier for camera `cam` (rest light, falling to the exit light as the spots go out). */

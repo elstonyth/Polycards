@@ -476,6 +476,25 @@ export function lapAt(
   }
 }
 
+/**
+ * Whether two lap states draw the same: every field counts, the free span's
+ * `trim` included (a normal scroll reaches the trim line inside the free
+ * span, and a jump in can leave it set on the way back up).
+ */
+export function sameLap(
+  a: Readonly<StageLap> | null,
+  b: Readonly<StageLap> | null,
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return (
+    a.rise === b.rise &&
+    a.ret === b.ret &&
+    a.free === b.free &&
+    a.trim === b.trim
+  );
+}
+
 /** The end of Return (Last, and the wrap's lock): the row at rest exactly. */
 export const LAP_END: Readonly<StageLap> = Object.freeze({
   rise: 1,

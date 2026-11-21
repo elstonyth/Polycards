@@ -5,7 +5,7 @@
 // clicked.
 //
 //   node scripts/qa-home-resilience.mjs [baseUrl] [--only=phone|desktop]
-//        [--part=rotate,height,keys,touch,reduced,nojs,lap]
+//        [--part=rotate,height,keys,touch,reduced,nojs,lap,trim,touchcancel]
 //   BROWSER=webkit node scripts/qa-home-resilience.mjs ...
 //
 // Writes frames and a JSON log to QA_OUT (default
@@ -27,6 +27,13 @@
 // - nojs: exactly one footer and no spacer with height.
 // - lap: a turn of the phone at the rise, in Return and at Last keeps the
 //   lap's place; End and PageDown at Last wrap to the row.
+// - trim: scrolling normally (wheel notches, or one-finger swipes) through
+//   every stop and the lineup's exit to the middle of the free span, only the
+//   chosen pack is kept (lap.trim, at most one pack drawn) and, on the phone,
+//   the GPU estimate's peak stays under 40 MB; scrolling back up to the exit
+//   restores the row (no trim, more than one pack drawn).
+// - touchcancel (phone): a drag ended by touchCancel at a stop leaves the page
+//   on that stop; in the free span it leaves no glide.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { chromium, webkit } from 'playwright';
 
@@ -1033,6 +1040,307 @@ async function lapPart(size) {
   await s.ctx.close();
 }
 
+/** A drag that lets go gently (no fling) or ends in the given touch event. */
+async function drag(
+  s,
+  x,
+  y0,
+  y1,
+  { steps = 8, delay = 16, hold = 0, end = 'touchEnd' } = {},
+) {
+  const { cdp, page } = s;
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ x, y: y0 }],
+  });
+  for (let i = 1; i <= steps; i++) {
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ x, y: y0 + ((y1 - y0) * i) / steps }],
+    });
+    await page.waitForTimeout(delay);
+  }
+  if (hold) await page.waitForTimeout(hold);
+  await cdp.send('Input.dispatchTouchEvent', { type: end, touchPoints: [] });
+}
+
+/** The lap and what the 3D engine draws, as numbers. */
+const trimProbe = (page) =>
+  page.evaluate(() => {
+    const ps = window.__packStage;
+    const lap = ps?.flow?.()?.lap ?? null;
+    const d = ps?.runtime?.()?.drawn ?? [];
+    const list = Array.isArray(d) ? d : [];
+    return {
+      lap,
+      drawn: Array.isArray(d) ? d.length : Number(d),
+      ids: list.map((e) => (typeof e === 'string' ? e : (e?.id ?? '?'))),
+      free: !!document.querySelector('[data-flow-free]'),
+      y: Math.round(scrollY * 10) / 10,
+    };
+  });
+
+/** Normal scrolling only: one notch (desktop) or one swipe (phone) per step. */
+async function driveStep(s, p, dir) {
+  const { page } = s;
+  const paged = p.exitEnd === null || p.y < p.exitEnd - 1;
+  if (s.size === 'phone') {
+    const len = paged ? 300 : 220;
+    const [a, b] = dir > 0 ? [640, 640 - len] : [300, 300 + len];
+    await drag(s, 195, a, b, { steps: 10, delay: 30, hold: paged ? 0 : 120 });
+  } else {
+    await page.mouse.move(720, 450);
+    await page.mouse.wheel(0, dir * (paged ? 120 : 300));
+    await page.waitForTimeout(paged ? 1600 : 250);
+  }
+  return rest(page);
+}
+
+/** Scroll down normally until goal(p), recording the rest indexes passed. */
+async function driveDown(s, p, goal, visited) {
+  for (let i = 0; i < 150 && !goal(p); i++) {
+    p = await driveStep(s, p, 1);
+    const k = restIndex(p);
+    if (k >= 0) visited.add(k);
+  }
+  return p;
+}
+
+/** The middle of the free span (between the lineup exit and the rise). */
+const freeMiddle = (p) =>
+  p.exitEnd === null
+    ? Infinity
+    : p.rise
+      ? (p.exitEnd + p.rise.start) / 2
+      : p.exitEnd + (p.max - p.exitEnd) / 2;
+
+async function trimPart(size) {
+  const s = await open(size);
+  const { page } = s;
+  if (!s.cdp && size === 'phone') {
+    report('trim-free-span-phone', 'SKIP', 'no CDP touch input in ' + ENGINE);
+    report('trim-restored-phone', 'SKIP', 'no CDP touch input in ' + ENGINE);
+    report(
+      'trim-gpu-free-span-phone',
+      'SKIP',
+      'no CDP touch input in ' + ENGINE,
+    );
+    await s.ctx.close();
+    return;
+  }
+  await load(s);
+  let p = await rest(page);
+  if (p.exitEnd === null) {
+    report('trim-free-span-' + size, false, 'no lineup exit in the flow table');
+    await s.ctx.close();
+    return;
+  }
+  const visited = new Set([restIndex(p)]);
+  const way = size === 'phone' ? 'swipes' : 'wheel notches';
+  p = await driveDown(s, p, (q) => q.free && q.y >= freeMiddle(q), visited);
+  await page.waitForTimeout(1200);
+  p = await rest(page);
+  const t = await trimProbe(page);
+  await shot(page, 'trim-free-span-' + size);
+  const stopsText =
+    'rests passed ' +
+    [...visited].sort((a, b) => a - b).join(',') +
+    ' of ' +
+    p.stops.length;
+  report(
+    'trim-free-span-' + size,
+    !!t.lap &&
+      t.lap.free === true &&
+      t.lap.trim === true &&
+      t.free &&
+      t.drawn <= 1,
+    'by ' +
+      way +
+      ' to scrollY ' +
+      t.y +
+      ' (exit end ' +
+      p.exitEnd +
+      ', rise ' +
+      (p.rise ? p.rise.start : 'none') +
+      ', max ' +
+      p.max +
+      '); lap ' +
+      JSON.stringify(t.lap) +
+      '; data-flow-free ' +
+      t.free +
+      '; drawn ' +
+      t.drawn +
+      (t.ids.length ? ' [' + t.ids.join(',') + ']' : '') +
+      '; ' +
+      stopsText,
+  );
+  if (size === 'phone') {
+    // the Just Pulled drawer has loaded; the GPU estimate's peak in the free span
+    const live = await page
+      .waitForSelector('[data-jp-live="1"]', {
+        state: 'attached',
+        timeout: 20000,
+      })
+      .then(() => true)
+      .catch(() => false);
+    await page.evaluate(() => {
+      window.__gpuPeak = 0;
+      const f = () => {
+        const b = window.__packStage?.stats?.()?.gpuBytesEstimate ?? 0;
+        window.__gpuPeak = Math.max(window.__gpuPeak, b);
+        requestAnimationFrame(f);
+      };
+      requestAnimationFrame(f);
+    });
+    await page.waitForTimeout(2000);
+    await drag(s, 195, 600, 400, { steps: 10, delay: 30, hold: 120 });
+    await rest(page);
+    await drag(s, 195, 400, 600, { steps: 10, delay: 30, hold: 120 });
+    await rest(page);
+    await page.waitForTimeout(1000);
+    const g = await page.evaluate(() => ({
+      peak: window.__gpuPeak,
+      has: typeof window.__packStage?.stats?.()?.gpuBytesEstimate === 'number',
+      free: !!document.querySelector('[data-flow-free]'),
+    }));
+    const mb = Math.round((g.peak / 1048576) * 100) / 100;
+    report(
+      'trim-gpu-free-span-phone',
+      live && g.has && g.free && mb <= 40,
+      'peak ' +
+        mb +
+        ' MB (cap 40); drawer loaded ' +
+        live +
+        '; estimate present ' +
+        g.has +
+        '; still in the free span ' +
+        g.free,
+    );
+    p = await rest(page);
+  }
+  // normally back up to the lineup exit
+  for (let i = 0; i < 150 && p.free && p.y > p.exitEnd + 2; i++) {
+    p = await driveStep(s, p, -1);
+  }
+  await page.waitForTimeout(1200);
+  p = await rest(page);
+  // at the exit's end the trim is off; one more gesture up pages back into
+  // the lineup, where the other packs are drawn again
+  const atEnd = await trimProbe(page);
+  p = await driveStep(s, p, -1);
+  await page.waitForTimeout(1800);
+  p = await rest(page);
+  const u = await trimProbe(page);
+  report(
+    'trim-restored-' + size,
+    !!atEnd.lap &&
+      atEnd.lap.trim === false &&
+      (u.lap === null || u.lap.trim !== true) &&
+      u.drawn > 1,
+    'at the exit end: lap ' +
+      JSON.stringify(atEnd.lap) +
+      ', drawn ' +
+      atEnd.drawn +
+      '; then ' +
+      'back up by ' +
+      way +
+      ' to scrollY ' +
+      u.y +
+      ' (exit end ' +
+      p.exitEnd +
+      ', rest ' +
+      restIndex(p) +
+      '); lap ' +
+      JSON.stringify(u.lap) +
+      '; drawn ' +
+      u.drawn +
+      '; data-flow-free ' +
+      u.free,
+  );
+  report(
+    'errors-trim-' + size,
+    page.errors.length === 0,
+    page.errors.join(' | ') || 'none',
+  );
+  await s.ctx.close();
+}
+
+async function touchcancelPart(size) {
+  if (size !== 'phone') return;
+  const s = await open(size);
+  const { page } = s;
+  if (!s.cdp) {
+    report(
+      'touchcancel-no-page-phone',
+      'SKIP',
+      'no CDP touch input in ' + ENGINE,
+    );
+    report(
+      'touchcancel-no-glide-free-span-phone',
+      'SKIP',
+      'no CDP touch input in ' + ENGINE,
+    );
+    await s.ctx.close();
+    return;
+  }
+  await load(s);
+  let p = await rest(page);
+  for (let i = 0; i < 6 && restIndex(p) < 2; i++) {
+    await swipe(s, 195, 640, 195, 340);
+    p = await rest(page);
+  }
+  const y0 = p.y;
+  const k0 = restIndex(p);
+  const f0 = p.focus;
+  await drag(s, 195, 600, 520, { steps: 5, delay: 30, end: 'touchCancel' });
+  await page.waitForTimeout(2000);
+  let q = await rest(page);
+  report(
+    'touchcancel-no-page-phone',
+    k0 >= 1 && Math.abs(q.y - y0) <= 2 && restIndex(q) === k0 && q.focus === f0,
+    'before: scrollY ' +
+      y0 +
+      ', rest ' +
+      k0 +
+      ', stop ' +
+      f0 +
+      '; after an 80 px drag ended by touchCancel and 2 s: scrollY ' +
+      q.y +
+      ', rest ' +
+      restIndex(q) +
+      ', stop ' +
+      q.focus,
+  );
+  // in the free span: a cancel must leave the page where the finger left it
+  q = await driveDown(s, q, (r) => r.free && r.y >= freeMiddle(r), new Set());
+  await page.waitForTimeout(800);
+  q = await rest(page);
+  await drag(s, 195, 650, 500, { steps: 6, delay: 30, end: 'touchCancel' });
+  await page.waitForTimeout(100);
+  const ya = await page.evaluate(() => scrollY);
+  await page.waitForTimeout(1200);
+  const yb = await page.evaluate(() => scrollY);
+  report(
+    'touchcancel-no-glide-free-span-phone',
+    q.free && Math.abs(yb - ya) <= 2,
+    'free span ' +
+      q.free +
+      '; a 150 px drag ended by touchCancel: scrollY ' +
+      Math.round(ya * 10) / 10 +
+      ' at 100 ms, ' +
+      Math.round(yb * 10) / 10 +
+      ' at 1.3 s (moved ' +
+      Math.round(Math.abs(yb - ya) * 10) / 10 +
+      ' px, limit 2)',
+  );
+  report(
+    'errors-touchcancel-phone',
+    page.errors.length === 0,
+    page.errors.join(' | ') || 'none',
+  );
+  await s.ctx.close();
+}
+
 const log = [];
 for (const size of ['phone', 'desktop']) {
   if (ONLY && ONLY !== size) continue;
@@ -1051,6 +1359,8 @@ for (const size of ['phone', 'desktop']) {
   await run('reduced', () => reducedPart(size));
   await run('nojs', () => nojsPart(size));
   await run('lap', () => lapPart(size));
+  await run('trim', () => trimPart(size));
+  await run('touchcancel', () => touchcancelPart(size));
 }
 await browser.close();
 writeFileSync(

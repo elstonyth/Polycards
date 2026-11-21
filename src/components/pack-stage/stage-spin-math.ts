@@ -5,8 +5,7 @@
  * lazily loaded chunks (spin, runtime, focus) reach this one. Pure.
  */
 import { slotIntroLinear } from './stage-pose';
-
-const DEG = Math.PI / 180;
+import { CAPSULE_LIMITS } from './stage-capsule-lean';
 
 /** Packs' lean mode amplitude, radians (10.9, the planner's default). */
 export const LEAN = 0.61;
@@ -15,7 +14,7 @@ export const LEAN = 0.61;
  * Capsules' lean, radians: 25 degrees each way (owner, 2026-11-20). Used by
  * focus and spin alike; tests assert "within +-CAPSULE_LEAN", never a number.
  */
-export const CAPSULE_LEAN = 25 * DEG;
+export const CAPSULE_LEAN = CAPSULE_LIMITS.yaw;
 
 /** End of the full-turn row's gather (10.9); the composed pose weighs its idle terms by it. */
 export const SPIN_GATHER = 0.15;

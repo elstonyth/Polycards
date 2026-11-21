@@ -18,6 +18,7 @@ import {
   lapTrim,
   returnProgress,
   riseProgress,
+  sameLap,
   spreadAt,
   wrapScrollAt,
   wrapTarget,
@@ -538,5 +539,34 @@ describe('stage flow: the free part kept across a re-measure (rotation, plan 2.9
       9800,
       6,
     );
+  });
+});
+
+describe('stage flow: when the lap state changes (the free-span trim)', () => {
+  const free = (trim: boolean) => ({ rise: 0, ret: 0, free: true, trim });
+  it('a trim that switches on or off is a change', () => {
+    expect(sameLap(free(false), free(true))).toBe(false);
+    expect(sameLap(free(true), free(false))).toBe(false);
+  });
+  it('the same values are the same lap; null only equals null', () => {
+    expect(sameLap(free(true), free(true))).toBe(true);
+    expect(sameLap(null, null)).toBe(true);
+    expect(sameLap(free(false), null)).toBe(false);
+    expect(sameLap(null, free(false))).toBe(false);
+  });
+  it('rise, return and free each count', () => {
+    const a = { rise: 0.5, ret: 0, free: false, trim: false };
+    expect(sameLap(a, { ...a, rise: 0.6 })).toBe(false);
+    expect(sameLap(a, { ...a, ret: 0.1 })).toBe(false);
+    expect(sameLap(a, { ...a, free: true })).toBe(false);
+  });
+  it('a normal scroll into the free span reaches the trim (lapAt then sameLap)', () => {
+    // entering from the exit: the first free frame is not yet past the trim
+    // line, a later one is; the second must register as a change
+    const at = { zone: 'free', span: 'free' } as unknown as FlowAt;
+    const first = lapAt(at, { rise: 0, ret: 0 }, false);
+    const later = lapAt(at, { rise: 0, ret: 0 }, true);
+    expect(later?.trim).toBe(true);
+    expect(sameLap(first, later)).toBe(false);
   });
 });

@@ -14,7 +14,12 @@ import type {
   StageLayout,
   StageState,
 } from '../contract';
-import { CAPSULE_LIMITS, capsuleLean } from '../runtime/stage-capsule-lean';
+import {
+  CAPSULE_LIMITS,
+  capsuleLean,
+  capsulePose,
+} from '../stage-capsule-lean';
+import { tileVars } from '../StageTile';
 import { FOCUS_TERM } from '../stage-compose';
 import { focusKeys } from '../stage-focus-keys';
 import { poseAt, restState } from '../stage-pose';
@@ -151,4 +156,78 @@ describe('capsule lean limits', () => {
       }
     });
   }
+
+  // The CSS tiles: tileVars writes the row's rest pose (the server HTML
+  // and every frame without the spin chunk), so a capsule's tile clamps there
+  // too. Read back from the written vars (4 decimals, hence the tolerance).
+  const CSS_EPS = 1e-4;
+  const cssLean = (vars: Record<string, string>, p: 'm' | 'd') => ({
+    rotX: Number(vars[`--${p}-rx`]),
+    rotY: Number(vars[`--${p}-ry`]),
+  });
+  const cssWithin = (vars: Record<string, string>, what: string) => {
+    for (const p of ['m', 'd'] as const) {
+      const { rotX, rotY } = cssLean(vars, p);
+      expect(Math.abs(rotY), `${what} ${p} yaw`).toBeLessThanOrEqual(
+        CAPSULE_LIMITS.yaw + CSS_EPS,
+      );
+      expect(rotX, `${what} ${p} away`).toBeLessThanOrEqual(
+        CAPSULE_LIMITS.tipAway + CSS_EPS,
+      );
+      expect(-rotX, `${what} ${p} toward`).toBeLessThanOrEqual(
+        CAPSULE_LIMITS.tipToward + CSS_EPS,
+      );
+    }
+  };
+
+  it('CSS tiles: a capsule keeps the limits over the row at rest, every 0.01 of track', () => {
+    for (let k = 0; k <= (N - 1) * 100; k++) {
+      const track = k / 100;
+      for (let i = 0; i < N; i++)
+        for (const px of [-1, 0, 1])
+          for (const py of [-1, 0, 1]) {
+            const s: StageState = {
+              ...restState(2),
+              track,
+              pointerX: px,
+              pointerY: py,
+            };
+            cssWithin(
+              tileVars(i, s, false, 0, true),
+              `track=${track} i=${i} p=${px},${py}`,
+            );
+          }
+    }
+  });
+
+  it('CSS tiles: sleeves stay as they are', () => {
+    let turned = false;
+    for (let k = 0; k <= (N - 1) * 20; k++)
+      for (let i = 0; i < N; i++) {
+        const s: StageState = { ...restState(2), track: k / 20, pointerX: 1 };
+        const sleeve = tileVars(i, s, false, 0.3);
+        expect(tileVars(i, s, false, 0.3, false)).toEqual(sleeve);
+        // the rest table turns a sleeve's neighbours past the capsule limit
+        if (Math.abs(cssLean(sleeve, 'd').rotY) > CAPSULE_LIMITS.yaw + 0.05)
+          turned = true;
+      }
+    expect(turned).toBe(true);
+  });
+
+  it('a capsule has no Buyback: five stops, on both sizes', () => {
+    for (const desktop of [false, true])
+      expect(
+        focusKeys('gold-capsule', desktop, 'capsule').map((k) => k.kind),
+      ).toEqual(['front', 'tophits', 'odds', 'pulls', 'closing']);
+  });
+
+  it('capsulePose clamps a capsule and hands a sleeve its own pose', () => {
+    const wide = { rotX: 1, rotY: -1, dx: 3 };
+    expect(capsulePose(wide, false)).toBe(wide);
+    expect(capsulePose(wide, true)).toEqual({
+      rotX: CAPSULE_LIMITS.tipAway,
+      rotY: -CAPSULE_LIMITS.yaw,
+      dx: 3,
+    });
+  });
 });

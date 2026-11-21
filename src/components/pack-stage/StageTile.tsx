@@ -14,6 +14,7 @@ import {
   stageOpacity,
   stageSpring,
 } from './stage-pose';
+import { capsulePose } from './stage-capsule-lean';
 import styles from './pack-stage.module.css';
 
 const clamp01 = (v: number) => (v < 0 ? 0 : v > 1 ? 1 : v);
@@ -56,12 +57,15 @@ export type TileGeom = {
  * posed in host px from the measured stage and divided back by the art height
  * (the row's panel offsets folded into dx and dy). `cyArt` is the art centre's
  * height in the host, in art heights (it sets how far the float-in drops).
+ * `capsule`: a capsule's tile keeps the capsule's lean limits (`capsulePose`),
+ * as the 3D capsule does.
  */
 export function tileVars(
   index: number,
   state: StageState,
   soldOut: boolean,
   cyArt = 0,
+  capsule = false,
 ): Record<string, string> {
   const d = index - state.track;
   const a = Math.abs(d);
@@ -81,7 +85,10 @@ export function tileVars(
       artH: 1,
       artW: u.artW,
     };
-    const pose = poseAt(state, index, layout, desktop, soldOut);
+    const pose = capsulePose(
+      poseAt(state, index, layout, desktop, soldOut),
+      capsule,
+    );
     const reach = desktop ? STAGE_REACH.desktop : STAGE_REACH.phone;
     const op = stageOpacity(state, index, desktop);
     // Desktop: every visible neighbour carries its name and price; the centred
@@ -140,7 +147,7 @@ export default function StageTile({
 }) {
   const a0 = Math.abs(index - start);
   const style = {
-    ...tileVars(index, restState(start), pack.soldOut),
+    ...tileVars(index, restState(start), pack.soldOut, 0, pack.ticket),
     '--i': String(index),
     // The loader hand-over: centre first, neighbours 90 ms apart.
     '--fade-delay': `${Math.min(a0, 4) * 90}ms`,

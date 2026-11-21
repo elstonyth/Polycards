@@ -62,7 +62,7 @@ const BASE =
   process.env.PW_BASE ??
   'http://localhost:4300';
 const ONLY = (args.find((a) => a.startsWith('--only=')) ?? '=').split('=')[1];
-/** --part=pass,motion,nav,keys,reload,wp3c,lineup,wp4b,wp5,wp67: run only these groups. */
+/** --part=pass,motion,nav,keys,reload,wp3c,lineup,wp4b,wp5,wp67,poly: run only these groups. */
 const PARTS = (args.find((a) => a.startsWith('--part=')) ?? '=')
   .split('=')[1]
   .split(',')
@@ -2462,6 +2462,450 @@ for (const size of sizes) {
     }
     report(
       'errors-wp67-' + size,
+      page.errors.length === 0,
+      page.errors.join(' | '),
+    );
+    await s.ctx.close();
+  }
+
+  // The Poly tab (5 capsules) through the lap: lean limits in every frame of
+  // the lineup, the rise and the return, the free span's memory, the seam, the
+  // pick carried through the wrap, and the stops. One lap per capsule index.
+  if (part('poly')) {
+    const s = await open(size);
+    const { page } = s;
+    await load(s);
+    const DEG = Math.PI / 180;
+    const LIM = { yaw: 25 * DEG, away: 15 * DEG, toward: 25 * DEG };
+    const EPS = 1e-3;
+    const CAPSULE_KINDS = ['front', 'tophits', 'odds', 'pulls', 'closing'];
+    const HELD = ['loading', 'compiling', 'built', 'uploaded'];
+    const MB = (b) => Math.round((b / 1e6) * 100) / 100;
+    const r3 = (v) => Math.round(v * 1000) / 1000;
+    await page.getByRole('button', { name: /^Poly$/ }).click();
+    await page.waitForFunction(
+      () => {
+        const t = document.querySelectorAll(
+          '[data-stage-panel]:not([hidden]) [data-stage-tile]',
+        );
+        const fl = window.__packStage.flow();
+        return t.length > 0 && fl.bound && !fl.busy;
+      },
+      null,
+      { timeout: 20000 },
+    );
+    await page.waitForTimeout(2500);
+    // Every frame, the composed pose of each visible tile (--m-ry/--m-rx on a
+    // phone, --d-ry/--d-rx on a desktop, radians), under the current phase.
+    // The page exposes no 3D rotation, so the tile pose (the pose a capsule is
+    // posed from) stands for the 3D capsule: "any" = every tile that is not
+    // faded out, "pic" = those whose picture shows (the flat tiles).
+    await page.evaluate(() => {
+      const num = (v) => {
+        const n = parseFloat(v);
+        return Number.isFinite(n) ? n : null;
+      };
+      const shown = (el, stop) => {
+        let o = 1;
+        for (let e = el; e && e !== stop.parentElement; e = e.parentElement) {
+          const cs = getComputedStyle(e);
+          if (cs.visibility === 'hidden' || cs.display === 'none') return 0;
+          o *= Number(cs.opacity);
+        }
+        return o;
+      };
+      window.__lean = { on: false, phase: 'load', ph: {} };
+      const tick = () => {
+        const L = window.__lean;
+        if (L.on) {
+          const k = innerWidth >= 1024 ? 'd' : 'm';
+          const ph = (L.ph[L.phase] ??= {
+            frames: 0,
+            any: { n: 0, yaw: 0, up: -9, down: 9, ex: null },
+            pic: { n: 0, yaw: 0, up: -9, down: 9, ex: null },
+          });
+          ph.frames++;
+          const tiles = document.querySelectorAll(
+            '[data-stage-panel]:not([hidden]) [data-stage-tile]',
+          );
+          for (const t of tiles) {
+            const cs = getComputedStyle(t);
+            const ry = num(cs.getPropertyValue('--' + k + '-ry'));
+            const rx = num(cs.getPropertyValue('--' + k + '-rx'));
+            if (ry === null || rx === null) continue;
+            const op = num(cs.getPropertyValue('--' + k + '-op'));
+            if (op !== null && op <= 0.001) continue;
+            const img = t.querySelector('img');
+            const pic = img ? shown(img, t) : 0;
+            for (const [name, on] of [
+              ['any', true],
+              ['pic', pic > 0.001],
+            ]) {
+              if (!on) continue;
+              const a = ph[name];
+              a.n++;
+              a.yaw = Math.max(a.yaw, Math.abs(ry));
+              a.up = Math.max(a.up, rx);
+              a.down = Math.min(a.down, rx);
+              const bad =
+                Math.abs(ry) > 25 * (Math.PI / 180) + 1e-3 ||
+                rx > 15 * (Math.PI / 180) + 1e-3 ||
+                rx < -25 * (Math.PI / 180) - 1e-3;
+              if (bad && !a.ex)
+                a.ex = {
+                  id: t.dataset.packId,
+                  yawDeg: Math.round((ry * 1800) / Math.PI) / 10,
+                  rotXDeg: Math.round((rx * 1800) / Math.PI) / 10,
+                };
+            }
+          }
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    const phase = (p) =>
+      page.evaluate((v) => {
+        window.__lean.phase = v;
+      }, p);
+    const pState = () =>
+      page.evaluate((held) => {
+        const ps = window.__packStage;
+        const fl = ps.flow();
+        const rt = ps.runtime?.() ?? null;
+        const flow = document.querySelector('[data-home-flow]');
+        const f = ps.focus?.() ?? null;
+        const r3 = (v) => Math.round(v * 1000) / 1000;
+        return {
+          y: scrollY,
+          t: fl.table,
+          lap: fl.lap,
+          busy: fl.busy,
+          on: !!f?.on,
+          kinds: f?.kinds ?? [],
+          free: flow.hasAttribute('data-flow-free'),
+          lapAttr: flow.hasAttribute('data-flow-lap'),
+          drawn: (rt?.drawn ?? [])
+            .filter((d) => d.opacity > 0)
+            .map((d) => ({
+              id: d.id,
+              x: r3(d.x),
+              y: r3(d.y),
+              z: r3(d.z),
+              s: r3(d.scale),
+            })),
+          held: (rt?.slots ?? [])
+            .filter(
+              (sl) =>
+                held.includes(sl.half ?? '') || held.includes(sl.full ?? ''),
+            )
+            .map((sl) => sl.id),
+          gpu: ps.stats?.()?.gpuBytesEstimate ?? 0,
+          track: ps.state.track,
+          index: ps.state.focusOn?.ctx?.index ?? null,
+          id: ps.state.focusOn?.id ?? null,
+          len: history.length,
+        };
+      }, HELD);
+    const to = async (y, wait = 500) => {
+      await page.evaluate((v) => window.scrollTo(0, v), y);
+      await page.waitForTimeout(wait);
+      return pState();
+    };
+    const sweep = async (from, upto, steps, dwell) => {
+      const seen = [];
+      for (let i = 0; i <= steps; i++) {
+        seen.push(await to(from + ((upto - from) * i) / steps, dwell));
+      }
+      return seen;
+    };
+    const settle = async () => {
+      await rest(page, 8000);
+      await page.waitForTimeout(500);
+      return pState();
+    };
+    const pickSettled = async () => {
+      await page.waitForTimeout(150);
+      await page
+        .waitForFunction(
+          () => {
+            const ln = window.__packStage.flow().line;
+            return !(ln?.moving || ln?.pending);
+          },
+          null,
+          { timeout: 15000 },
+        )
+        .catch(() => {});
+      await page.waitForTimeout(300);
+      return pState();
+    };
+    const tol = (p, q) =>
+      Math.abs(p.x - q.x) <= 0.02 * Math.abs(p.x) + 0.005 &&
+      Math.abs(p.y - q.y) <= 0.01 &&
+      Math.abs(p.z - q.z) <= 0.01 &&
+      Math.abs(p.s - q.s) <= 0.01;
+    /** Two sets of poses, ordered left to right, agree pack for pack (ids ignored). */
+    const sameRow = (a, b) => {
+      if (a.length === 0 || a.length !== b.length) return false;
+      const o = (l) => [...l].sort((m, n) => m.x - n.x);
+      const A = o(a);
+      const B = o(b);
+      return A.every((p, i) => tol(p, B[i]));
+    };
+    const centred = (st) =>
+      [...st.drawn].sort((m, n) => Math.abs(m.x) - Math.abs(n.x))[0]?.id ??
+      null;
+
+    const tiles = await page.evaluate(() =>
+      [
+        ...document.querySelectorAll(
+          '[data-stage-panel]:not([hidden]) [data-stage-tile]',
+        ),
+      ].map((t) => t.dataset.packId),
+    );
+    report(
+      'poly-tab-has-5-capsules-' + size,
+      tiles.length === 5,
+      tiles.length + ' tiles: ' + tiles.join(', '),
+    );
+
+    await page.evaluate(() => {
+      window.__lean.on = true;
+    });
+    const laps = [];
+    let prev = null;
+    for (let lap = 0; lap < 5; lap++) {
+      const rec = { lap };
+      await phase('row');
+      await page.waitForTimeout(800);
+      // the row to the lineup (the hand-off), then the pick
+      await phase('hand-off');
+      await page.keyboard.press('End');
+      await page.waitForTimeout(200);
+      await rest(page);
+      await phase('lineup');
+      await page.waitForTimeout(800);
+      if (lap > 0) {
+        await page.keyboard.press('ArrowRight');
+        await pickSettled();
+      }
+      const at = await pState();
+      rec.id = at.id;
+      rec.index = at.index;
+      rec.kinds = at.kinds;
+      rec.prevIndex = prev?.index ?? null;
+      const t = at.t;
+      // the free span: the trimmed middle
+      await phase('exit');
+      const free = await to((t.exitEnd + t.rise.start) / 2, 1800);
+      rec.free = {
+        y: Math.round(free.y),
+        free: free.free,
+        lapAttr: free.lapAttr,
+        drawn: free.drawn.map((d) => d.id),
+        held: free.held,
+        gpu: free.gpu,
+        gpuLineup: at.gpu,
+      };
+      // the rise, then the plateau, then the return
+      await phase('rise');
+      const rs = (await to(t.rise.start - 2, 300)).t.rise;
+      rec.riseSteps = await sweep(rs.start, rs.end, 24, 90);
+      const t2 = (await pState()).t;
+      await phase('plateau');
+      await to(t2.ret.start - 2, 400);
+      await phase('return');
+      rec.retSteps = await sweep(t2.ret.start, t2.ret.end, 24, 90);
+      // the seam: just above Last's top, then across it
+      await phase('plateau');
+      rec.before = await to(t2.lastTop - 2, 1500);
+      await phase('wrap');
+      await page.evaluate((v) => window.scrollTo(0, v), t2.lastTop + 20);
+      await page.waitForTimeout(40);
+      rec.after = await pState();
+      await phase('row');
+      rec.landed = await settle();
+      rec.r0 = t2.r0;
+      laps.push(rec);
+      prev = rec;
+    }
+    await page.evaluate(() => {
+      window.__lean.on = false;
+    });
+    const ph = await page.evaluate(() => window.__lean.ph);
+    const deg = (v) =>
+      Math.abs(v) > 8 ? 'n/a' : Math.round((v / DEG) * 10) / 10;
+    const within = (a) =>
+      a.yaw <= LIM.yaw + EPS &&
+      a.up <= LIM.away + EPS &&
+      a.down >= -LIM.toward - EPS;
+    const leanLine = (names, kind) =>
+      names
+        .map((n) => {
+          const a = ph[n]?.[kind];
+          return a && a.n
+            ? n +
+                ': |yaw| ' +
+                deg(a.yaw) +
+                ', rotX ' +
+                deg(a.down) +
+                '..' +
+                deg(a.up) +
+                ' (' +
+                a.n +
+                ' tile samples, ' +
+                ph[n].frames +
+                ' frames' +
+                (a.ex ? '; first over-limit ' + JSON.stringify(a.ex) : '') +
+                ')'
+            : n + ': no ' + kind + ' sample';
+        })
+        .join('; ');
+    const leanOk = (names, kind) =>
+      names.every((n) => !ph[n]?.[kind]?.n || within(ph[n][kind]));
+    const motionPhases = ['rise', 'return'];
+    const restPhases = ['row', 'hand-off', 'lineup'];
+    const framesIn = (names) => names.every((n) => (ph[n]?.frames ?? 0) > 0);
+    report(
+      'poly-lean-3d-capsules-rise-and-return-' + size,
+      framesIn(motionPhases) && leanOk(motionPhases, 'any'),
+      leanLine(motionPhases, 'any') +
+        ' [limits |yaw| <= 25, rotX <= 15 away, >= -25 toward; composed tile pose stands for the 3D capsule]',
+    );
+    report(
+      'poly-lean-flat-tiles-rise-and-return-' + size,
+      framesIn(motionPhases) && leanOk(motionPhases, 'pic'),
+      leanLine(motionPhases, 'pic'),
+    );
+    report(
+      'poly-lean-3d-capsules-row-handoff-lineup-' + size,
+      framesIn(restPhases) &&
+        leanOk(restPhases, 'any') &&
+        restPhases.every((n) => ph[n]?.any.n > 0),
+      leanLine(restPhases, 'any'),
+    );
+    report(
+      'poly-lean-flat-tiles-row-handoff-lineup-' + size,
+      framesIn(restPhases) && leanOk(restPhases, 'pic'),
+      leanLine(restPhases, 'pic'),
+    );
+    // (2) the free span holds and draws only the chosen capsule
+    report(
+      'poly-free-span-only-the-chosen-capsule-' + size,
+      laps.every(
+        (l) =>
+          l.free.free &&
+          !l.free.lapAttr &&
+          l.free.held.length === 1 &&
+          l.free.held[0] === l.id &&
+          l.free.drawn.every((d) => d === l.id) &&
+          l.free.gpu < l.free.gpuLineup,
+      ),
+      laps
+        .map(
+          (l) =>
+            'index ' +
+            l.index +
+            ' (' +
+            l.id +
+            '): held [' +
+            l.free.held.join(',') +
+            '], drawn [' +
+            l.free.drawn.join(',') +
+            '], GPU ' +
+            MB(l.free.gpu) +
+            ' MB (lineup ' +
+            MB(l.free.gpuLineup) +
+            ' MB)',
+        )
+        .join('; '),
+    );
+    // the stops, read while focused (at the lineup) on every lap's capsule
+    const row0 = { kinds: laps[0]?.kinds ?? [] };
+    report(
+      'poly-stops-without-buyback-' + size,
+      row0.kinds.length === 5 &&
+        !row0.kinds.includes('buyback') &&
+        row0.kinds.every((k, i) => k === CAPSULE_KINDS[i]) &&
+        laps.every(
+          (l) => JSON.stringify(l.kinds) === JSON.stringify(row0.kinds),
+        ),
+      'stop kinds ' +
+        JSON.stringify(row0.kinds) +
+        ' (want ' +
+        CAPSULE_KINDS.join(', ') +
+        ')',
+    );
+    // (3) the pose at the wrap is the same for every index
+    const ref = laps[0];
+    // Per index: no jump across the seam. Across indexes: the centred pack
+    // stands in the same place (x, z, scale); the row at rest has an end, so an
+    // end index shows one neighbour, and y carries the live idle bob.
+    const mid = (d) =>
+      [...d].sort((m, n) => Math.abs(m.x) - Math.abs(n.x))[0] ?? null;
+    const samePlace = (p, q) =>
+      !!p &&
+      !!q &&
+      Math.abs(p.x - q.x) <= 0.005 &&
+      Math.abs(p.z - q.z) <= 0.01 &&
+      Math.abs(p.s - q.s) <= 0.03;
+    const seamSame = laps.every(
+      (l) =>
+        sameRow(l.before.drawn, l.after.drawn) &&
+        samePlace(mid(l.before.drawn), mid(ref.before.drawn)) &&
+        samePlace(mid(l.landed.drawn), mid(ref.landed.drawn)),
+    );
+    report(
+      'poly-seam-pose-same-for-all-5-indexes-' + size,
+      new Set(laps.map((l) => l.index)).size === 5 && seamSame,
+      'indexes ' +
+        laps.map((l) => l.index).join(',') +
+        '; at the seam (left to right x:y:z:s) ' +
+        laps
+          .map(
+            (l) =>
+              l.index +
+              ' [' +
+              [...l.before.drawn]
+                .sort((m, n) => m.x - n.x)
+                .map((d) => [d.x, d.y, d.z, d.s].join(':'))
+                .join(' ') +
+              ']',
+          )
+          .join(' | '),
+    );
+    // (4) the pick carries through the wrap
+    report(
+      'poly-pick-carries-through-the-wrap-' + size,
+      laps.every(
+        (l) =>
+          Math.round(l.landed.track) === l.index &&
+          centred(l.landed) === l.id &&
+          Math.abs(l.landed.y - l.r0) < 1 &&
+          !l.landed.on &&
+          (l.prevIndex === null || l.index !== l.prevIndex),
+      ),
+      laps
+        .map(
+          (l) =>
+            'picked ' +
+            l.id +
+            ' (index ' +
+            l.index +
+            '): after the wrap track ' +
+            r3(l.landed.track) +
+            ', centred ' +
+            centred(l.landed) +
+            ', y ' +
+            Math.round(l.landed.y) +
+            ' (R0 ' +
+            l.r0 +
+            ')',
+        )
+        .join('; '),
+    );
+    report(
+      'errors-poly-' + size,
       page.errors.length === 0,
       page.errors.join(' | '),
     );

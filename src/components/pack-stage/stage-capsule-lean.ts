@@ -5,23 +5,30 @@
  * yaw within +-`CAPSULE_LEAN`, tipping away from the viewer at most
  * `capsuleTipAway`, toward it at most `capsuleTipToward`. Pure (no three.js).
  *
+ * The limits live here, with no imports, beside the pose module, because the
+ * CSS tiles' rest pose (`tileVars`, first load) clamps with them too; `CAPSULE_LEAN` and
+ * the spin row's capsule tip limits take their values from `CAPSULE_LIMITS`.
+ *
  * Pose convention: `rotY` turns about the screen's vertical, `rotX` positive
  * tips the top away. three.js (`placeModel`): rotation.y = rotY, rotation.x =
  * -rotX, order ZYX; the lean's 'YXZ' with no roll is the same Ry * Rx, so the
  * screen roll stays on the outer object and the result matches a sleeve's.
  */
-import type { Pose } from '../contract';
-import { CAPSULE_LEAN } from '../stage-spin-math';
-import { CIAO_ROW } from '../stage-spin';
+import type { Pose } from './contract';
+
+const DEG = Math.PI / 180;
 
 const clamp = (v: number, lo: number, hi: number) =>
   v < lo ? lo : v > hi ? hi : v;
 
-/** The lean limits in pose terms (radians): yaw either way, rotX away / toward. */
+/**
+ * The lean limits in pose terms (radians): yaw 25 degrees either way, rotX
+ * 15 away / 25 toward (owner, 2026-11-20).
+ */
 export const CAPSULE_LIMITS = Object.freeze({
-  yaw: CAPSULE_LEAN,
-  tipAway: CIAO_ROW.capsuleTipAway,
-  tipToward: CIAO_ROW.capsuleTipToward,
+  yaw: 25 * DEG,
+  tipAway: 15 * DEG,
+  tipToward: 25 * DEG,
 });
 
 /**
@@ -38,4 +45,17 @@ export function capsuleLean(pose: Readonly<Pick<Pose, 'rotX' | 'rotY'>>): {
     yaw: clamp(yaw, -CAPSULE_LIMITS.yaw, CAPSULE_LIMITS.yaw) + 0,
     rotX: clamp(rotX, -CAPSULE_LIMITS.tipToward, CAPSULE_LIMITS.tipAway) + 0,
   };
+}
+
+/**
+ * A pose as a flat tile draws it: a capsule's yaw and pitch through
+ * `capsuleLean` (as the 3D capsule takes them), a sleeve's pose as it is.
+ */
+export function capsulePose<T extends Pick<Pose, 'rotX' | 'rotY'>>(
+  pose: T,
+  capsule: boolean,
+): T {
+  if (!capsule) return pose;
+  const { yaw, rotX } = capsuleLean(pose);
+  return { ...pose, rotY: yaw, rotX };
 }

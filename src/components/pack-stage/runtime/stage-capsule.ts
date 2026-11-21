@@ -14,7 +14,7 @@ import {
   type Capsule3dModel,
 } from '@/components/pack-3d/capsule/build';
 import type { Pose } from '../contract';
-import { capsuleLean } from './stage-capsule-lean';
+import { capsuleLean } from '../stage-capsule-lean';
 
 const DEG = Math.PI / 180;
 type Res = 'half' | 'full';

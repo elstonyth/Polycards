@@ -205,6 +205,7 @@ export default function StageTrack({
         state,
         packs[i]?.soldOut ?? false,
         cyArtRef.current,
+        packs[i]?.ticket ?? false,
       );
       for (const key in vars) tile.style.setProperty(key, vars[key] ?? '');
     }

@@ -40,7 +40,9 @@ const BASE =
   'http://localhost:4300';
 const opt = (k, d) =>
   (args.find((a) => a.startsWith(`--${k}=`)) ?? `=${d}`).split('=')[1];
-const SLUG = opt('slug', '151');
+// --slug defaults to 151, or with --tab to the centred pack of that tab
+const SLUG_ARG = opt('slug', '');
+let SLUG = SLUG_ARG || '151';
 const TAB = opt('tab', '');
 const ONLY = opt('only', '');
 /** The focus value by which the row's other packs must be gone. */
@@ -511,6 +513,18 @@ for (const size of ['phone', 'desktop']) {
   if (TAB) {
     await page.getByRole('button', { name: new RegExp(`^${TAB}$`) }).click();
     await page.waitForTimeout(2500);
+    if (!SLUG_ARG) {
+      const centred = await page.evaluate(() => {
+        const i = Math.round(window.__packStage.state.track);
+        return document
+          .querySelector(
+            `[data-stage-panel]:not([hidden]) [data-stage-tile][data-index="${i}"]`,
+          )
+          ?.getAttribute('data-pack-id');
+      });
+      if (!centred) throw new Error(`no centred tile on the ${TAB} tab`);
+      SLUG = centred;
+    }
   }
   // centre the pack
   for (let i = 0; i < 8; i++) {
