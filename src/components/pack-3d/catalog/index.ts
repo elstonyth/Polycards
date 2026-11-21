@@ -5,8 +5,8 @@
 //
 //   const assets = pack3dAssets(pack.id);          // null: keep the flat image
 //   if (assets) {
-//     const { buildPack3d } = await import('@/components/pack-3d/catalog/build');
-//     const pack3d = await buildPack3d(pack.id, { resolution: 'half', envMap });
+//     const { openPack3d } = await import('@/components/pack-3d/catalog/build');
+//     const model = await openPack3d(pack.id, { resolution: 'half', envMap })?.model();
 //   }
 //
 // The 3D pack always uses its bundled front, never `pack.image` (operator

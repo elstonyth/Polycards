@@ -210,7 +210,8 @@ function sameSource(a: StageSlotSource, b: StageSlotSource): boolean {
   );
 }
 
-class StageEngine {
+/** Exported for the teardown test only; the app reaches it through the provider. */
+export class StageEngine {
   readonly state: StageState = restState(0);
   readonly values = {
     intro: motionValue(1),
@@ -693,9 +694,10 @@ class StageEngine {
     this.prepared = false;
     this.prepDone = false;
     this.released = false;
+    // off before dispose: the engine's own forced context loss is no crash
+    this.canvas?.removeEventListener('webglcontextlost', this.onContextLost);
     if (rt) this.safe(() => rt.dispose());
     if (this.canvas) {
-      this.canvas.removeEventListener('webglcontextlost', this.onContextLost);
       this.canvas.remove();
       this.canvas = null;
     }

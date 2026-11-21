@@ -1,6 +1,6 @@
 // The catalogue's back handling:
-// the no-odds rule, hideBack(), releaseCanvas, the quarter spin back and the
-// quarter spin handle, and their byte accounting. Node has no canvas or
+// the no-odds rule, hideBack(), releaseCanvas, the front released after its
+// upload, aborted downloads, and their byte accounting. Node has no canvas or
 // ImageBitmap, so pictures, canvases and the print are stand-ins; the GPU
 // side (re-binding the front without an upload) is proven on the bench.
 import * as THREE from 'three';
@@ -122,10 +122,6 @@ afterEach(() => {
 const ID = 'silver-pack';
 const A = PACK_3D_ASSETS[ID]!;
 const gpu = (w: number, h: number) => Math.round((w * h * 4 * 4) / 3);
-const quarter = [
-  Math.round(A.halfWidth / 2),
-  Math.round(A.halfHeight / 2),
-] as const;
 
 describe('printableBack (the no-odds rule)', () => {
   it('needs pull odds rows', () => {
@@ -170,30 +166,12 @@ describe('showBack', () => {
     pack.dispose();
   });
 
-  it('downscale 2: the quarter spin back from back-half.webp, whatever the resolution', async () => {
-    const pack = openPack3d(ID, { resolution: 'full' })!;
-    const back = (await pack.showBack(DETAILS, { downscale: 2 }))!;
-    expect(fetched.filter((u) => u.includes('/back'))).toEqual([A.backHalf]);
-    expect([back.info.width, back.info.height]).toEqual(quarter);
-    expect(back.info.bytes).toBe(gpu(quarter[0], quarter[1]));
-    // decoded half plate + quarter plate canvas + quarter print canvas
-    expect(back.transientBytes).toBe(
-      A.halfWidth * A.halfHeight * 4 + 2 * quarter[0] * quarter[1] * 4,
-    );
-    // only the print canvas survives the print
-    expect(pack.canvasBytes()).toBe(quarter[0] * quarter[1] * 4);
-    pack.dispose();
-  });
-
   it('releaseCanvas frees the print canvas once the renderer uploads it', async () => {
     const pack = openPack3d(ID, { resolution: 'half' })!;
-    const back = (await pack.showBack(DETAILS, {
-      releaseCanvas: true,
-      downscale: 2,
-    }))!;
+    const back = (await pack.showBack(DETAILS, { releaseCanvas: true }))!;
     const canvas = back.texture.image as FakeCanvas;
-    expect(canvas.width).toBe(quarter[0]);
-    expect(pack.canvasBytes()).toBe(quarter[0] * quarter[1] * 4);
+    expect(canvas.width).toBe(A.halfWidth);
+    expect(pack.canvasBytes()).toBe(A.halfWidth * A.halfHeight * 4);
     back.texture.onUpdate?.(back.texture); // what three calls after the upload
     expect(canvas.width).toBe(0);
     expect(pack.canvasBytes()).toBe(0);
@@ -235,24 +213,95 @@ describe('hideBack', () => {
   });
 });
 
-describe('the quarter spin handle (downscale 2 on open)', () => {
-  it('draws front-half at half size, unflipped, and counts it', async () => {
-    const pack = openPack3d(ID, { resolution: 'half', downscale: 2 })!;
-    const info = await pack.frontReady;
-    expect([info.width, info.height]).toEqual(quarter);
-    expect(info.bytes).toBe(gpu(quarter[0], quarter[1]));
-    const decoded = bitmaps.find((b) => b.url.includes('front-half'))!;
-    expect(decoded.flipped).toBe(false);
-    expect(decoded.closed).toBe(true);
-    expect(pack.canvasBytes()).toBe(quarter[0] * quarter[1] * 4);
+describe('the decoded front', () => {
+  it('is closed once the renderer uploads it, and still counted', async () => {
+    const pack = openPack3d(ID, { resolution: 'half' })!;
     const model = await pack.model();
-    expect((model.material.map as THREE.Texture).flipY).toBe(true);
-    await pack.showBack(DETAILS, { downscale: 2, releaseCanvas: true });
-    expect(pack.textures().map((t) => t.bytes)).toEqual([
-      gpu(quarter[0], quarter[1]),
-      gpu(quarter[0], quarter[1]),
-    ]);
+    const front = model.material.map as THREE.Texture;
+    const decoded = bitmaps.find((b) => b.url.includes('front-half'))!;
+    const before = pack.textures();
+    expect(decoded.closed).toBe(false);
+    front.onUpdate?.(front); // what three calls after the upload
+    expect(decoded.closed).toBe(true);
+    expect(front.onUpdate).toBeNull();
+    expect(pack.textures()).toEqual(before);
     pack.dispose();
-    expect(pack.canvasBytes()).toBe(0);
+  });
+
+  it('is closed when the shared upload lands on the back face first', async () => {
+    const clone = vi.spyOn(THREE.Texture.prototype, 'clone');
+    const pack = openPack3d(ID, { resolution: 'half' })!;
+    const model = await pack.model();
+    const front = model.material.map as THREE.Texture;
+    const back = clone.mock.results[0]!.value as THREE.Texture; // the back face
+    clone.mockRestore();
+    const decoded = bitmaps.find((b) => b.url.includes('front-half'))!;
+    back.onUpdate?.(back); // three uploads the shared picture through the back
+    expect(decoded.closed).toBe(true);
+    expect(front.onUpdate).toBeNull();
+    expect(back.onUpdate).toBeNull();
+    pack.dispose();
+  });
+
+  it('is no longer counted once the pack is disposed', async () => {
+    const pack = openPack3d(ID, { resolution: 'half' })!;
+    await pack.model();
+    pack.dispose();
+    expect(pack.textures()).toEqual([]);
+  });
+});
+
+describe('downloads for a pack let go', () => {
+  // fetches that never answer until aborted, as on a slow network
+  const hang = (): AbortSignal[] => {
+    const seen: AbortSignal[] = [];
+    vi.stubGlobal(
+      'fetch',
+      (url: string, init?: { signal?: AbortSignal }) =>
+        new Promise((_, reject) => {
+          fetched.push(url);
+          if (init?.signal) seen.push(init.signal);
+          init?.signal?.addEventListener('abort', () =>
+            reject(new DOMException('aborted', 'AbortError')),
+          );
+        }),
+    );
+    return seen;
+  };
+
+  it('hideBack aborts the back plate still downloading', async () => {
+    const pack = openPack3d(ID, { resolution: 'half' })!;
+    await pack.model();
+    const seen = hang();
+    const p = pack.showBack(DETAILS);
+    expect(seen).toHaveLength(1);
+    pack.hideBack();
+    expect(seen[0]!.aborted).toBe(true);
+    expect(await p).toBeNull();
+    // never retried as an <img>
+    expect(fetched.filter((u) => u.includes('back'))).toHaveLength(1);
+    pack.dispose();
+  });
+
+  it('a back plate aborted while the front still downloads is never unhandled', async () => {
+    const seen = hang();
+    const pack = openPack3d(ID, { resolution: 'half' })!;
+    const p = pack.showBack(DETAILS);
+    expect(seen).toHaveLength(2);
+    pack.hideBack();
+    expect(seen[1]!.aborted).toBe(true);
+    // let the aborted plate's rejection land before the front settles
+    await new Promise((r) => setTimeout(r, 0));
+    pack.dispose();
+    expect(await p).toBeNull();
+  });
+
+  it('dispose aborts the front still downloading', async () => {
+    const seen = hang();
+    const pack = openPack3d(ID, { resolution: 'half' })!;
+    expect(seen).toHaveLength(1);
+    pack.dispose();
+    expect(seen[0]!.aborted).toBe(true);
+    await expect(pack.frontReady).rejects.toThrow();
   });
 });

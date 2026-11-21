@@ -216,6 +216,38 @@ describe('the scheduler', () => {
     tick(16); // the loop goes idle: nothing is left to run
   });
 
+  it('one throwing callback neither stops the loop nor the rest of the frame', () => {
+    const thrown: unknown[] = [];
+    vi.stubGlobal('queueMicrotask', (fn: () => void) => {
+      try {
+        fn();
+      } catch (e) {
+        thrown.push(e);
+      }
+    });
+    const v = observable(0);
+    v.on('change', () => {
+      throw new Error('listener');
+    });
+    const ran: string[] = [];
+    animate(v, 1, { duration: 0.1, ease: 'linear' });
+    frame.update(() => {
+      throw new Error('update');
+    });
+    frame.render(() => ran.push('render'));
+    tick(50);
+    expect(ran).toEqual(['render']);
+    expect(thrown.map((e) => (e as Error).message)).toEqual([
+      'listener',
+      'update',
+    ]);
+    // the loop is still alive: the tween goes on, a new callback runs
+    frame.render(() => ran.push('again'));
+    tick(60);
+    expect(v.get()).toBe(1);
+    expect(ran).toEqual(['render', 'again']);
+  });
+
   it('a frozen clock freezes animations (the QA page clock)', () => {
     const v = observable(0);
     animate(v, 1, { duration: 0.1, ease: 'linear' });

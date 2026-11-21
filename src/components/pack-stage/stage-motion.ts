@@ -38,7 +38,7 @@ class Value implements Observable<number> {
   set = (v: number) => {
     if (v === this.v) return;
     this.v = v;
-    for (const cb of [...this.subs]) cb(v);
+    for (const cb of [...this.subs]) guarded(() => cb(v));
   };
   on = (_event: 'change', cb: (v: number) => void) => {
     this.subs.add(cb);
@@ -72,11 +72,22 @@ function wake() {
   requestAnimationFrame(processFrame);
 }
 
+/** One failing callback must not stop the frame or the loop: report it later. */
+function guarded(fn: () => void) {
+  try {
+    fn();
+  } catch (e) {
+    queueMicrotask(() => {
+      throw e;
+    });
+  }
+}
+
 function runStep(step: Map<FrameCallback, boolean>) {
   // Callbacks added while a step runs wait for the next frame.
   const now = [...step];
   for (const [cb, keep] of now) if (!keep) step.delete(cb);
-  for (const [cb] of now) cb(data);
+  for (const [cb] of now) guarded(() => cb(data));
 }
 
 function processFrame() {
@@ -85,12 +96,16 @@ function processFrame() {
   data.delta = data.timestamp ? Math.min(t - data.timestamp, 1000) : 1000 / 60;
   data.timestamp = t;
   processing = true;
-  // Tweens move their values first: their listeners write the DOM (update).
-  for (const tw of [...tweens]) tw.step(t);
-  runStep(steps.update);
-  runStep(steps.render);
-  processing = false;
-  if (tweens.size > 0 || steps.update.size > 0 || steps.render.size > 0) wake();
+  try {
+    // Tweens move their values first: their listeners write the DOM (update).
+    for (const tw of [...tweens]) guarded(() => tw.step(t));
+    runStep(steps.update);
+    runStep(steps.render);
+  } finally {
+    processing = false;
+    if (tweens.size > 0 || steps.update.size > 0 || steps.render.size > 0)
+      wake();
+  }
 }
 
 function schedule(step: Map<FrameCallback, boolean>) {

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
+import { drawingBufferBytes, fitPixelRatio } from '../runtime/stage-scene';
 import {
+  GPU_CAP_DESKTOP_BYTES,
   NO_PROMOTION,
   PROMOTE_AFTER_MS,
   RESIDENCY_DESKTOP,
@@ -134,7 +136,7 @@ describe('planResidency', () => {
     }
   });
 
-  it('never goes over the byte budget, at any track or budget', () => {
+  it('never goes over the byte budget (but for the centre half), at any track or budget', () => {
     for (const config of [RESIDENCY_PHONE, RESIDENCY_DESKTOP]) {
       for (const budget of [
         0,
@@ -148,10 +150,41 @@ describe('planResidency', () => {
         let now = 0;
         for (let t = 0; t <= 10; t += 0.13) {
           const p = sim.step(t, (now += 16), Math.round(t));
-          expect(p.bytes).toBeLessThanOrEqual(budget);
+          expect(p.bytes).toBeLessThanOrEqual(Math.max(budget, HALF));
         }
       }
     }
+  });
+
+  it('a budget of 0 still holds the centre pack at half size', () => {
+    for (const config of [RESIDENCY_PHONE, RESIDENCY_DESKTOP]) {
+      const p = simulator(config, { budget: 0 }).step(6.3, 0, 6);
+      expect([...p.want]).toEqual([[6, { full: false }]]);
+      expect(p.bytes).toBe(HALF);
+    }
+  });
+
+  it('a whole-host canvas on a wide desktop leaves room for 3D packs', () => {
+    // 2560x1200 at ratio 1 with 4x MSAA: ~123 MB, over the 96 MB cap alone
+    const atOne = drawingBufferBytes(2560, 1200, 4);
+    expect(textureBudgetBytes(true, atOne)).toBe(0);
+    for (const [w, h, dpr, samples] of [
+      [2560, 1200, 1, 4],
+      [1920, 1080, 1, 4],
+      [1440, 900, 2, 0],
+    ] as const) {
+      const r = fitPixelRatio(dpr, w, h, samples, GPU_CAP_DESKTOP_BYTES / 2);
+      expect(r).toBeLessThan(dpr);
+      const buffer = drawingBufferBytes(
+        Math.round(w * r),
+        Math.round(h * r),
+        samples,
+      );
+      expect(buffer).toBeLessThanOrEqual(GPU_CAP_DESKTOP_BYTES / 2 + 1e5);
+    }
+    // a canvas that already fits keeps its ratio; never under 0.5
+    expect(fitPixelRatio(2, 390, 300, 0, 40e6 / 2)).toBe(2);
+    expect(fitPixelRatio(1, 8000, 8000, 4, 1e6)).toBe(0.5);
   });
 
   it('a tight budget keeps the centre first', () => {

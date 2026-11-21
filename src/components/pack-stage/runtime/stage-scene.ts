@@ -152,3 +152,20 @@ export function drawingBufferBytes(
   const px = Math.max(0, width) * Math.max(0, height);
   return samples > 0 ? px * (samples * 8 + 8) : px * 12;
 }
+
+/**
+ * The pixel ratio, lowered (not under 0.5) until a canvas of `width` x
+ * `height` CSS pixels costs at most `maxBytes`.
+ */
+export function fitPixelRatio(
+  dpr: number,
+  width: number,
+  height: number,
+  samples: number,
+  maxBytes: number,
+): number {
+  const atOne = drawingBufferBytes(width, height, samples);
+  return atOne > 0
+    ? Math.max(0.5, Math.min(dpr, Math.sqrt(maxBytes / atOne)))
+    : dpr;
+}

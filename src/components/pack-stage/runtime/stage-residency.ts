@@ -16,7 +16,8 @@
  *   `nextDirection` ratchets the drag direction (it flips only after half a
  *   pack of travel the other way), so small wobbles never flip the prefetch.
  * - Caps: never more than `maxResident` packs (phone 4, desktop 7) and never
- *   more than `budgetBytes`; when something must give, the furthest and least
+ *   more than `budgetBytes` (but the centre pack's half front is always
+ *   held); when something must give, the furthest and least
  *   needed goes first. A promoted pack holds its full front AND its half
  *   front (demotion is then an instant swap); both count against the budget.
  */
@@ -185,7 +186,11 @@ export function planResidency(input: ResidencyInput): ResidencyPlan {
     ) {
       entry = { full: true };
       bytes += half + full;
-    } else if (bytes + half <= input.budgetBytes) {
+    } else if (
+      bytes + half <= input.budgetBytes ||
+      // the centre pack (nearest drawn) is always 3D, over budget if need be
+      (want.size === 0 && cand.rank === RANK_REQUIRED)
+    ) {
       entry = { full: false };
       bytes += half;
     }

@@ -193,17 +193,21 @@ const isBitmap = (p: Picture): p is ImageBitmap =>
   typeof ImageBitmap !== 'undefined' && p instanceof ImageBitmap;
 
 /** Decodes a same-origin picture, flipped for upload (straight alpha). */
-async function decodePicture(url: string): Promise<Picture> {
+async function decodePicture(
+  url: string,
+  signal?: AbortSignal,
+): Promise<Picture> {
   if (bitmapsUsable()) {
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { signal });
       if (!res.ok) throw new Error(`capsule-3d: ${url} answered ${res.status}`);
       return await createImageBitmap(await res.blob(), {
         imageOrientation: 'flipY',
         premultiplyAlpha: 'none',
       });
-    } catch {
-      // fall through to <img>
+    } catch (e) {
+      // aborted: let go, never retried as an <img>; anything else falls through
+      if (signal?.aborted) throw e;
     }
   }
   const img = new Image();
@@ -352,6 +356,7 @@ export function openCapsule3d(
   const anisotropy = options.anisotropy ?? 8;
 
   let disposed = false;
+  const abort = new AbortController();
   let logoHeld = true;
   const pictures: Picture[] = [];
   const own: {
@@ -384,7 +389,7 @@ export function openCapsule3d(
     const loads = ownSpecs
       .filter(([, file]) => file)
       .map(async ([role, file, spec]) => {
-        const p = await decodePicture(file!.url);
+        const p = await decodePicture(file!.url, abort.signal);
         if (disposed) {
           closePicture(p);
           throw new Error('capsule-3d: disposed');
@@ -656,6 +661,7 @@ export function openCapsule3d(
     dispose() {
       if (disposed) return;
       disposed = true;
+      abort.abort();
       built?.dispose();
       for (const o of own) o.texture.dispose();
       for (const p of pictures) closePicture(p);
@@ -668,20 +674,4 @@ export function openCapsule3d(
       }
     },
   };
-}
-
-/** One call: opens the capsule and builds its model. Null for no 3D capsule. */
-export async function buildCapsule3d(
-  id: string,
-  options: OpenCapsule3dOptions = {},
-): Promise<Capsule3d | null> {
-  const capsule = openCapsule3d(id, options);
-  if (!capsule) return null;
-  try {
-    await capsule.model();
-    return capsule;
-  } catch (e) {
-    capsule.dispose();
-    throw e;
-  }
 }

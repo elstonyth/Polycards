@@ -65,6 +65,7 @@ import {
   planResidency,
   promotionPending,
   lapResidency,
+  gpuCapBytes,
   residencyConfig,
   textureBudgetBytes,
   textureBytes,
@@ -77,6 +78,7 @@ import {
   createStageScene,
   dprCap,
   drawingBufferBytes,
+  fitPixelRatio,
   placeModel,
   stageBand,
   type StageScene,
@@ -786,7 +788,19 @@ export function createStageRuntime(
     if (!st || dead()) return;
     if (hostW > 0 && hostH > 0) {
       band = bandFor();
-      st.renderer.setPixelRatio(pixelRatio);
+      // the whole host can cost more than the GPU cap (MSAA at 2560x1200 at
+      // ratio 1: ~123 MB, leaving no pack 3D): its buffer gets half the cap
+      st.renderer.setPixelRatio(
+        fullCanvas || spinBand
+          ? fitPixelRatio(
+              pixelRatio,
+              hostW,
+              band.h,
+              st.samples,
+              gpuCapBytes(desktop) / 2,
+            )
+          : pixelRatio,
+      );
       st.renderer.setSize(hostW, band.h, false);
       canvas.style.top = `${band.y}px`;
       canvas.style.bottom = 'auto';
@@ -1408,7 +1422,7 @@ export function createStageRuntime(
       ...counters,
       staged: [...staged.values()].map((s) => s.half?.state ?? 'none'),
       kept: keep.size,
-      pixelRatio,
+      pixelRatio: stage?.renderer.getPixelRatio() ?? pixelRatio,
       drawingBuffer: gl
         ? [gl.drawingBufferWidth, gl.drawingBufferHeight]
         : [0, 0],
@@ -1489,6 +1503,9 @@ export function createStageRuntime(
         gpuBytesEstimate: 0,
       };
       st.renderer.dispose();
+      // free the context now, not at garbage collection: Chrome kills the
+      // oldest past 16 (our own listener is already off)
+      st.renderer.forceContextLoss();
     } else {
       finalInfo = {
         textures: 0,
@@ -1497,7 +1514,6 @@ export function createStageRuntime(
         gpuBytesEstimate: 0,
       };
     }
-    // No forceContextLoss(): the canvas stays reusable (the provider removes it).
   };
 
   return {

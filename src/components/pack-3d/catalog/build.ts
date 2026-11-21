@@ -12,8 +12,6 @@
 //   ...
 //   pack.dispose();                          // every texture, bitmap and canvas
 //
-// or in one call: await buildPack3d('151', { details, envMap, anisotropy }).
-//
 // A back with no pull odds to print is never drawn (owner's no-odds rule,
 // 2026-11-20: no plate is bundled for it, and the plate alone would show the
 // fixed odds heading over an empty box): showBack() with null details, null
@@ -24,12 +22,9 @@
 // - showBack(details, { releaseCanvas: true }) sets the print canvas to 0x0
 //   once the renderer has uploaded it (texture.onUpdate), so only the GPU copy
 //   stays. Nothing may set needsUpdate on that texture afterwards.
-// - showBack(details, { downscale: 2 }) prints the quarter-resolution SPIN
-//   back: back-half.webp drawn at half its size, whatever this pack's
-//   resolution; the layout follows the plate's own size.
-// - openPack3d(id, { resolution: 'half', downscale: 2 }) opens a quarter
-//   "spin handle": the front is front-half.webp drawn at half its size (about
-//   0.5 MB on the GPU), for packs outside the residency during the spin.
+//   The decoded front picture is closed the same way once uploaded.
+// - hideBack() and dispose() abort a back plate still downloading; dispose()
+//   also aborts the front's.
 // - hideBack() frees the back's GPU binding and canvas and puts the front's
 //   Source back on the clone: the renderer re-binds the front's existing GPU
 //   texture, with no upload (the Source's version is untouched).
@@ -87,18 +82,11 @@ export type OpenPack3dOptions = {
   /** CSS font-family for the live text; in the app, the family next/font
    *  registered for Geist (default "Geist, sans-serif"). */
   fonts?: DrawOptions['fonts'];
-  /**
-   * 2 draws the front at half the chosen resolution's size: with
-   * `resolution: 'half'`, the quarter spin handle. Default 1.
-   */
-  downscale?: 1 | 2;
 };
 
 export type ShowBackOptions = {
   /** Free the print canvas (0x0) once the renderer has uploaded it. */
   releaseCanvas?: boolean;
-  /** 2: the quarter spin back, from back-half.webp at half size. Default 1. */
-  downscale?: 1 | 2;
   /**
    * 'full': print from the full back plate (back.webp) whatever the handle's
    * resolution: the focused pack, read close up. Default: the handle's own.
@@ -172,10 +160,14 @@ const cpuBytes = (w: number, h: number) => Math.max(0, w) * Math.max(0, h) * 4;
  * the texture's flipY turned off. premultiplyAlpha 'none' keeps the straight
  * alpha an <img> upload gives.
  */
-async function decodePicture(url: string, flipY: boolean): Promise<Picture> {
+async function decodePicture(
+  url: string,
+  flipY: boolean,
+  signal?: AbortSignal,
+): Promise<Picture> {
   if (bitmapsUsable()) {
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { signal });
       if (!res.ok) throw new Error(`pack-3d: ${url} answered ${res.status}`);
       return await createImageBitmap(
         await res.blob(),
@@ -183,10 +175,12 @@ async function decodePicture(url: string, flipY: boolean): Promise<Picture> {
           ? { imageOrientation: 'flipY', premultiplyAlpha: 'none' }
           : { premultiplyAlpha: 'none' },
       );
-    } catch {
-      // fall through to <img>
+    } catch (e) {
+      // aborted: let go, never retried as an <img>; anything else falls through
+      if (signal?.aborted) throw e;
     }
   }
+  // shortcut: an <img> download cannot be aborted, only browsers without usable bitmaps take this path
   const img = new Image();
   img.decoding = 'async';
   img.src = url;
@@ -260,12 +254,13 @@ export function openPack3d(
   const half = resolution === 'half';
   const frontUrl = half ? assets.frontHalf : assets.front;
   const backUrl = half ? assets.backHalf : assets.back;
-  const frontDown = options.downscale === 2;
 
   let disposed = false;
+  const frontAbort = new AbortController();
+  let backAbort: AbortController | null = null;
   let frontPicture: Picture | null = null;
-  /** The downscaled front (spin handle): a canvas instead of a picture. */
-  let frontCanvas: AnyCanvas | null = null;
+  /** The front's size, kept after the decoded picture is closed. */
+  let frontSize: [number, number] | null = null;
   let frontTexture: THREE.Texture | null = null;
   let backTexture: THREE.Texture | null = null;
   let backCanvas: AnyCanvas | null = null;
@@ -275,24 +270,15 @@ export function openPack3d(
   let backCall = 0;
 
   const frontReady = (async (): Promise<Pack3dTextureInfo> => {
-    // a picture drawn onto a canvas must not be decoded upside down
-    const picture = await decodePicture(frontUrl, !frontDown);
+    const picture = await decodePicture(frontUrl, true, frontAbort.signal);
     if (disposed) {
       closePicture(picture);
       throw new Error('pack-3d: disposed');
     }
-    let texture: THREE.Texture;
-    if (frontDown) {
-      const c = halfCanvas(picture);
-      closePicture(picture);
-      frontCanvas = c;
-      texture = new THREE.Texture(c as HTMLCanvasElement);
-      texture.flipY = true;
-    } else {
-      frontPicture = picture;
-      texture = new THREE.Texture(picture);
-      texture.flipY = !isBitmap(picture);
-    }
+    frontPicture = picture;
+    frontSize = [picture.width, picture.height];
+    const texture = new THREE.Texture(picture);
+    texture.flipY = !isBitmap(picture);
     texture.name = `pack-3d-${id}-front`;
     frontTexture = texture;
     const info = frontInfo();
@@ -309,6 +295,8 @@ export function openPack3d(
       // fronts only: the back is the front's own texture (shared Source)
       backTexture = frontTexture.clone();
       backTexture.name = `pack-3d-${id}-back`;
+      // either texture's upload is the shared one: keep the GPU copy only
+      frontTexture.onUpdate = backTexture.onUpdate = releaseFront;
       built = createPackModel({
         front: frontTexture,
         back: backTexture,
@@ -342,13 +330,12 @@ export function openPack3d(
     if (!printableBack(details)) return null;
     const call = ++backCall;
     const current = () => !disposed && call === backCall;
-    const down = o.downscale === 2;
-    const plateUrl = down
-      ? assets.backHalf
-      : o.plate === 'full'
-        ? assets.back
-        : backUrl;
-    const decoding = decodePicture(plateUrl, false);
+    const plateUrl = o.plate === 'full' ? assets.back : backUrl;
+    backAbort?.abort();
+    backAbort = new AbortController();
+    const decoding = decodePicture(plateUrl, false, backAbort.signal);
+    // aborted before it is awaited (the front still loading): never unhandled
+    decoding.catch(() => {});
     let plate: Picture | null = null;
     const scratch: AnyCanvas[] = [];
     let peak = 0;
@@ -359,8 +346,11 @@ export function openPack3d(
         if (disposed) return null;
         throw e;
       }
-      plate = await decoding;
-      if (!current()) return null;
+      plate = await decoding.catch((e: unknown) => {
+        if (current()) throw e;
+        return null; // aborted by the call, hideBack() or dispose() that overtook it
+      });
+      if (!plate || !current()) return null;
       await loadFonts(
         [
           spec.price.font.weight,
@@ -372,15 +362,8 @@ export function openPack3d(
       );
       if (!current()) return null;
       const plateBytes = cpuBytes(plate.width, plate.height);
-      let source: Picture | AnyCanvas = plate;
-      if (down) {
-        // the quarter plate; renderPackBack sizes the print from it
-        const c = halfCanvas(plate);
-        scratch.push(c);
-        source = c;
-      }
       const { canvas, layout } = renderPackBack(
-        { live: source, noOdds: source },
+        { live: plate, noOdds: plate },
         details,
         spec,
         {
@@ -433,6 +416,7 @@ export function openPack3d(
 
   const hideBack = () => {
     backCall++; // a print in flight resolves null and swaps nothing
+    backAbort?.abort();
     const texture = backTexture;
     const front = frontTexture;
     if (disposed || !texture || !front || !backInfo) return;
@@ -464,22 +448,20 @@ export function openPack3d(
       );
     },
     canvasBytes() {
-      let n = 0;
-      for (const c of [frontCanvas, backCanvas])
-        if (c) n += cpuBytes(c.width, c.height);
-      return n;
+      return backCanvas ? cpuBytes(backCanvas.width, backCanvas.height) : 0;
     },
     dispose() {
       if (disposed) return;
       disposed = true;
       backCall++;
+      frontAbort.abort();
+      backAbort?.abort();
       built?.dispose();
       frontTexture?.dispose();
       backTexture?.dispose();
       closePicture(frontPicture);
       frontPicture = null;
-      if (frontCanvas) freeCanvas(frontCanvas);
-      frontCanvas = null;
+      frontSize = null;
       if (backCanvas) freeCanvas(backCanvas);
       backCanvas = null;
       backInfo = null;
@@ -487,50 +469,22 @@ export function openPack3d(
   };
 
   function frontInfo(): Pack3dTextureInfo | null {
-    const p = frontCanvas ?? frontPicture;
-    return p
-      ? {
-          role: 'front',
-          url: frontUrl,
-          width: p.width,
-          height: p.height,
-          bytes: gpuBytes(p.width, p.height),
-        }
-      : null;
+    if (!frontSize) return null;
+    const [width, height] = frontSize;
+    return {
+      role: 'front',
+      url: frontUrl,
+      width,
+      height,
+      bytes: gpuBytes(width, height),
+    };
   }
-}
 
-/** A picture drawn at half its size (rounded) on a new canvas. */
-function halfCanvas(p: Picture | AnyCanvas): AnyCanvas {
-  const w = Math.max(1, Math.round(p.width / 2));
-  const h = Math.max(1, Math.round(p.height / 2));
-  const c = makeCanvas(w, h);
-  const ctx = c.getContext('2d') as
-    CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
-  if (!ctx) throw new Error('pack-3d: no 2d context');
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(p as CanvasImageSource, 0, 0, w, h);
-  return c;
-}
-
-/**
- * One call: opens the pack, builds the model and, when `details` carries pull
- * odds, prints and shows the back (no odds: fronts only, never the bare
- * plate). Null for a pack with no bundled set.
- */
-export async function buildPack3d(
-  id: string,
-  options: OpenPack3dOptions & { details?: PackBackDetails | null } = {},
-): Promise<Pack3d | null> {
-  const pack = openPack3d(id, options);
-  if (!pack) return null;
-  try {
-    await pack.model();
-    if (options.details !== undefined) await pack.showBack(options.details);
-    return pack;
-  } catch (e) {
-    pack.dispose();
-    throw e;
+  function releaseFront(): void {
+    if (frontTexture) frontTexture.onUpdate = null;
+    // showBack() may have given the back its own onUpdate since
+    if (backTexture?.onUpdate === releaseFront) backTexture.onUpdate = null;
+    closePicture(frontPicture);
+    frontPicture = null;
   }
 }
