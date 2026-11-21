@@ -169,6 +169,23 @@ async function packMask(s) {
   return keyedMask(a, b);
 }
 
+/**
+ * WebKit logs the site's report-only security policy (it has no report-to) as a
+ * console error. A report-only policy blocks nothing, so the visitor loses
+ * nothing: the notice is reported as INFO, not as a page error.
+ */
+function dropReportOnlyNotice(s) {
+  const re =
+    /was delivered in report-only mode, but does not specify a 'report-to'/;
+  const n = s.errors.filter((e) => re.test(e)).length;
+  if (n)
+    qa.info(
+      'report-only-policy-notice ' + s.size,
+      n + ' (WebKit; nothing blocked)',
+    );
+  s.errors = s.errors.filter((e) => !re.test(e));
+}
+
 /** One reading of the layout at a rest (CSS px). */
 const readLayout = (s) =>
   s.page.evaluate(() => {
@@ -628,6 +645,7 @@ async function plainWalk(browser, key, touch) {
   );
   await s.page.waitForTimeout(800);
   await s.capture('upright');
+  dropReportOnlyNotice(s);
   s.checkNoErrors('no-page-errors ' + key);
   return s;
 }
@@ -700,6 +718,7 @@ async function walk(browser, key) {
       ' rests to y ' +
       r.y,
   );
+  dropReportOnlyNotice(s);
   s.checkNoErrors('no-page-errors ' + key);
   if (s.failed.length)
     qa.info('failed-requests ' + key, s.failed.slice(0, 4).join(' | '));

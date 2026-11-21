@@ -610,7 +610,20 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* short phones: the compact odds rows and Closing fit above the tab bar */
+/* phones under 700 px tall (an iPhone in Safari with its bars): the compact
+   odds rows and Closing fit above the tab bar */
+@media (max-width: 1023px) and (max-height: 700px) {
+  .compact li {
+    min-height: 2rem;
+  }
+
+  .over .block[data-kind='closing'] {
+    top: auto;
+    bottom: 12px;
+  }
+}
+
+/* short phones: tighter still */
 @media (max-width: 1023px) and (max-height: 640px) {
   .compact li {
     min-height: 1.75rem;
@@ -619,10 +632,5 @@
   /* Front keeps its name, tag and buttons; the top hit is the next stop */
   .over .block[data-kind='front'] .lead {
     display: none;
-  }
-
-  .over .block[data-kind='closing'] {
-    top: auto;
-    bottom: 12px;
   }
 }
