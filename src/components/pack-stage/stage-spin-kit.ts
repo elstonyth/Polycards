@@ -66,7 +66,7 @@ import {
 } from './stage-flow-gate';
 import { placeInstantly } from './stage-entry-cover';
 import { SLOT_PATH } from './stage-focus-address';
-import { HOME_TAP_EVENT } from '@/components/app-shell/tabs';
+import { HOME_TAP_EVENT, setHomeFlowShown } from '@/components/app-shell/tabs';
 
 /**
  * The measured stage a CSS row is projected into (host px; the art box is
@@ -1046,6 +1046,7 @@ export function startSpin(host: SpinHost): SpinControl {
     e.preventDefault();
   };
   window.addEventListener(HOME_TAP_EVENT, onHomeTap);
+  setHomeFlowShown(true);
   const idleLoad = setTimeout(() => void loadFocus(), 2500);
   const atEntry = () => {
     const st: unknown = window.history.state;
@@ -1195,6 +1196,7 @@ export function startSpin(host: SpinHost): SpinControl {
       focus?.stop();
       window.removeEventListener('keydown', onKey);
       window.removeEventListener(HOME_TAP_EVENT, onHomeTap);
+      setHomeFlowShown(false);
       stopLoop();
       window.removeEventListener('wheel', onWheel);
       window.removeEventListener('pointerdown', onPointerDown);

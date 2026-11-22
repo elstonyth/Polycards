@@ -20,6 +20,25 @@ export const HOME_TAP_EVENT = 'home-tab-tap';
 export const homeTapTaken = (): boolean =>
   !window.dispatchEvent(new Event(HOME_TAP_EVENT, { cancelable: true }));
 
+/**
+ * The home flow is the page showing (set while it handles the Home tap): its
+ * pack addresses are places on the home page, so Home stays lit on them. The
+ * server never sets it, so served pages are unchanged.
+ */
+let homeFlow = false;
+const homeFlowSubs = new Set<() => void>();
+export function setHomeFlowShown(on: boolean): void {
+  homeFlow = on;
+  for (const f of homeFlowSubs) f();
+}
+export const homeFlowShown = (): boolean => homeFlow;
+export function subscribeHomeFlow(f: () => void): () => void {
+  homeFlowSubs.add(f);
+  return () => homeFlowSubs.delete(f);
+}
+
+const PACK_PATH = /^\/slots\/[^/]+\/?$/;
+
 export type Tab = {
   label: string;
   href: string;
@@ -72,7 +91,11 @@ export const TABS: Tab[] = [
   },
 ];
 
-export function isTabActive(tab: Tab, pathname: string): boolean {
+export function isTabActive(
+  tab: Tab,
+  pathname: string,
+  homeFlow = false,
+): boolean {
   if (
     tab.href === '/vault' &&
     (pathname === '/vault/coin-flip' ||
@@ -80,8 +103,14 @@ export function isTabActive(tab: Tab, pathname: string): boolean {
   )
     return false;
   // The home preview serves "/" under its switch, and the server renders it
-  // with the preview's own path: both light Home, so hydration agrees.
-  if (tab.href === '/') return pathname === '/' || pathname === '/home-preview';
+  // with the preview's own path: both light Home, so hydration agrees. A pack
+  // address lights it only while the home flow shows (never on the server).
+  if (tab.href === '/')
+    return (
+      pathname === '/' ||
+      pathname === '/home-preview' ||
+      (homeFlow && PACK_PATH.test(pathname))
+    );
   if (pathname === tab.href || pathname.startsWith(`${tab.href}/`)) return true;
   return (tab.match ?? []).some(
     (p) => pathname === p || pathname.startsWith(`${p}/`),

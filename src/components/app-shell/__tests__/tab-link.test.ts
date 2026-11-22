@@ -79,7 +79,7 @@ vi.mock('../DrawDotProvider', () => ({ useDrawDot: () => ({ show: false }) }));
 vi.mock('../GamesSheet', () => ({ preloadGamesSheet: vi.fn() }));
 
 const { TabLink } = await import('../TabLink');
-const { TABS } = await import('../tabs');
+const { TABS, isTabActive, setHomeFlowShown } = await import('../tabs');
 const { openAuth } = await import('@/components/AuthButton');
 const { preloadGamesSheet } = await import('../GamesSheet');
 
@@ -227,6 +227,35 @@ describe('TabLink: re-tapping the tab you are on', () => {
     expect(container.querySelector('a')?.getAttribute('aria-current')).toBe(
       'page',
     );
+  });
+
+  test('the lit tabs on a pack address follow whether the home flow is the page showing', () => {
+    const lit = (path: string, flow: boolean) =>
+      TABS.filter((t) => isTabActive(t, path, flow)).map((t) => t.label);
+    // the flow focused on a pack, whichever way the address was written
+    expect(lit('/slots/151', true)).toEqual(['Home']);
+    expect(lit('/slots/151/', true)).toEqual(['Home']);
+    // today's pack page (the switch off, or the flow's fallback): no tab
+    expect(lit('/slots/151', false)).toEqual([]);
+    // a move to another tab while the flow is still mounted lights that tab alone
+    expect(lit('/leaderboard', true)).toEqual(['Ranks']);
+    expect(lit('/slots/151/spin', true)).toEqual([]);
+    expect(lit('/', false)).toEqual(['Home']);
+  });
+
+  test('Home lights on a pack address once the home flow shows, and goes dark when it leaves', async () => {
+    nav.pathname = '/slots/151';
+    await render('Home');
+    const current = () =>
+      container.querySelector('a')?.getAttribute('aria-current') ?? null;
+    expect(current()).toBeNull();
+    try {
+      await act(async () => setHomeFlowShown(true));
+      expect(current()).toBe('page');
+    } finally {
+      await act(async () => setHomeFlowShown(false));
+    }
+    expect(current()).toBeNull();
   });
 
   test('a page that takes the Home tap itself cancels the scroll and the move', async () => {

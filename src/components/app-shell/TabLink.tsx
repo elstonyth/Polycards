@@ -1,6 +1,12 @@
 'use client';
 
-import { useEffect, useRef, useState, type MouseEvent } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type MouseEvent,
+} from 'react';
 import Link, { useLinkStatus } from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -10,7 +16,14 @@ import { useDrawDot } from './DrawDotProvider';
 import { useVaultDot } from './VaultDotProvider';
 import { openGames } from './games';
 import { preloadGamesSheet } from './GamesSheet';
-import { TABS, homeTapTaken, isTabActive, type Tab } from './tabs';
+import {
+  TABS,
+  homeFlowShown,
+  homeTapTaken,
+  isTabActive,
+  subscribeHomeFlow,
+  type Tab,
+} from './tabs';
 
 /** How long a gated tap made while auth is still loading waits for the answer
  *  before it navigates anyway (the server gate then covers it, as before). */
@@ -45,7 +58,12 @@ export function TabLink({ tab, variant }: { tab: Tab; variant: Variant }) {
   const { customer, isLoading } = useAuth();
   const { show: vaultDot } = useVaultDot();
   const { show: drawDot } = useDrawDot();
-  const active = isTabActive(tab, pathname);
+  const homeFlow = useSyncExternalStore(
+    subscribeHomeFlow,
+    homeFlowShown,
+    () => false,
+  );
+  const active = isTabActive(tab, pathname, homeFlow);
   // Leaving a game plays the game exit (PageTransition); other moves fade.
   const inGame = TABS.some((t) => t.opens && isTabActive(t, pathname));
   // The vault's "new CARDS" dot and the Draw tab's "new gate" dot: the Me
