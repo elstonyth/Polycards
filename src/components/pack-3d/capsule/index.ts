@@ -16,7 +16,7 @@
 import { CAPSULE_3D_ASSETS } from './capsule-manifest';
 import type { Capsule3dAssets } from './capsule-types';
 
-export type { Capsule3dAssets, Capsule3dResolution } from './capsule-types';
+export type { Capsule3dAssets } from './capsule-types';
 
 /** Every capsule pack id (the /slots/<slug> slug) with a 3D model. */
 export const CAPSULE_3D_IDS: readonly string[] = Object.keys(CAPSULE_3D_ASSETS);

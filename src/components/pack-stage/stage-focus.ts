@@ -22,10 +22,6 @@ import { smoothstep } from './stage-spin-math';
 
 const DEG = Math.PI / 180;
 
-/** The active block fades before "All packs" jumps back to the Front stop. */
-export const LEAVE_FADE_MS = 250;
-/** A back uploaded after the pack reached its stop turns over this long. */
-export const BACK_TURN_MS = 650;
 /**
  * The neighbours leave WITH the tap, over this share of its time (sliding
  * out, sinking and setting back as they fade).

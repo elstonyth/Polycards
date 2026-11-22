@@ -770,4 +770,4 @@ export function stepTurnWeight(
 }
 
 /** Re-exported so callers can type the lazily imported module. */
-export type { SpinCtx, SpinPoseFn };
+export type { SpinPoseFn };

@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { IntentLink } from '@/components/IntentLink';
 import { cn } from '@/lib/utils';
 import { isOptimizableImage } from '@/lib/optimizable-image';
-import type { SpinPanel, StageLayout, StagePack, StageState } from './contract';
+import type { StageLayout, StagePack, StageState } from './contract';
 import {
   STAGE_REACH,
   labelIntro,
@@ -29,20 +29,6 @@ export const STAGE_UNITS = {
   phone: { step: 0.511, artW: 0.54 },
   desktop: { step: 0.589, artW: 0.5357 },
 } as const;
-
-/**
- * The measured stage, for the spin row (a projection in host px, which does
- * not separate into steps and art heights): host CSS px of the breakpoint in
- * use, the art centre's height in the host, and the panel.
- */
-export type TileGeom = {
-  desktop: boolean;
-  step: number;
-  artH: number;
-  artW: number;
-  cy: number;
-  panel: SpinPanel;
-};
 
 /**
  * A tile's pose as CSS custom properties, for phones (--m-*) and desktop

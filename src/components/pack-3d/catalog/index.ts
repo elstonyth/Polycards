@@ -15,7 +15,7 @@
 import { PACK_3D_ASSETS } from './pack-3d-manifest';
 import type { Pack3dAssets } from './pack-3d-types';
 
-export type { Pack3dAssets, Pack3dResolution } from './pack-3d-types';
+export type { Pack3dAssets } from './pack-3d-types';
 
 /** Every pack id (the /slots/<slug> slug) with a bundled 3D set. */
 export const PACK_3D_IDS: readonly string[] = Object.keys(PACK_3D_ASSETS);

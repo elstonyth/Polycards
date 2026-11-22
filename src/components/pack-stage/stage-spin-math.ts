@@ -27,19 +27,6 @@ export function smoothstep(e0: number, e1: number, x: number): number {
   return t * t * (3 - 2 * t);
 }
 
-/** Exponential follow with time constant `tauMs` (the spin's 150 ms, focus's 90 ms). */
-export function dampedFollow(
-  current: number,
-  target: number,
-  dtMs: number,
-  tauMs: number,
-  snap = 1e-4,
-): number {
-  if (!(dtMs > 0)) return current;
-  const next = current + (target - current) * (1 - Math.exp(-dtMs / tauMs));
-  return Math.abs(target - next) < snap ? target : next;
-}
-
 /**
  * Float-in visibility (as the loader leaves): each pack fades in over the first third of its rise, like the CSS
  * `stage-in` fade, so an arrival at `intro` 0 draws nothing.

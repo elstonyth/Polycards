@@ -234,9 +234,6 @@ export interface StageSpinSource {
   empty: boolean;
 }
 
-/** The pin's scroll range, document px (whole numbers). */
-export type SpinRange = { start: number; length: number; exit: number };
-
 /**
  * What a back prints: structurally `PackBackDetails` from
  * `@/components/pack-3d/pack-print` (restated: the stage's import guard
@@ -254,11 +251,6 @@ export type PackBackDetails = {
 /** The focused pack's stops, in order. */
 export type StageStopKind =
   'front' | 'tophits' | 'odds' | 'buyback' | 'pulls' | 'closing';
-export type StageStop = { y: number; kind: StageStopKind };
-
-export interface StageScrollSource {
-  stops(): readonly StageStop[] | null;
-}
 
 /** A lit rect of the back image (fractions: x across, y along from the top). */
 export type SpotRect = { x0: number; y0: number; x1: number; y1: number };
@@ -314,27 +306,6 @@ export type StageFocusOn = {
   spot(focus: number, ctx: Readonly<FocusCtx>): { on: number; rect: SpotRect };
   details: PackBackDetails | null;
 };
-
-export type StageFocusRequest = {
-  index: number;
-  packId: string;
-  back: PackBackDetails | null;
-};
-
-/** `withBack` is false whenever `canTurn` is. */
-export type StageFocusDecl = {
-  id: string;
-  details: PackBackDetails | null;
-  withBack: boolean;
-};
-
-export type StageBackStatus = 'none' | 'loading' | 'ready' | 'unavailable';
-
-/** Spin back entries (the full-turn row, not wired). */
-export type StageSpinBack = { id: string; details: PackBackDetails | null };
-
-// `poseAt` lives in `./stage-pose` (pure); re-exported so the contract path works too.
-export { poseAt } from './stage-pose';
 
 /** Signature of `poseAt` (implemented in `./stage-pose`). */
 export type PoseAtFn = (

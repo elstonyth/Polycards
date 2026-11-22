@@ -71,6 +71,7 @@ import {
   type StageOverride,
 } from './stage-gate';
 import {
+  IDLE_REST_PERIOD_S,
   INTRO_TOTAL_MS,
   STAGE_SPRING_BEZIER,
   SWAP_RISE_MS,
@@ -937,7 +938,8 @@ export class StageEngine {
       this.rested = true;
       return;
     }
-    const target = Math.ceil(s.idle / 3 - 1e-9) * 3;
+    const target =
+      Math.ceil(s.idle / IDLE_REST_PERIOD_S - 1e-9) * IDLE_REST_PERIOD_S;
     const remaining = target - s.idle;
     if (remaining <= 1e-4) {
       s.idle = target;
