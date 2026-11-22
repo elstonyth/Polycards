@@ -36,13 +36,20 @@
  *   view at its rest (`freeFits` false) that move ends on the footer's
  *   rest instead, unless the finger already took the page past it. A swipe
  *   that turns back up the page before the lift never goes on: the page
- *   settles back where the touch began. Up from the
- *   footer is the free part's (native wheel and keys, the finger follows).
+ *   settles back where the touch began. Up from the footer the wheel and
+ *   keys are the free part's (native); a finger mirrors the way down: a
+ *   swipe over 24 px up the page that starts on the footer's or the Just
+ *   Pulled rest, or whose glide would go above the Just Pulled rest (the
+ *   half-empty band over the lineup), is one move to RL from where it is
+ *   let go, at the finger's speed. Where Just Pulled is taller than the
+ *   view it ends on the Just Pulled rest first, unless the finger already
+ *   took the page above it; one that turns back down before the lift
+ *   settles back where it began.
  *   The move to Last's top ends on the wrap frame, with no lock to wait out.
  * - Free part: the wheel and the keys are native, except an up notch that
  *   would cross the edge, which pages to RL (whatever its size: never to the
- *   exit end). Touch follows the finger 1:1 (on to the chosen pack's rest,
- *   never past it); on release it glides
+ *   exit end). Touch follows the finger 1:1 (from RL to the chosen pack's
+ *   rest, never past either); on release it glides
  *   `sign * |v|^1.7` px (v: the finger's speed over its moves in the 100 ms
  *   up to the last one, timed by the touch events' own times, as px per 60
  *   Hz frame; 0 when the finger has not moved for 100 ms before the lift),
@@ -303,7 +310,7 @@ export interface FlowPager {
 type Move = { t0: number; from: number; k: number; ms: number; v0?: number };
 type Glide = { y: number; target: number; toEdge: boolean };
 type Touch = {
-  /** It started on the footer's rest or the Just Pulled rest: a swipe up the screen pages on to the chosen pack. */
+  /** It started on the footer's rest or the Just Pulled rest: a swipe up the screen pages on to the chosen pack, one down it to RL. */
   footer: boolean;
   x0: number;
   y0: number;
@@ -512,11 +519,14 @@ export function createFlowPager(): FlowPager {
     glide = null;
     return true;
   };
-  /** Where a free finger puts the page: between the paged edge and the chosen pack's rest. */
+  /** Where a free finger puts the page: between RL and the chosen pack's rest. */
   const followOf = (t: Touch, y: number): number =>
     Math.min(
       endsOf()[packEnd()] ?? Infinity,
-      Math.max(table?.edge ?? 0, t.start + (t.y0 - y)),
+      Math.max(
+        table?.stops[table.stops.length - 1] ?? table?.edge ?? 0,
+        t.start + (t.y0 - y),
+      ),
     );
   const atLineup = (y: number): boolean => {
     if (!table || !table.lineup || table.stops.length === 0) return false;
@@ -772,6 +782,26 @@ export function createFlowPager(): FlowPager {
               ? endBase()
               : endBase() + packEnd();
           begin(scrollY, k, now, PAGE_MS, v / FRAME_MS);
+          return;
+        }
+      }
+      const xe = table.exitEnd;
+      if (xe !== null && t.y - t.y0 > TOUCH_PAGE_PX) {
+        if (v > 0) {
+          // turned back down the page before the lift: never on to RL
+          if (Math.abs(t.start - scrollY) >= SAME_PX)
+            glide = { y: scrollY, target: t.start, toEdge: false };
+          return;
+        }
+        if (t.footer || scrollY + glideDistance(v) < xe - SAME_PX) {
+          // down the screen from a rest, or a glide that would go above the
+          // Just Pulled rest: one move to RL at the finger's speed; where
+          // Just Pulled is taller than the view to its rest first
+          const k =
+            table.freeFits === false && scrollY > xe + SAME_PX
+              ? table.stops.length
+              : table.stops.length - 1;
+          begin(scrollY, k, now, PAGE_MS, -v / FRAME_MS);
           return;
         }
       }

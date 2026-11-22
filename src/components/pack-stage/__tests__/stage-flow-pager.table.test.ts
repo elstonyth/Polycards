@@ -12,7 +12,10 @@
  * 2. Lift: the page speed in the first frames after the lift (50 ms) stays
  *    near the finger's speed over its last 100 ms: at most 1.5x it plus
  *    0.1 px/ms, never against it, and on the first frame at least half of it
- *    unless the page already reached its rest.
+ *    unless the page already reached its rest. After a still finger the page
+ *    starts from rest: at most 0.1 px/ms on the first frame, then rising at
+ *    most 0.1 px/ms a frame (a fixed cap over the window would judge the
+ *    curve's length, not a jump: a trip of 880 px from rest passes it).
  * 3. Turned back: a swipe moving back up the page at the lift never goes on
  *    towards the pack and ends where it began.
  * 4. One way: during the finger and during the move after the lift the page
@@ -24,6 +27,13 @@
  *    chosen pack; where it is not, the first swipe ends on the footer's rest
  *    (unless the finger itself carried the page past it: going back would
  *    break rule 4) and the same swipe again reaches the pack.
+ *
+ * Up the page (from the Just Pulled rest and the footer's rest) the same
+ * rules hold with the lineup in the pack's place: one swipe reaches the
+ * lineup; where Just Pulled is not all in view, a swipe from the footer
+ * first ends on the Just Pulled rest (unless the finger carried the page
+ * above it). A drag longer than the band to the paged edge checks that the
+ * finger never holds the page still there.
  *
  * Desktop (wheel and keys, from the footer's rest): rules 1, 4, 5, and one
  * gesture lands on the pack (a reversed notch mid-move is swallowed; a
@@ -269,6 +279,14 @@ const GESTURES: Gesture[] = [
     ],
   },
   {
+    // 30 px in 100 ms, then held 500 ms: the longest move after a still finger
+    name: 'short hold',
+    from: 'jp',
+    down: true,
+    touch: () => [START, ...moves(5, 20, 6), { t: 600, kind: 'end', dy: 30 }],
+    desk: () => [{ t: 0, kind: 'wheel', dy: 30 }],
+  },
+  {
     // from the footer's rest: 180 px, then the touch is cancelled
     name: 'touch cancel',
     from: 'footer',
@@ -279,6 +297,27 @@ const GESTURES: Gesture[] = [
     },
     // a sideways (Shift) wheel: not the pager's
     desk: () => [{ t: 0, kind: 'wheel', dy: 100, shift: true }],
+  },
+];
+
+/** The touch gestures turned up the page (finger down the screen), plus a drag past the band to the paged edge. */
+const UP: Gesture[] = [
+  ...GESTURES.filter((g) => g.name !== 'touch cancel').map((g) => ({
+    ...g,
+    name: `up ${g.name}`,
+    down: false,
+    touch: (s: Size) => g.touch(s).map((e) => ({ ...e, dy: -e.dy })),
+  })),
+  {
+    // 600 px in 1 s, a move every 50 ms: from Just Pulled at 390x844 the paged edge is 444 px up
+    name: 'up long drag',
+    from: 'jp',
+    down: false,
+    touch: () => {
+      const m = moves(20, 50, -30);
+      return [START, ...m, { t: lastOf(m).t + 20, kind: 'end', dy: -600 }];
+    },
+    desk: () => [],
   },
 ];
 
@@ -394,6 +433,8 @@ type Expect = {
   lift: boolean;
   /** The gesture's way down the page (+1), up (-1), or none known (0). */
   way: number;
+  /** The swipe's way before a turn back: down the page (+1, the default) or up (-1). */
+  swipe?: 1 | -1;
 };
 
 /** The visitor's rules over one played gesture; returns the faults found (empty: none). */
@@ -401,6 +442,8 @@ function faults(t: FlowTable, run: Played, x: Expect, g: Gesture): string[] {
   const out: string[] = [];
   const f = run.frames;
   const pack = t.ends[1]!;
+  /** Where the finger's follow ends, the one place the page may wait under it. */
+  const holds = [pack, t.stops[t.stops.length - 1]!];
   const rests = [...t.stops, t.exitEnd, ...t.ends];
   const final = f[f.length - 1]!.y;
   const at = (k: number) =>
@@ -415,7 +458,7 @@ function faults(t: FlowTable, run: Played, x: Expect, g: Gesture): string[] {
     const df = f[k]!.finger - f[k - 1]!.finger;
     const dy = f[k]!.y - f[k - 1]!.y;
     if (Math.abs(f[k]!.finger) < 6 || Math.abs(df) < 1) continue; // the axis lock's slop
-    if (Math.abs(dy) < SAME && !near(f[k]!.y, pack)) {
+    if (Math.abs(dy) < SAME && !holds.some((h) => near(f[k]!.y, h))) {
       out.push(`rest: dead stop while the finger moves at ${at(k)}`);
       break;
     }
@@ -436,6 +479,7 @@ function faults(t: FlowTable, run: Played, x: Expect, g: Gesture): string[] {
   // 2. lift: the speed carries on from the finger's
   if (x.lift && settle > L) {
     const v = run.vFinger;
+    let prev = 0;
     for (
       let k = L + 1;
       k < f.length && f[k]!.now - f[L]!.now <= LIFT_WINDOW_MS;
@@ -443,7 +487,12 @@ function faults(t: FlowTable, run: Played, x: Expect, g: Gesture): string[] {
     ) {
       const pv = (f[k]!.y - f[k - 1]!.y) / (f[k]!.now - f[k - 1]!.now);
       const s = Math.sign(v) || Math.sign(pv) || 1;
-      const hi = SPEED_RATIO_MAX * Math.abs(v) + SPEED_SLACK;
+      // a still finger: from rest, then speeding up on its curve, never by a jump
+      const hi =
+        v === 0
+          ? prev + SPEED_SLACK
+          : SPEED_RATIO_MAX * Math.abs(v) + SPEED_SLACK;
+      prev = pv * s;
       const lo = SPEED_RATIO_MIN * Math.abs(v);
       const arrived = near(f[k]!.y, final);
       // the floor only on the first frame: a short ease-out then slows to its rest within the window
@@ -462,11 +511,14 @@ function faults(t: FlowTable, run: Played, x: Expect, g: Gesture): string[] {
   }
 
   // 3. turned back: never on, back where it began
-  if (g.name === 'turned back' && x.lift) {
+  if (g.name.endsWith('turned back') && x.lift) {
     const yl = f[L]!.y;
-    const k = f.findIndex((fr, j) => j > L && fr.y > yl + SAME);
+    const sw = x.swipe ?? 1;
+    const k = f.findIndex((fr, j) => j > L && (fr.y - yl) * sw > SAME);
     if (k >= 0)
-      out.push(`turned back: went on down the page after the lift at ${at(k)}`);
+      out.push(
+        `turned back: went on the swipe's way after the lift at ${at(k)}`,
+      );
   }
 
   // 4. one way, no stand-still mid-move
@@ -493,9 +545,10 @@ function faults(t: FlowTable, run: Played, x: Expect, g: Gesture): string[] {
     (fr) => fr.locked || (t.lastTop !== null && fr.y >= t.lastTop - SAME),
   );
   if (wrap >= 0) out.push(`wrap: on to the row at ${at(wrap)}`);
-  if (x.way > 0) {
-    const up = f.findIndex((fr) => fr.y < run.y0 - SAME);
-    if (up >= 0) out.push(`one way: a down gesture went up at ${at(up)}`);
+  if (x.way !== 0) {
+    const back = f.findIndex((fr) => (fr.y - run.y0) * x.way < -SAME);
+    if (back >= 0)
+      out.push(`one way: the gesture went against its way at ${at(back)}`);
   }
   return out;
 }
@@ -549,6 +602,46 @@ describe('phone swipe from Just Pulled', () => {
           expect(found.join('\n')).toBe('');
         });
       }
+});
+
+describe('phone swipe up from Just Pulled and the footer rest', () => {
+  for (const s of PHONES)
+    for (const g of UP)
+      for (const from of ['jp', 'footer'] as const)
+        for (const dt of FRAMES) {
+          it(`${s.name} ${g.name} from ${from} @${dt}ms`, () => {
+            const t = tableOf(s);
+            const p = createFlowPager();
+            p.setTable(flowPagerTable(t, kinds));
+            const lineup = t.stops[t.stops.length - 1]!;
+            const y0 = from === 'jp' ? t.exitEnd : t.ends[0]!;
+            const ev = g.touch(s);
+            const one = playTouch(p, y0, 0, ev, dt);
+            const back = g.name.endsWith('turned back');
+            // short screens stop at Just Pulled's top, unless the finger already carried the page above it
+            const yLift = one.frames[one.lift]?.y ?? y0;
+            const twoStep = !back && !jpInView(s) && yLift > t.exitEnd + SAME;
+            const rest = back ? y0 : twoStep ? t.exitEnd : lineup;
+            const found = faults(
+              t,
+              one,
+              { rest, lift: true, way: back ? 0 : -1, swipe: -1 },
+              g,
+            );
+            if (twoStep) {
+              const at = one.frames[one.frames.length - 1]!;
+              const two = playTouch(p, at.y, at.now + dt, ev, dt);
+              for (const m of faults(
+                t,
+                two,
+                { rest: lineup, lift: true, way: -1, swipe: -1 },
+                g,
+              ))
+                found.push(`second swipe: ${m}`);
+            }
+            expect(found.join('\n')).toBe('');
+          });
+        }
 });
 
 describe('desktop wheel and keys from the footer rest', () => {
