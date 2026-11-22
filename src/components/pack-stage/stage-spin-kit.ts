@@ -33,7 +33,12 @@ import { SLEEVE_TILE } from './stage-capsule-lean';
 import { rowTilePacks, tilePose, tileSpinCtx } from './stage-row-tiles';
 import { cancelFrame, frame, type FrameData } from './stage-motion';
 import { composeOpacity, composePose } from './stage-pose-compose';
-import { lineupCopies, lineupOpacity, lineupPose } from './stage-spin';
+import {
+  lineupCopies,
+  lineupOpacity,
+  lineupPitchPx,
+  lineupPose,
+} from './stage-spin';
 import {
   createFlowInput,
   flowKeyIntent,
@@ -293,22 +298,20 @@ export function startSpin(host: SpinHost): SpinControl {
       return true;
     },
     canPick: (i) => !!focus?.kindsAt(i),
-    // the row's spacing on screen at the middle: a drag moves it one pack per spacing
+    // the lineup's spacing as drawn (the 3D row, fitted to the viewport height; the
+    // tiles keep the row's step): a drag moves it one pack per spacing
     pitch: () => {
-      const mid = window.innerWidth / 2;
-      const xs = [
-        ...(src?.panel.querySelectorAll<HTMLElement>(
-          '[data-stage-panel]:not([hidden]) [data-stage-tile] [data-stage-art]',
-        ) ?? []),
-      ]
-        .map((a) => {
-          const b = a.getBoundingClientRect();
-          return b.width > 0 ? b.left + b.width / 2 : Number.NaN;
-        })
-        .filter(Number.isFinite)
-        .sort((a, b) => Math.abs(a - mid) - Math.abs(b - mid));
-      const next = xs.find((x) => Math.abs(x - xs[0]!) > 20);
-      return next === undefined ? null : Math.abs(next - xs[0]!);
+      const panel = src?.panel;
+      const row = panel?.querySelector<HTMLElement>(
+        '[data-stage-panel]:not([hidden]) [data-stage-row]',
+      );
+      const g = row && panel ? geomOf(row, panel) : null;
+      if (!g) return null;
+      const px = lineupPitchPx(
+        { cx: 0, cy: g.cy, step: g.step, artH: g.artH, artW: g.artW },
+        g.panel,
+      );
+      return px > 0 ? px : null;
     },
   });
   const flowOn = () => !!src?.flow.hasAttribute('data-flow-on');

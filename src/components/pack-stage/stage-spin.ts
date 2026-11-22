@@ -552,6 +552,21 @@ function lineupRowBlock(
 }
 
 /**
+ * The lineup's spacing on screen at its centre (CSS px): how far the drawn
+ * row moves for one pack. It follows the panel (the projection is fitted to
+ * the viewport height), not the row's tile step.
+ */
+export function lineupPitchPx(
+  l: Readonly<StageLayout>,
+  panel: Readonly<SpinPanel>,
+): number {
+  const cam = lineupCameraAt(0);
+  const at = (dp: number) =>
+    lineupRowBlock(dp, dp, l, panel, cam, false, false).fx ?? 0;
+  return Math.abs(at(0.5) - at(-0.5)) * panel.w;
+}
+
+/**
  * Row slot offsets (multiples of the set's size, 0 included) at which pack i
  * is drawn in the `tip` row, so the row runs off both edges however short the
  * set: a short set is repeated out to 24 cans. The caller draws each extra

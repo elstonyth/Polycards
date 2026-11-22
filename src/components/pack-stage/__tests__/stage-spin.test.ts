@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { StageLayout } from '../contract';
-import type { SpinCtx, StageState } from '../contract';
+import type { SpinCtx, SpinPanel, StageState } from '../contract';
 import { restBlock } from '../stage-compose';
 import { restState, slotOpacity } from '../stage-pose';
 import { CAPSULE_LIMITS } from '../stage-capsule-lean';
@@ -12,6 +12,7 @@ import {
   lineupCopies,
   lineupView,
   lineupOpacity,
+  lineupPitchPx,
   lineupPose,
   lineupRatio,
   quadInOut,
@@ -413,6 +414,40 @@ describe('switches', () => {
     w = stepTurnWeight(w, 1, 1000, false);
     expect(w).toBe(1);
     expect(stepTurnWeight(1, 0, 16, false)).toBe(1);
+  });
+});
+
+describe('the lineup follows the hand: one pack per drawn spacing', () => {
+  // where the centred pack is drawn when the track moves by half a pack each way
+  const drawnX = (panel: SpinPanel, track: number) => {
+    const s = st(1, track);
+    const p = lineupPose(
+      restBlock(s, 0, DESKTOP, true, false),
+      s,
+      0,
+      DESKTOP,
+      true,
+      { count: 5, turn: 0, lean: LEAN, exit: 0, panel },
+    );
+    return (
+      DESKTOP.cx + (0 - track) * DESKTOP.step + p.dx + (p.fx ?? 0) * panel.w
+    );
+  };
+  for (const [w, h] of [
+    [3840, 2160],
+    [2560, 1440],
+    [1920, 1080],
+    [390, 844],
+  ] as const) {
+    it(`${w}x${h}: the drag's spacing is the spacing drawn on screen`, () => {
+      const panel = { w, h: h - 70, anchorY: 0.46, viewH: h };
+      const drawn = Math.abs(drawnX(panel, 0.5) - drawnX(panel, -0.5));
+      expect(lineupPitchPx(DESKTOP, panel)).toBeCloseTo(drawn, 0);
+    });
+  }
+  it('on a 4K screen the drawn spacing is far wider than the row step (a drag by the step ran ahead of the hand)', () => {
+    const panel = { w: 3840, h: 2090, anchorY: 0.46, viewH: 2160 };
+    expect(lineupPitchPx(DESKTOP, panel)).toBeGreaterThan(1.3 * DESKTOP.step);
   });
 });
 
