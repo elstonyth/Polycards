@@ -936,3 +936,11 @@
     transition: none;
   }
 }
+
+/* a short desktop view: the row's art is small, so the neighbours' names
+   would run into each other; the centred pack keeps its info block */
+@media (min-width: 1024px) and (max-height: 700px) {
+  .stage .label {
+    visibility: hidden;
+  }
+}
