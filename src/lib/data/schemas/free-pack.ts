@@ -209,11 +209,16 @@ export const UnreportedDepositsSchema = z.looseObject({
  *  the loose object for a future in-page renderer. */
 /** GET /store/credits/deposit/payer — the paying account's name the
  *  regional top-up sheet shows: a saved account's holder, else nothing saved
- *  and the real name to pre-fill. */
+ *  and the real name to pre-fill. `fixed_name`: the rail takes the name from
+ *  the saved account only (GMpay), so the sheet offers no "Change";
+ *  `blocked_reason`: why such a top-up would be refused, shown before Pay.
+ *  Both optional so an older backend still parses. */
 export const DepositPayerSchema = z.looseObject({
   currency: z.string(),
   saved_name: z.string().nullable(),
   real_name: z.string().nullable(),
+  fixed_name: z.boolean().optional(),
+  blocked_reason: z.string().nullable().optional(),
 });
 
 export const DepositStartSchema = z.looseObject({

@@ -370,3 +370,60 @@ describe('POST /store/credits/deposit — the payer name A3Pay matches', () => {
     expect(sentPayer()).toBeUndefined();
   });
 });
+
+describe('POST /store/credits/deposit — GMpay takes the payer from the saved account only', () => {
+  const GMPAY_ENV: Record<string, string> = {
+    GATEWAY_ENABLED: 'true',
+    GMPAY_ENABLED: 'true',
+    GMPAY_API_BASE: 'https://xapi.example.test/v3',
+    GMPAY_CLIENT_ID: 'client-1',
+    GMPAY_SECRET_KEY: 'secret',
+  };
+  let before: Record<string, string | undefined>;
+  beforeEach(() => {
+    before = Object.fromEntries(
+      Object.keys(GMPAY_ENV).map((k) => [k, process.env[k]]),
+    );
+    Object.assign(process.env, GMPAY_ENV);
+  });
+  afterEach(() => {
+    for (const [k, v] of Object.entries(before)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  it('ignores a typed name: the holder and account on file are what GMpay is sent', async () => {
+    const packs = {
+      savedBankAccountsFor: jest.fn(async () => [
+        {
+          bankCode: 'DBSSSGSG',
+          accountHolderName: 'TAN AH KOW',
+          accountNumber: '0123456789',
+        },
+      ]),
+      getVerificationState: jest.fn(async () => ({
+        phoneVerified: true,
+        realName: 'TAN AH KOW',
+      })),
+      siteSettings: jest.fn(async () => ({ payment_gateway: null })),
+    };
+    const req = mkReq({
+      body: {
+        amount: 100,
+        currency: 'SGD',
+        payment_method_code: 'BQR',
+        payer_name: 'LIM MEI LING',
+      },
+      scope: { resolve: () => packs },
+    });
+    await POST(req, res);
+    const sent = startMock.mock.calls[0][1];
+    expect(sent.gateway).toBe('gmpay');
+    expect(sent.payerName).toBe('TAN AH KOW');
+    expect(sent.payerBank).toEqual({
+      bankCode: 'DBSSSGSG',
+      accountNumber: '0123456789',
+    });
+  });
+});

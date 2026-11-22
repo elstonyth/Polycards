@@ -235,22 +235,47 @@ export async function getDepositMethods(): Promise<DepositMethodCode[]> {
   return enabled.map((method) => method.code);
 }
 
+/** What the regional top-up sheet knows about the paying account. */
+export type RegionalPayer = {
+  savedName: string | null;
+  realName: string | null;
+  /** The rail takes the name from the saved account only (GMpay): no
+   *  "Change", no name field. */
+  fixedName: boolean;
+  /** Why the backend would refuse this top-up (no saved account, or a name
+   *  the rail can never match), shown before Pay. */
+  blockedReason: string | null;
+};
+
 /**
- * The paying account's name for a regional top-up (A3Pay matches the
- * transfer against it): `savedName` is the holder of a saved account at a
- * bank that rail pays, which the sheet shows with "Change"; with none saved
- * the sheet asks, pre-filled with `realName`. Any failure reads as nothing
- * saved, so the sheet asks — a name the customer types is never wrong to send.
+ * The paying account's name for a regional top-up (A3Pay and GMpay match
+ * the transfer against it): `savedName` is the holder of a saved account at
+ * a bank that rail pays. On A3Pay the sheet shows it with "Change", and with
+ * none saved asks, pre-filled with `realName`; on GMpay (`fixedName`) it is
+ * the only name that can match, shown as is. Any failure reads as nothing
+ * saved, so the sheet asks, and the backend still decides.
  */
 export async function getRegionalPayer(
   currency: string,
-): Promise<{ savedName: string | null; realName: string | null }> {
+): Promise<RegionalPayer> {
   const r = await store.get(
     `/store/credits/deposit/payer?currency=${encodeURIComponent(currency)}`,
     DepositPayerSchema,
   );
-  if (!r.ok) return { savedName: null, realName: null };
-  return { savedName: r.data.saved_name, realName: r.data.real_name };
+  if (!r.ok) {
+    return {
+      savedName: null,
+      realName: null,
+      fixedName: false,
+      blockedReason: null,
+    };
+  }
+  return {
+    savedName: r.data.saved_name,
+    realName: r.data.real_name,
+    fixedName: r.data.fixed_name === true,
+    blockedReason: r.data.blocked_reason ?? null,
+  };
 }
 
 /**

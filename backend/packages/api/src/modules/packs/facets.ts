@@ -19,6 +19,7 @@ import type PacksModuleService from './service';
 /** The deposit half of the gateway loop: record intent, credit on callback. */
 export type GatewayDeposits = Pick<
   PacksModuleService,
+  | 'claimDepositAdjustmentRef'
   | 'claimDepositStatus'
   | 'createAdminActionAudits'
   | 'createDepositCapped'

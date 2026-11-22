@@ -219,6 +219,30 @@ export function newMerchantTransactionId(): string {
 export const PAYER_BANK_REQUIRED_MESSAGE =
   'Save the bank account you pay from first, on the Withdraw page. Singapore top-ups are matched to it.';
 
+/**
+ * The refusal when the payer name is not a full name. The name comes from the
+ * customer's real name (a saved bank's holder is never typed), which only
+ * support corrects. The storefront passes it through verbatim (vault-errors.ts
+ * matches "matched to the full name").
+ */
+export const PAYER_NAME_INCOMPLETE_MESSAGE =
+  'Singapore top-ups are matched to the full name on your bank account, and the name on your Polycards account is incomplete. Contact support to update it to your full name exactly as your bank shows it.';
+
+/**
+ * Whether a payer name can match the name a bank shows: at least two words of
+ * two or more letters. GMpay matches each pay-in to the name it is sent
+ * (2026-11-20), so a name of initials ("lkm") or one run together
+ * ("LIMWEIGUAN") never matches, and the money sits unmatched until GMpay
+ * completes it by hand. One-letter parts ("S/O", an initial) do not count.
+ */
+export function payerNameLooksFull(name: string): boolean {
+  const words = name
+    .normalize('NFKC')
+    .split(/[\s.,/@'-]+/)
+    .filter((word) => (word.match(/\p{L}/gu)?.length ?? 0) >= 2);
+  return words.length >= 2;
+}
+
 export type StartDepositInput = {
   /** From the verified token — NEVER the request body. */
   customerId: string;
@@ -390,21 +414,10 @@ export async function startDeposit(
     );
   }
 
-  // The name on the PAYING account (A3Pay matches it against the transfer).
-  // Refused here, before any row, rather than as the adapter's definite
-  // refusal after one.
-  const payerName =
-    typeof input.payerName === 'string' ? input.payerName.trim() : '';
-  const needsPayerName = GATEWAYS[gateway].needsPayerName === true;
-  if (needsPayerName && (payerName.length < 2 || payerName.length > 120)) {
-    throw new MedusaError(
-      MedusaError.Types.INVALID_DATA,
-      'Enter the name on the bank account you are paying from (reload the page if you see no name field).',
-    );
-  }
-
   // The paying account itself (GMpay declares it on every pay-in). Refused
-  // here, before any row, for the same reason as the name above.
+  // here, before any row. Checked BEFORE the name: on such a rail the name is
+  // the saved account's holder, so with no account there is no name either,
+  // and "save the account" is the one step that helps.
   const needsPayerBank = GATEWAYS[gateway].needsPayerBank === true;
   const payerBank = input.payerBank;
   if (
@@ -414,6 +427,25 @@ export async function startDeposit(
     throw new MedusaError(
       MedusaError.Types.NOT_ALLOWED,
       PAYER_BANK_REQUIRED_MESSAGE,
+    );
+  }
+
+  // The name on the PAYING account (A3Pay and GMpay match it against the
+  // transfer). Refused here, before any row, rather than as the adapter's
+  // definite refusal after one.
+  const payerName =
+    typeof input.payerName === 'string' ? input.payerName.trim() : '';
+  const needsPayerName = GATEWAYS[gateway].needsPayerName === true;
+  if (needsPayerName && (payerName.length < 2 || payerName.length > 120)) {
+    throw new MedusaError(
+      MedusaError.Types.INVALID_DATA,
+      'Enter the name on the bank account you are paying from (reload the page if you see no name field).',
+    );
+  }
+  if (needsPayerName && !payerNameLooksFull(payerName)) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      PAYER_NAME_INCOMPLETE_MESSAGE,
     );
   }
 
@@ -686,8 +718,13 @@ export type DepositOutcome =
        *   ever gets here.
        * - `'admin'` — an operator's Credit deposit (creditDepositByAdmin). A
        *   person chose this row, so it takes the callback's fence.
+       * - `'entry'` — an operator's Credit from gateway entry
+       *   (creditFromAdjustmentEntry): the gateway's own manual entry for what
+       *   arrived, read live, through the row's FX lock. It differs from the
+       *   ask by design, so it cannot take the equality fence; the caller
+       *   bounds it to a band around the ask, and the ceiling still applies.
        */
-      source: 'callback' | 'requery' | 'admin';
+      source: 'callback' | 'requery' | 'admin' | 'entry';
       /** What the gateway says was paid. Credited verbatim (a `'callback'`
        *  is fenced against the row first). */
       amount: number;
@@ -806,7 +843,11 @@ export async function applyDepositOutcome(
     const ceiling = gateway
       ? GATEWAYS[gateway].limits.depositMax
       : GATEWAY_MAX_RM;
-    if (amount !== Number(deposit.amount_requested) || amount > ceiling) {
+    // An entry credit keeps the ceiling but not the equality: what arrived
+    // differing from the ask is the whole case (its caller bounds the band).
+    const unequal =
+      outcome.source !== 'entry' && amount !== Number(deposit.amount_requested);
+    if (unequal || amount > ceiling) {
       return { applied: false, reason: 'amount-mismatch' };
     }
   }
@@ -910,7 +951,8 @@ export async function applyDepositOutcome(
  *
  * Only on the gateway's own word, read now, and only for exactly what the row
  * asked for (`source: 'admin'` takes the callback's fence). A short or over
- * payment stays an engineer's call: 2026-10-26's short USDT is the example.
+ * payment the gateway booked as its own manual entry goes through Credit from
+ * gateway entry instead (creditFromAdjustmentEntry).
  *
  * Audited after the credit, so the log never claims one that was refused. A
  * crash in between leaves the credit and its ledger row as the record, and the

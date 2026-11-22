@@ -38,20 +38,30 @@ export const canCreditDeposit = (f: {
   f.note.includes('Use Credit deposit');
 
 /**
- * Offer "Link gateway entry" on a settled deposit the gateway calls FAILED:
- * a short payment credited by hand, whose arrived amount the gateway booked
- * as its own manual entry. Shown even once acknowledged, because linking is
- * what lets the hourly check confirm the credit instead. The backend repeats
- * every check.
+ * What "Link gateway entry" offers on a finding. 'link' on a settled deposit
+ * the gateway calls FAILED: a short payment credited by hand, whose arrived
+ * amount the gateway booked as its own manual entry. Shown even once
+ * acknowledged, because linking is what lets the hourly check confirm the
+ * credit instead. 'replace' once a linked entry stops backing its row (the
+ * audit's own words for that): only a new link can point the row at the
+ * corrected entry. Never on a note that says the order itself is paid now:
+ * that is two paid records, not a wrong link. The backend repeats every
+ * check, and refuses a replacement while the old entry is still good.
  */
-export const canLinkEntry = (f: {
+export const linkEntryAction = (f: {
   kind: string;
   status: string;
   note: string;
-}) =>
-  f.kind === 'deposit' &&
-  f.status === 'settled' &&
-  f.note.startsWith('gateway says FAILED');
+}): 'link' | 'replace' | null => {
+  if (f.kind !== 'deposit' || f.status !== 'settled') return null;
+  if (f.note.startsWith('gateway says FAILED')) return 'link';
+  if (
+    f.note.startsWith("gateway's manual entry ") ||
+    f.note.startsWith('gateway has NO record of manual entry ')
+  )
+    return 'replace';
+  return null;
+};
 
 /**
  * The "Gateway check" tile: open findings differ; findings an operator only

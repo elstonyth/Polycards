@@ -787,7 +787,7 @@ export function CoinFlipClient({
                     <p className="max-w-prose text-xs leading-relaxed text-neutral-300">
                       {round.cards.length > 0 &&
                         (outcome === 'won'
-                          ? `Added to your withdrawable Credit. ${round.cards.length === 1 ? 'Your card stays' : 'Every selected card stays'} in your Vault.`
+                          ? `Added to your Credit. ${round.cards.length === 1 ? 'Your card stays' : 'Every selected card stays'} in your Vault.`
                           : `${round.cards.length === 1 ? 'Your card has' : 'All selected cards have'} left your Vault. No Credit was added.`)}
                       {round.cards.length > 0 && round.tickets > 0 && ' '}
                       {round.tickets > 0 &&
@@ -1180,9 +1180,9 @@ export function CoinFlipClient({
         <p className="max-w-2xl pb-3 leading-relaxed">
           Choose up to 20 cards and call Head (emblem) or Tail (wordmark). One
           flip decides the whole selection. A win pays 100% of the combined
-          confirmed value as withdrawable Credit and keeps every card. A loss
-          permanently forfeits every selected card. Bonus and gift-funded cards
-          are included. Standard account and withdrawal checks still apply. Drag
+          confirmed value as Credit and keeps every card. A loss permanently
+          forfeits every selected card. Bonus and gift-funded cards are
+          included. Standard account and withdrawal checks still apply. Drag
           distance and release speed change how the coin flies, never the
           result.
         </p>
@@ -1310,7 +1310,7 @@ export function CoinFlipClient({
                           : 'Keep all selected cards'}{' '}
                         +{' '}
                         <strong className="text-buyback-fg">
-                          {rm(round.stake_amount)} withdrawable Credit
+                          {rm(round.stake_amount)} Credit
                         </strong>
                       </p>
                     )}

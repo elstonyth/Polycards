@@ -3,6 +3,7 @@ import {
   adjustmentAuditNote,
   depositAuditNote,
   ledgerTrail,
+  linkedOrderPaidNote,
   shortCreditNote,
   stampNote,
   withdrawalAuditNote,
@@ -278,6 +279,20 @@ describe('adjustmentAuditNote', () => {
     expect(
       adjustmentAuditNote({ status: 'settled', amount: null }, ref, paid(0)),
     ).toMatch(/row credited nothing/);
+  });
+});
+
+describe('linkedOrderPaidNote', () => {
+  it('names the order, the credit and the linked entry', () => {
+    expect(
+      linkedOrderPaidNote(
+        { status: 'settled', amount: 56.49 },
+        'MD20261108102020',
+        64.56,
+      ),
+    ).toBe(
+      'gateway now reports the order itself PAID (64.56), row credited 56.49, and manual entry MD20261108102020 is linked to it too — the gateway may hold two paid records for one top-up, investigate',
+    );
   });
 });
 

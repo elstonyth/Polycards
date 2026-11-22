@@ -46,8 +46,8 @@ medusaIntegrationTestRunner({
       const [pull] = await packs.createPulls([{ customer_id: owner.id, pack_id: 'test', card_id: 'coin-card', rolled_at: new Date(),
         source: 'gift', bonus_bp: 10000, flip_eligible_at: new Date() }]);
       await packs.createCreditTransactions([
-        { customer_id: owner.id, reason: 'topup', amount: 10, external_funded_cents: 1000 },
-        { customer_id: owner.id, reason: 'pack_open', amount: -10, external_funded_cents: -1000 },
+        { customer_id: owner.id, reason: 'topup', amount: 50, external_funded_cents: 5000 },
+        { customer_id: owner.id, reason: 'pack_open', amount: -50, external_funded_cents: -5000 },
       ]);
       const publicSettings = await api.get('/store/coin-flips/settings', { headers: owner.headers });
       expect(publicSettings.data).toEqual({ enabled: true, eligible: true, reason: null, reason_code: null, published_win_percent: 50 });

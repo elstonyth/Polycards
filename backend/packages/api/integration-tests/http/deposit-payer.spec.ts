@@ -93,6 +93,8 @@ medusaIntegrationTestRunner({
           currency: 'SGD',
           saved_name: null,
           real_name: null,
+          fixed_name: false,
+          blocked_reason: null,
         });
       });
     });

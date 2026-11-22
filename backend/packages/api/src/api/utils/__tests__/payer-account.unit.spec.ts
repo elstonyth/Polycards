@@ -84,6 +84,7 @@ describe('payerOnFile', () => {
     expect(await payerOnFile(scope, 'cus_1', 'gmpay', 'LIM MEI LING')).toEqual({
       name: 'LIM MEI LING',
       account: { bankCode: 'OCBCSGSG', accountNumber: '222' },
+      realName: 'Tan Ah Kow',
     });
   });
 
@@ -95,6 +96,7 @@ describe('payerOnFile', () => {
     expect(await payerOnFile(scope, 'cus_1', 'gmpay', undefined)).toEqual({
       name: 'TAN AH KOW',
       account: { bankCode: 'DBSSSGSG', accountNumber: '111' },
+      realName: 'Tan Ah Kow',
     });
     expect(packs.savedBankAccountsFor).toHaveBeenCalledTimes(1);
     expect(packs.getVerificationState).toHaveBeenCalledTimes(1);

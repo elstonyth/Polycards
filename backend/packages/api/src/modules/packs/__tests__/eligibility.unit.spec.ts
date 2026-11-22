@@ -17,7 +17,7 @@ const ok: PlayFacts = {
   disabled: false,
   frozen: false,
   hasTopup: true,
-  playthroughRemaining: 0,
+  topupMyr: 50,
   group: null,
 };
 const plain = EMPTY_GROUP_POLICY; // a real group that is not a partner group
@@ -31,21 +31,17 @@ describe('playRefusal', () => {
     ['disabled', { disabled: true }, 'unavailable', 'unavailable'],
     ['disabled beats every other refusal', { disabled: true, frozen: true, hasTopup: false }, 'unavailable', 'unavailable'],
     ['frozen', { frozen: true }, 'frozen', null],
-    ['no top-up, no group', { hasTopup: false }, 'no_topup', 'no_topup'],
-    ['no top-up beats playthrough', { hasTopup: false, playthroughRemaining: 5 }, 'no_topup', 'no_topup'],
-    ['playthrough left', { playthroughRemaining: 0.01 }, 'playthrough', null],
-    ['playthrough NaN', { playthroughRemaining: NaN }, 'playthrough', null],
-    ['playthrough +Infinity', { playthroughRemaining: Infinity }, 'playthrough', null],
-    ['playthrough -Infinity', { playthroughRemaining: -Infinity }, 'playthrough', null],
-    ['playthrough negative', { playthroughRemaining: -1 }, null, null],
-    // Any real group skips the top-up; the playthrough still holds where withdrawals are allowed.
-    ['plain group, no top-up', { group: plain, hasTopup: false }, null, null],
-    ['partner group that may withdraw, no top-up', { group: rebate, hasTopup: false }, null, null],
-    ['partner group that may withdraw, playthrough left', { group: rebate, playthroughRemaining: 0.01 }, 'playthrough', null],
+    ['no top-up, no group', { hasTopup: false, topupMyr: 0 }, 'no_topup', 'no_topup'],
+    // Coin Flip asks for RM 50 of real top-ups in total; spending them is not required (owner, 2026-11-21).
+    ['under RM 50 topped up', { topupMyr: 49.99 }, 'no_topup', null],
+    ['exactly RM 50 topped up', { topupMyr: 50 }, null, null],
+    ['top-up total NaN', { topupMyr: NaN }, 'no_topup', null],
+    ['top-up total +Infinity', { topupMyr: Infinity }, 'no_topup', null],
+    // Any real group skips the top-up.
+    ['plain group, no top-up', { group: plain, hasTopup: false, topupMyr: 0 }, null, null],
+    ['partner group that may withdraw, no top-up', { group: rebate, hasTopup: false, topupMyr: 0 }, null, null],
     ['plain group, frozen', { group: plain, frozen: true }, 'frozen', null],
-    // A withdrawal-blocked group can never cash out, so only the freeze (and disabled) still apply.
-    ['withdrawal-blocked group, no top-up, playthrough left', { group: blocked, hasTopup: false, playthroughRemaining: 5 }, null, null],
-    ['withdrawal-blocked group, NaN playthrough', { group: blocked, playthroughRemaining: NaN }, null, null],
+    ['withdrawal-blocked group, no top-up', { group: blocked, hasTopup: false, topupMyr: 0 }, null, null],
     ['withdrawal-blocked group, frozen', { group: blocked, frozen: true }, 'frozen', null],
     ['withdrawal-blocked group, disabled', { group: blocked, disabled: true }, 'unavailable', 'unavailable'],
   ])('%s → coin flip %s, lucky draw %s', (_label, facts, coin, lucky) => {
@@ -59,8 +55,7 @@ describe('COIN_FLIP_REFUSAL', () => {
     expect(COIN_FLIP_REFUSAL).toEqual({
       unavailable: 'This account is unavailable.',
       frozen: 'Coin flips are unavailable while your account is under review.',
-      no_topup: 'Top up once to play Coin Flip.',
-      playthrough: 'Complete your deposit playthrough before flipping a card.',
+      no_topup: 'Top up at least RM 50 in total to play Coin Flip.',
     });
     expect(Object.values(COIN_FLIP_REFUSAL)).not.toContain(NO_TOPUP_MESSAGE);
   });
@@ -109,11 +104,15 @@ describe('column guards', () => {
 describe('mayPlay', () => {
   const service = (over: Partial<Record<'disabled' | 'topup', boolean>> = {}) => ({
     isAccountDisabled: jest.fn(async () => over.disabled ?? false),
+    isFrozen: jest.fn(async () => false),
     hasTopUp: jest.fn(async () => over.topup ?? true),
-    walletSummary: jest.fn(async () => ({ isFrozen: false, hasTopup: over.topup ?? true, playthrough: { remaining: 0 } })),
+    walletSummary: jest.fn(),
   });
-  const ctx = (group: { name: string; metadata: Record<string, unknown> } | null) => {
-    const execute = jest.fn(async () => (group ? [group] : []));
+  // The group query answers with the group; the top-up sum query with topupSen.
+  const ctx = (group: { name: string; metadata: Record<string, unknown> } | null, topupSen = '5000') => {
+    const execute = jest.fn(async (sql: string, _args?: unknown[]) =>
+      sql.includes("reason = 'topup'") ? [{ sen: topupSen }] : group ? [group] : [],
+    );
     return { ctx: { manager: { execute } } as never, execute };
   };
   const run = (svc: ReturnType<typeof service>, game: 'lucky_draw' | 'coin_flip', c: { ctx: never }) =>
@@ -138,13 +137,22 @@ describe('mayPlay', () => {
     expect(c.execute).toHaveBeenCalledWith(expect.stringContaining('DISTINCT ON'), ['cus_1']);
   });
 
-  it('coin flip reads the wallet summary (not hasTopUp) and the group policy', async () => {
-    const svc = service({ topup: false });
-    await expect(run(svc, 'coin_flip', ctx(null))).resolves.toBe('no_topup');
+  it('coin flip sums the normal part of positive top-ups, never the wallet or its playthrough', async () => {
+    const svc = service();
+    const short = ctx(null, '4999');
+    await expect(run(svc, 'coin_flip', short)).resolves.toBe('no_topup');
+    const [sumSql, sumArgs] = short.execute.mock.calls.find(([sql]) => sql.includes("reason = 'topup'"))!;
+    expect(sumSql).toContain('amount > 0');
+    expect(sumSql).toContain('bonus_cents');
+    expect(sumSql).toContain('deleted_at IS NULL');
+    expect(sumArgs).toEqual(['cus_1']);
+    await expect(run(svc, 'coin_flip', ctx(null, '5000'))).resolves.toBeNull();
+    await expect(run(svc, 'coin_flip', ctx(null, null as never))).resolves.toBe('no_topup');
     expect(svc.hasTopUp).not.toHaveBeenCalled();
-    expect(svc.walletSummary).toHaveBeenCalledWith('cus_1', undefined, expect.anything());
+    expect(svc.walletSummary).not.toHaveBeenCalled();
+    expect(svc.isFrozen).toHaveBeenCalledWith('cus_1', expect.anything());
     await expect(
-      run(service({ topup: false }), 'coin_flip', ctx({ name: 'Partner', metadata: { partner_rate_bp: 100, withdrawals_blocked: true } })),
+      run(service(), 'coin_flip', ctx({ name: 'Partner', metadata: { partner_rate_bp: 100, withdrawals_blocked: true } }, '0')),
     ).resolves.toBeNull();
   });
 });

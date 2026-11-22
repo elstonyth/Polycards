@@ -517,6 +517,14 @@ export const ADMIN_ROUTES: readonly AdminRoute[] = [
     policy: paymentWrite,
     limits: ACTION,
   },
+  {
+    // Settlement's Credit from gateway entry: a ledger write for what arrived,
+    // read off the gateway's manual entry. Guarded like Credit deposit.
+    matcher: '/admin/payments/deposits/*/credit-from-entry',
+    method: 'POST',
+    policy: paymentWrite,
+    limits: ACTION,
+  },
   // Purchase-invoice writer (POLYCARD-BACK §3.5) — raises real inventory
   // counters, up to 200 lines x 1,000,000 qty per call; same admin budget.
   { matcher: '/admin/purchase-invoices', method: 'POST', limits: ACTION },

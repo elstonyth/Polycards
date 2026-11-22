@@ -205,7 +205,12 @@ export const GMPAY_PAYOUT_FLOAT_EMPTY = 'GMPAY_PAYOUT_FLOAT_EMPTY';
  * once. Everything else stays unclear until proven: refunding a payout that
  * was in fact created would pay twice. Extend only from what staging shows.
  */
-const PAYOUT_CREATES_NOTHING = new Set(['INVALID_IP']);
+const PAYOUT_CREATES_NOTHING = new Set([
+  'INVALID_IP',
+  // Prod 2026-11-20: two payouts refused this way returned no token and never
+  // appeared in GMpay's back office (amount outside the channel limit).
+  'AMOUNT_NOT_IN_RANGE',
+]);
 
 export class GmpayError extends GatewayError {
   constructor(
@@ -226,7 +231,12 @@ type GmpayResponse = Record<string, unknown> & {
 };
 
 type Path =
-  'payin' | 'payout' | 'payinQuery' | 'payoutQuery' | 'balance' | 'banklist';
+  | 'payin'
+  | 'payout'
+  | 'payinQuery'
+  | 'payoutQuery'
+  | 'balance'
+  | 'banklist';
 
 function failure(
   path: Path,

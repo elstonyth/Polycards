@@ -896,7 +896,9 @@ moduleIntegrationTestRunner<PacksModuleService>({
       const sameDay = new Date(retiredAt.getTime() + 60_000);
       const nextDay = new Date(retiredAt.getTime() + 24 * 3600 * 1000);
       await checkInPaid({ customerId: cus, now: sameDay });
-      await service.checkInDaily({ customerId: cus, now: nextDay });
+      // Paid too: on a Sunday, nextDay is Monday, a new task week, and the
+      // check-in top-up gate resets with it.
+      await checkInPaid({ customerId: cus, now: nextDay });
       // (sameDay may cross MYT midnight in the minute after the retire; if so
       // it is a LATER day and must be refused too.)
       const sameMytDay =

@@ -22,6 +22,7 @@ import {
   adjustmentAuditNote,
   depositAuditNote,
   ledgerTrail,
+  linkedOrderPaidNote,
   stampNote,
   withdrawalAuditNote,
   type GatewayAnswer,
@@ -275,22 +276,77 @@ export default async function gatewayAuditJob(container: MedusaContainer) {
       }
       note = adjustmentAuditNote(audited, entryRef, entry);
     } else {
-      // Rewritten against the ledger only when the gateway disagrees: most
-      // rows agree, and this costs two more reads.
-      note =
-        depositAuditNote(audited, answer) &&
-        depositAuditNote(
-          audited,
-          answer,
-          await ledgerTrail(packs, {
-            customerId: row.customer_id,
-            anchor: topupIdempotencyReference(
-              row.customer_id,
-              row.merchant_transaction_id,
-            ),
-            refs: [row.merchant_transaction_id, row.gateway_transaction_id],
-          }),
-        );
+      // The order turned paid on a row linked to a manual entry. If the entry
+      // is still paid too, the gateway holds two paid records for one credit,
+      // and that holds even when the order paid exactly what was credited, so
+      // the entry is asked about whatever the order's amount (review,
+      // 2026-11-21; the 2026-11-20 version only reworded an existing
+      // mismatch note). An entry no longer paid, or gone, no longer counts:
+      // the order alone is read. netAmount stays the ORDER's either way: the
+      // order is the record that backs the credit once it is paid.
+      let entryPaid = false;
+      if (
+        entryRef &&
+        row.status === 'settled' &&
+        answer.kind === 'detail' &&
+        answer.state === 'success'
+      ) {
+        try {
+          const e = await getDepositDetail(entryRef, config, rowFx(row));
+          entryPaid = e.state === 'success';
+        } catch (error) {
+          if (classifyRequeryError(error).kind !== 'not-found') {
+            skipped += 1;
+            logger.warn(
+              `[gateway-audit] deposit ${row.merchant_transaction_id}: manual entry ${entryRef} answer ambiguous (${
+                error instanceof Error ? error.message : String(error)
+              }) — retry next run`,
+            );
+            continue;
+          }
+        }
+      }
+      if (entryRef && entryPaid && answer.kind === 'detail') {
+        note = linkedOrderPaidNote(audited, entryRef, answer.amount);
+      } else {
+        // Rewritten against the ledger only when the gateway disagrees: most
+        // rows agree, and this costs two more reads.
+        note =
+          depositAuditNote(audited, answer) &&
+          depositAuditNote(
+            audited,
+            answer,
+            await ledgerTrail(packs, {
+              customerId: row.customer_id,
+              anchor: topupIdempotencyReference(
+                row.customer_id,
+                row.merchant_transaction_id,
+              ),
+              refs: [row.merchant_transaction_id, row.gateway_transaction_id],
+            }),
+          );
+      }
+    }
+    // The batch was read at the start of the run. A link made or replaced on
+    // Settlement while this run asked the gateway makes this copy stale, and
+    // stamping it would put back the finding the operator just answered (code
+    // review, 2026-11-20). Leave such a row to the next run.
+    if (
+      row.status === 'settled' &&
+      answer.kind === 'detail' &&
+      answer.state === 'failed'
+    ) {
+      const [fresh] = await packs.listGatewayDeposits(
+        { id: row.id },
+        { take: 1, select: ['id', 'gateway_adjustment_ref'] },
+      );
+      if (
+        fresh &&
+        (fresh.gateway_adjustment_ref ?? null) !== (entryRef ?? null)
+      ) {
+        skipped += 1;
+        continue;
+      }
     }
     await packs.updateGatewayDeposits({
       id: row.id,

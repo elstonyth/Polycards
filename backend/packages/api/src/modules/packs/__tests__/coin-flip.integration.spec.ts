@@ -50,10 +50,10 @@ moduleIntegrationTestRunner<PacksModuleService>({
       const [pull] = await service.createPulls([{ customer_id: customerId, card_id: card.handle,
         pack_id: 'coin-test', rolled_at: new Date(), source, bonus_bp: source === 'pack' ? 0 : 10000,
         stock_earmarked: true, flip_eligible_at: new Date() }]);
-      // Eligible despite zero wallet balance.
+      // Eligible despite zero wallet balance: exactly the RM 50 of top-ups Coin Flip asks for.
       await service.createCreditTransactions([
-        { customer_id: customerId, amount: 10, reason: 'topup', external_funded_cents: 1000 },
-        { customer_id: customerId, amount: -10, reason: 'pack_open', external_funded_cents: -1000 },
+        { customer_id: customerId, amount: 50, reason: 'topup', external_funded_cents: 5000 },
+        { customer_id: customerId, amount: -50, reason: 'pack_open', external_funded_cents: -5000 },
       ]);
       return { customerId, pullId: pull.id };
     };
@@ -298,13 +298,12 @@ moduleIntegrationTestRunner<PacksModuleService>({
       expect((await pullState(input.pullId)).flip_eligible_at).toBeTruthy();
     });
 
-    it.each(['expired', 'config', 'disabled', 'frozen', 'playthrough', 'ownership', 'group'] as const)('refuses %s changes after quote without mutation', async cause => {
+    it.each(['expired', 'config', 'disabled', 'frozen', 'ownership', 'group'] as const)('refuses %s changes after quote without mutation', async cause => {
       const input = await seed();
       const q = await service.quoteCoinFlip(input);
       if (cause === 'expired') await service.updateCoinFlipRounds([{ id: q.id, expires_at: new Date(0) }]);
       if (cause === 'config') await configure(0);
       if (cause === 'disabled' || cause === 'frozen') await service.createCustomerAccountStates([{ customer_id: input.customerId, [cause]: true }]);
-      if (cause === 'playthrough') await service.createCreditTransactions([{ customer_id: input.customerId, amount: 10, reason: 'topup', external_funded_cents: 1000 }]);
       if (cause === 'ownership') await service.updatePulls([{ id: input.pullId, customer_id: 'other' }]);
       if (cause === 'group') {
         const em = MikroOrmWrapper.forkManager();
@@ -323,24 +322,19 @@ moduleIntegrationTestRunner<PacksModuleService>({
       await expect(service.quoteCoinFlip(await seed('free'))).rejects.toThrow();
     });
 
-    it('lets a withdrawal-blocked group flip without a top-up or finished playthrough, never while frozen', async () => {
+    it('lets a withdrawal-blocked group flip without a top-up, never while frozen', async () => {
       const em = MikroOrmWrapper.forkManager();
       await em.execute("INSERT INTO customer_group (id, name, metadata) VALUES ('blocked', 'Partner', '{\"partner_rate_bp\":100,\"withdrawals_blocked\":true}')");
       const join = (customerId: string) =>
         em.execute("INSERT INTO customer_group_customer (customer_id, customer_group_id) VALUES (?, 'blocked')", [customerId]);
-      // Outside such a group both gates still hold.
+      // Outside such a group the top-up still holds.
       const fresh = await noTopup();
       await expect(service.quoteCoinFlip(fresh)).rejects.toThrow(/top up/i);
-      const unplayed = await seed();
-      await service.createCreditTransactions([{ customer_id: unplayed.customerId, amount: 10, reason: 'topup', external_funded_cents: 1000 }]);
-      await expect(service.quoteCoinFlip(unplayed)).rejects.toThrow(/playthrough/i);
-      // Inside it, neither applies: nothing a member wins can leave the account.
-      for (const input of [fresh, unplayed]) {
-        await join(input.customerId);
-        const q = await service.quoteCoinFlip(input);
-        expect((await service.acceptCoinFlip({ customerId: input.customerId, roundId: q.id })).status).toBe('won');
-        expect(await wins(input.customerId)).toHaveLength(1);
-      }
+      // Inside it, it does not: nothing a member wins can leave the account.
+      await join(fresh.customerId);
+      const q = await service.quoteCoinFlip(fresh);
+      expect((await service.acceptCoinFlip({ customerId: fresh.customerId, roundId: q.id })).status).toBe('won');
+      expect(await wins(fresh.customerId)).toHaveLength(1);
       expect((await service.walletSummary(fresh.customerId)).withdrawable).toBe(0);
       // A freeze still stops a member.
       const frozen = await noTopup();
@@ -349,7 +343,7 @@ moduleIntegrationTestRunner<PacksModuleService>({
       await expect(service.quoteCoinFlip(frozen)).rejects.toThrow(/review/i);
     });
 
-    it('asks only DEFAULT to top up: any other group flips without one but keeps its playthrough', async () => {
+    it('asks only DEFAULT to top up: any other group flips without one', async () => {
       const em = MikroOrmWrapper.forkManager();
       await em.execute(`INSERT INTO customer_group (id, name, metadata) VALUES
         ('default', 'DEFAULT', '{}'),
@@ -374,11 +368,24 @@ moduleIntegrationTestRunner<PacksModuleService>({
       // DEFAULT plus a real group follows the real group.
       await join(inDefault.customerId, 'plain');
       expect((await service.quoteCoinFlip(inDefault)).status).toBe('quoted');
-      // Where withdrawals are allowed, an unfinished playthrough still stops a flip.
-      const unplayed = await seed();
-      await service.createCreditTransactions([{ customer_id: unplayed.customerId, amount: 10, reason: 'topup', external_funded_cents: 1000 }]);
-      await join(unplayed.customerId, 'rebate');
-      await expect(service.quoteCoinFlip(unplayed)).rejects.toThrow(/playthrough/i);
+    });
+
+    it('asks DEFAULT for RM 50 of real top-ups in total, spent or not', async () => {
+      const short = await noTopup();
+      // RM 49.99 of top-ups, plus admin credit and a bonus-funded top-up part that never count.
+      await service.createCreditTransactions([
+        { customer_id: short.customerId, amount: 49.99, reason: 'topup', external_funded_cents: 4999 },
+        { customer_id: short.customerId, amount: 500, reason: 'adjustment' },
+        { customer_id: short.customerId, amount: 10, reason: 'topup', bonus_cents: 1000, external_funded_cents: 0 },
+      ]);
+      await expect(service.quoteCoinFlip(short)).rejects.toThrow(/RM 50/);
+      // One more sen reaches the bar, and nothing has been spent on packs.
+      await service.createCreditTransactions([{ customer_id: short.customerId, amount: 0.01, reason: 'topup', external_funded_cents: 1 }]);
+      expect((await service.walletSummary(short.customerId)).playthrough.remaining).toBeGreaterThan(0);
+      const q = await service.quoteCoinFlip(short);
+      expect((await service.acceptCoinFlip({ customerId: short.customerId, roundId: q.id })).status).toBe('won');
+      // The win is credit, but withdrawals keep their spend-first gate.
+      expect((await service.walletSummary(short.customerId)).withdrawable).toBe(0);
     });
 
     it('can sell after a win, preserving the gift buyback cash rule', async () => {
