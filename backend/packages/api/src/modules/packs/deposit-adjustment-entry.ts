@@ -37,8 +37,9 @@ const refused = (message: string) =>
  * Whether a hand credit (adjustment or bonus grant, the pair ledgerTrail reads)
  * to a DIFFERENT customer already quotes the entry's reference. The gateway's
  * answer names no payer, so the ledger is the only other witness to whose
- * money an entry is (code review, 2026-11-20). Case-insensitive, with "_"
- * escaped so it matches itself and not any character.
+ * money an entry is (code review, 2026-11-20). Case-insensitive, with the LIKE
+ * metacharacters (%, _ and the escape character \) escaped so each matches
+ * itself, the same way the admin assistant's search does.
  */
 export async function quotedForAnotherCustomer(
   packs: Pick<GatewayDeposits, 'listCreditTransactions'>,
@@ -48,7 +49,7 @@ export async function quotedForAnotherCustomer(
     {
       customer_id: { $ne: input.customerId },
       reason: ['adjustment', 'bonus_grant'],
-      reference: { $ilike: `%${input.ref.replace(/_/g, '\\_')}%` },
+      reference: { $ilike: `%${input.ref.replace(/[%_\\]/g, '\\$&')}%` },
     } as never,
     { take: 1, select: ['id'] },
   );

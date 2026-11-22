@@ -270,6 +270,24 @@ moduleIntegrationTestRunner<PacksModuleService>({
           }),
         ).toBe(true);
       });
+
+      // CodeQL #32: "%" and "\" in the reference match themselves too.
+      it('treats % and \\ in the reference as plain characters', async () => {
+        await credit('cus_other2', 'adjustment', 'entry MDY2026B');
+        expect(
+          await quotedForAnotherCustomer(service, {
+            customerId: 'cus_me2',
+            ref: 'MD%2026B',
+          }),
+        ).toBe(false);
+        await credit('cus_other2', 'adjustment', 'entry MD\\2026C');
+        expect(
+          await quotedForAnotherCustomer(service, {
+            customerId: 'cus_me2',
+            ref: 'MD\\2026C',
+          }),
+        ).toBe(true);
+      });
     });
   },
 });
