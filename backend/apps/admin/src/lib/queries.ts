@@ -68,6 +68,7 @@ import {
   acknowledgeAuditFinding,
   creditGatewayDeposit,
   linkGatewayAdjustmentEntry,
+  creditFromGatewayEntry,
   getMoneyIntegrity,
   getPaymentGateway,
   savePaymentGateway,
@@ -479,6 +480,29 @@ export const useLinkAdjustmentEntry = () => {
     onSuccess: () => toast.success(t('settlement.linkedToast')),
     onError: (e) => toast.error(e instanceof Error ? e.message : String(e)),
     onSettled: () => qc.invalidateQueries({ queryKey: qk.gatewayAuditKey }),
+  });
+};
+
+// No error toast: the prompt shows the refusal inline and stays open.
+export const useCreditFromEntry = () => {
+  const qc = useQueryClient();
+  const { t } = useTranslation();
+  return useMutation({
+    mutationFn: creditFromGatewayEntry,
+    // A replay moved nothing: say so, with what the ledger already holds.
+    onSuccess: (r) =>
+      toast.success(
+        t(
+          r.replayed
+            ? 'deposits.entryAlreadyToast'
+            : 'deposits.entryCreditedToast',
+          { amount: r.amount.toFixed(2) },
+        ),
+      ),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ['admin', 'gateway-deposits'] });
+      qc.invalidateQueries({ queryKey: qk.gatewayAuditKey });
+    },
   });
 };
 

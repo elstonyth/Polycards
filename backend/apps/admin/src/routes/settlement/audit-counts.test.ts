@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   auditCounts,
   canCreditDeposit,
-  canLinkEntry,
   gatewayCheck,
+  linkEntryAction,
 } from './audit-counts';
 
 const rows = (n: number) => Array.from({ length: n }, () => ({}));
@@ -39,7 +39,7 @@ describe('canCreditDeposit', () => {
   });
 });
 
-describe('canLinkEntry', () => {
+describe('linkEntryAction', () => {
   const alarm =
     'gateway says FAILED but the row is settled — credit issued without gateway confirmation, investigate';
   const short =
@@ -47,10 +47,23 @@ describe('canLinkEntry', () => {
 
   it('offers the link on a settled deposit the gateway calls FAILED', () => {
     for (const note of [alarm, short]) {
-      expect(canLinkEntry({ kind: 'deposit', status: 'settled', note })).toBe(
-        true,
-      );
+      expect(
+        linkEntryAction({ kind: 'deposit', status: 'settled', note }),
+      ).toBe('link');
     }
+  });
+
+  // The audit's own words once a linked entry stops backing its row: only a
+  // new link can point the row at the corrected entry.
+  it.each([
+    "gateway's manual entry MD1 paid 50.00, row credited 56.49 — investigate",
+    "gateway's manual entry MD1 is FAILED, but the row is settled — investigate",
+    "gateway's manual entry MD1 reports no readable amount — investigate",
+    'gateway has NO record of manual entry MD1 linked to this settled deposit — investigate',
+  ])('offers a replacement on a dead link: %s', (note) => {
+    expect(linkEntryAction({ kind: 'deposit', status: 'settled', note })).toBe(
+      'replace',
+    );
   });
 
   it.each([
@@ -60,10 +73,10 @@ describe('canLinkEntry', () => {
     [
       'deposit',
       'settled',
-      "gateway's manual entry MD1 paid 50.00, row credited 56.49 — investigate",
+      'gateway now reports the order itself PAID (64.56), row credited 56.49, and manual entry MD1 is linked to it too — the gateway may hold two paid records for one top-up, investigate',
     ],
   ])('never on a %s that is %s with another note', (kind, status, note) => {
-    expect(canLinkEntry({ kind, status, note })).toBe(false);
+    expect(linkEntryAction({ kind, status, note })).toBeNull();
   });
 });
 

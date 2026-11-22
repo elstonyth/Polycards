@@ -804,6 +804,7 @@ import type {
 import type { MoneyIntegrity } from '@acme/api/admin/payments/integrity';
 import type { CreditDepositResult } from '@acme/api/admin/payments/deposits/[id]/credit';
 import type { LinkAdjustmentEntryResult } from '@acme/api/admin/payments/deposits/[id]/adjustment-entry';
+import type { CreditFromEntryResult } from '@acme/api/admin/payments/deposits/[id]/credit-from-entry';
 import type {
   GatewayPreflightRefusal,
   PaymentGateway,
@@ -876,6 +877,19 @@ export const linkGatewayAdjustmentEntry = (body: {
 }) =>
   postJson<LinkAdjustmentEntryResult>(
     `/admin/payments/deposits/${encodeURIComponent(body.id)}/adjustment-entry`,
+    { ref: body.ref, reason: body.reason },
+  );
+
+/** Deposits' Credit from gateway entry: credits what the gateway's manual
+ *  entry booked, through the row's FX lock, and links the entry. The backend
+ *  checks the order and the entry live first. */
+export const creditFromGatewayEntry = (body: {
+  id: string;
+  ref: string;
+  reason: string;
+}) =>
+  postJson<CreditFromEntryResult>(
+    `/admin/payments/deposits/${encodeURIComponent(body.id)}/credit-from-entry`,
     { ref: body.ref, reason: body.reason },
   );
 

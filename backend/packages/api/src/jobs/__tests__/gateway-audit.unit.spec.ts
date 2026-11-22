@@ -432,10 +432,13 @@ describe('gateway audit job', () => {
       gateway_adjustment_ref: 'MD-ENTRY-1',
     };
     const byRef =
-      (entry: Record<string, unknown> | Error) =>
+      (
+        entry: Record<string, unknown> | Error,
+        order: Record<string, unknown> = { state: 'failed', amount: 0 },
+      ) =>
       (): Record<string, unknown> => {
         const ref = fakeGateway.calls.depositDetails.at(-1);
-        if (ref === 'PC-1') return { state: 'failed', amount: 0 };
+        if (ref === 'PC-1') return order;
         if (entry instanceof Error) throw entry;
         return entry;
       };
@@ -521,13 +524,120 @@ describe('gateway audit job', () => {
       }
     });
 
-    it('never asks about the entry while the order itself agrees', async () => {
+    // The order turned paid after the link. The plain "gateway paid X, row
+    // credited Y" would hide that the entry is on the gateway's books too
+    // (code review, 2026-11-20).
+    it('names the entry when the order itself turns paid for another sum', async () => {
       fakeGateway.script({
-        getDepositDetail: { state: 'success', amount: 56.49 },
+        getDepositDetail: { state: 'success', amount: 64.56 },
       });
       const h = harness([linked]);
       await gatewayAuditJob(h.container as never);
-      expect(fakeGateway.calls.depositDetails).toEqual(['PC-1']);
+      expect(fakeGateway.calls.depositDetails).toEqual(['PC-1', 'MD-ENTRY-1']);
+      expect(update(h)?.audit_note).toBe(
+        'gateway now reports the order itself PAID (64.56), row credited 56.49, and manual entry MD-ENTRY-1 is linked to it too — the gateway may hold two paid records for one top-up, investigate',
+      );
+    });
+
+    // Settlement's Link gateway entry answered the row while this run was
+    // asking the gateway. What the run read at its start is stale: stamping
+    // it would put back the finding the operator just answered.
+    it.each([
+      ['linked', { ...linked, gateway_adjustment_ref: null }, 'MD-ENTRY-1'],
+      ['pointed at another entry', linked, 'MD-ENTRY-2'],
+    ])('leaves a row %s mid-run to the next run', async (_label, row, now) => {
+      fakeGateway.script({
+        getDepositDetail: byRef({ state: 'failed', amount: 0 }) as never,
+      });
+      const h = harness([row]);
+      h.packs.listGatewayDeposits.mockImplementation(
+        async (f: { id?: unknown; audited_at?: unknown }) =>
+          f.id
+            ? [{ id: 'gpd_linked', gateway_adjustment_ref: now }]
+            : f.audited_at === null
+              ? [row]
+              : [],
+      );
+      await gatewayAuditJob(h.container as never);
+      expect(h.packs.updateGatewayDeposits).not.toHaveBeenCalled();
+      expect(h.logger.error).not.toHaveBeenCalled();
+    });
+
+    // The order turned paid for exactly the credited sum. The row agrees with
+    // its order, but a linked entry still paid means two paid records for one
+    // credit, so the entry is asked about too (review, 2026-11-21).
+    describe('when the order itself turns paid for what was credited', () => {
+      const orderPaid = { state: 'success', amount: 56.49, netAmount: 55.92 };
+      const runPaid = async (entry: Record<string, unknown> | Error) => {
+        fakeGateway.script({
+          getDepositDetail: byRef(entry, orderPaid) as never,
+        });
+        const h = harness([linked]);
+        await gatewayAuditJob(h.container as never);
+        return h;
+      };
+
+      it('names the entry when it is paid too', async () => {
+        const h = await runPaid({
+          state: 'success',
+          amount: 56.49,
+          netAmount: 50,
+        });
+        expect(fakeGateway.calls.depositDetails).toEqual([
+          'PC-1',
+          'MD-ENTRY-1',
+        ]);
+        expect(update(h)?.audit_note).toBe(
+          'gateway now reports the order itself PAID (56.49), row credited 56.49, and manual entry MD-ENTRY-1 is linked to it too — the gateway may hold two paid records for one top-up, investigate',
+        );
+      });
+
+      it.each([
+        ['failed', { state: 'failed', amount: 56.49, netAmount: 50 }],
+        [
+          'gone from the gateway',
+          new GatewayError('Not found', [], 400, false, {
+            result: 'not-found',
+          }),
+        ],
+      ])(
+        'reads the order alone when the entry is %s, backfilling the order net',
+        async (_label, entry) => {
+          const h = await runPaid(entry);
+          expect(fakeGateway.calls.depositDetails).toEqual([
+            'PC-1',
+            'MD-ENTRY-1',
+          ]);
+          expect(update(h)).toMatchObject({
+            id: 'gpd_linked',
+            audit_note: null,
+            net_amount: 55.92,
+          });
+          expect(h.logger.error).not.toHaveBeenCalled();
+        },
+      );
+
+      it('gives the plain order note when the order paid another sum and the entry is not paid', async () => {
+        fakeGateway.script({
+          getDepositDetail: byRef(
+            { state: 'failed', amount: 0 },
+            { state: 'success', amount: 64.56 },
+          ) as never,
+        });
+        const h = harness([linked]);
+        await gatewayAuditJob(h.container as never);
+        expect(update(h)?.audit_note).toBe(
+          'gateway paid 64.56, row credited 56.49',
+        );
+      });
+
+      it('writes nothing when the entry lookup is ambiguous', async () => {
+        const h = await runPaid(new GatewayError('their outage', [], 500));
+        expect(h.packs.updateGatewayDeposits).not.toHaveBeenCalled();
+        expect(h.logger.warn).toHaveBeenCalledWith(
+          expect.stringMatching(/MD-ENTRY-1.*retry next run/),
+        );
+      });
     });
   });
 
@@ -555,8 +665,7 @@ describe('gateway audit job — payout net_amount', () => {
   });
   const lastWithdrawalUpdate = (h: ReturnType<typeof harness>) =>
     (h.packs.updateGatewayWithdrawals.mock.calls as unknown[][]).at(-1)?.[0] as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
 
   it('backfills a NULL payout net from the gateway’s answer', async () => {
     fakeGateway.script({

@@ -201,6 +201,20 @@ export function adjustmentAuditNote(
   }, but the row is settled — investigate`;
 }
 
+/**
+ * A linked row whose own order the gateway now reports PAID. The plain "gateway
+ * paid X, row credited Y" would hide that the linked manual entry is on the
+ * gateway's books too: two paid records may back one top-up (code review,
+ * 2026-11-20).
+ */
+export function linkedOrderPaidNote(
+  row: AuditedRow,
+  ref: string,
+  paid: number,
+): string {
+  return `gateway now reports the order itself PAID (${paid.toFixed(2)}), row credited ${rowMoney(row.amount)}, and manual entry ${ref} is linked to it too — the gateway may hold two paid records for one top-up, investigate`;
+}
+
 export function withdrawalAuditNote(
   row: AuditedRow,
   gateway: GatewayAnswer,

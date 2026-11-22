@@ -605,7 +605,18 @@
     "empty": "No deposits in this view.",
     "loadError": "Could not load deposits.",
     "tableLabel": "Deposits table",
-    "paidIn": "paid {{amount}}"
+    "paidIn": "paid {{amount}}",
+    "actions": "Actions",
+    "creditFromEntry": "Credit from gateway entry",
+    "entryTitle": "Credit what arrived?",
+    "entryDesc": "For a USDT top-up where a different amount arrived, so GlobePay365 kept the order failed and booked what arrived as its own manual entry. GlobePay365 is asked about that entry now: it must show paid, and close to what was ordered. The customer is credited what arrived, at this top-up's locked rate, once, and the entry is linked so the hourly check stays clear. Don't also make a hand adjustment.",
+    "entryRef": "Merchant Reference ID of the manual entry",
+    "entryRefHint": "From the GlobePay365 back office (currency USDT), the MD… number in the Merchant Reference ID column. Not the Deposit ID (D…).",
+    "entryReason": "Reason",
+    "entryReasonPlaceholder": "What did you check? (recorded in the audit log)",
+    "entryCancel": "Cancel",
+    "entryCreditedToast": "Credited RM {{amount}}",
+    "entryAlreadyToast": "Already credited RM {{amount}} earlier. Nothing new was credited."
   },
   "withdrawals": {
     "title": "Withdrawals",
@@ -1067,6 +1078,8 @@
     "linkRef": "Merchant Reference ID of the manual entry",
     "linkRefHint": "From the gateway back office, the MD… number in the Merchant Reference ID column. Not the Deposit ID (D…).",
     "linkedToast": "Gateway entry linked",
+    "replaceEntry": "Replace gateway entry",
+    "linkReplaceHint": "This deposit is already linked to an entry the gateway no longer backs. The new entry replaces it, and the old reference stays in the audit log.",
     "checkAcknowledged_one": "{{count, number}} acknowledged, still differs",
     "checkAcknowledged_other": "{{count, number}} acknowledged, still differ"
   },
