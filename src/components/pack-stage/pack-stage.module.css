@@ -223,7 +223,9 @@
   /* Phone: centre pack about 190x352 on an iPhone 13, neighbours' inner
      halves showing at the screen edges. Fits the panel: heading, tabs, row
      and info block in one screen (326 px is everything but the art). */
-  --art-h: clamp(200px, calc(var(--panel, 100svh) - 326px), 352px);
+  /* the floor lets a short phone (320 x 568) keep the price and Open above
+     the tab bar */
+  --art-h: clamp(112px, calc(var(--panel, 100svh) - 326px), 352px);
   --art-w: calc(var(--art-h) * 0.54);
   --step: calc(var(--art-h) * 0.511);
   /* Phones label only the centred pack, in the info block. */
@@ -238,7 +240,9 @@
     /* Desktop: centre about 300x560 at its tallest, +-1 one step (330 px at
        full size) out, +-2 at 560 px. Shrinks with a short window so the info
        block stays on the first screen. */
-    --art-h: clamp(220px, calc(var(--panel, 100svh) - 411px), 560px);
+    /* the floor lets a short laptop view (1280 x 600, 1366 x 650 with the
+       browser's bars) keep the price and Open on the first screen */
+    --art-h: clamp(160px, calc(var(--panel, 100svh) - 411px), 560px);
     --art-w: calc(var(--art-h) * 0.5357);
     --step: calc(var(--art-h) * 0.589);
     --label-h: 3.5rem;
