@@ -31,7 +31,12 @@
  *   notch that starts there pages on. A finger does not stop there: going
  *   down, a swipe over 24 px that starts on the Just Pulled rest (the exit
  *   end) or the footer's, or whose glide would reach the footer, is one
- *   move on to the chosen pack from where it is let go. Up from the
+ *   move on to the chosen pack from where it is let go, starting at the
+ *   finger's speed (`handOver`). Where Just Pulled is taller than the
+ *   view at its rest (`freeFits` false) that move ends on the footer's
+ *   rest instead, unless the finger already took the page past it. A swipe
+ *   that turns back up the page before the lift never goes on: the page
+ *   settles back where the touch began. Up from the
  *   footer is the free part's (native wheel and keys, the finger follows).
  *   The move to Last's top ends on the wrap frame, with no lock to wait out.
  * - Free part: the wheel and the keys are native, except an up notch that
@@ -113,6 +118,12 @@ export type FlowPagerTable = {
    * pack, Last's top); absent or empty: the free part runs on to the wrap.
    */
   ends?: readonly number[] | null;
+  /**
+   * At the exit end the free part's content is all in view (the flow
+   * table's `freeFits`); absent: true. False: a touch going down stops at
+   * the footer's rest before it goes on to the chosen pack.
+   */
+  freeFits?: boolean;
 };
 
 /** The pager table for a flow table and the chosen pack's stop kinds. */
@@ -128,7 +139,29 @@ export function flowPagerTable(
     lineup: true,
     lastTop: t.lastTop,
     ends: t.ends,
+    freeFits: t.freeFits,
   };
+}
+
+/**
+ * A move from `from` to `to` at progress s (0..1) that starts at speed
+ * `m` (px per whole move, from - to sign aside) and ends at rest: the cubic
+ * Hermite curve. For 0 <= m <= 3 |to - from| it never turns back and never
+ * passes `to`; at m = 3 |to - from| it is the ease-out cubic.
+ */
+export function handOver(
+  from: number,
+  to: number,
+  m: number,
+  s: number,
+): number {
+  const d = to - from;
+  const u = Math.max(0, Math.min(1, s));
+  return (
+    from +
+    d * (3 * u * u - 2 * u * u * u) +
+    Math.sign(d) * m * (u - 2 * u * u + u * u * u)
+  );
 }
 
 /** The free glide's length for a release speed v (px per 60 Hz frame). */
@@ -266,7 +299,8 @@ export interface FlowPager {
   refused(): boolean;
 }
 
-type Move = { t0: number; from: number; k: number; ms: number };
+/** `v0`: the start speed (px/ms) a touch release hands over; absent: an ease-out cubic. */
+type Move = { t0: number; from: number; k: number; ms: number; v0?: number };
 type Glide = { y: number; target: number; toEdge: boolean };
 type Touch = {
   /** It started on the footer's rest or the Just Pulled rest: a swipe up the screen pages on to the chosen pack. */
@@ -456,10 +490,25 @@ export function createFlowPager(): FlowPager {
     }
     return k;
   };
-  const begin = (y: number, k: number, now: number, ms?: number): boolean => {
+  const begin = (
+    y: number,
+    k: number,
+    now: number,
+    ms?: number,
+    v0?: number,
+  ): boolean => {
     const to = ext[k];
     if (to === undefined || Math.abs(to - y) < SAME_PX) return false;
-    move = { t0: now, from: y, k, ms: ms ?? duration(nearest(y), k) };
+    const len = ms ?? duration(nearest(y), k);
+    move = { t0: now, from: y, k, ms: len };
+    if (v0 !== undefined) {
+      // starts at the finger's speed: a start speed that would overshoot an
+      // ease-out cubic shortens the move to that curve instead
+      const v = Math.max(0, v0);
+      const d = Math.abs(to - y);
+      move.ms = v * len > 3 * d ? (3 * d) / v : len;
+      move.v0 = v;
+    }
     glide = null;
     return true;
   };
@@ -705,16 +754,26 @@ export function createFlowPager(): FlowPager {
       }
       const e0 = endsOf()[0];
       const v = releaseSpeed(t.samples, at);
-      if (
-        e0 !== undefined &&
-        t.y0 - t.y > TOUCH_PAGE_PX &&
-        (t.footer || scrollY + glideDistance(v) >= e0 - SAME_PX)
-      ) {
-        // up the screen from a rest, or a glide that would reach the footer:
-        // one move on to the chosen pack from where the finger let go (the
-        // footer is no stop on the way down)
-        begin(scrollY, endBase() + packEnd(), now, PAGE_MS);
-        return;
+      if (e0 !== undefined && t.y0 - t.y > TOUCH_PAGE_PX) {
+        if (v < 0) {
+          // the finger turned back up the page before it let go: never on to
+          // the pack; the page settles back where the gesture began
+          if (Math.abs(t.start - scrollY) >= SAME_PX)
+            glide = { y: scrollY, target: t.start, toEdge: false };
+          return;
+        }
+        if (t.footer || scrollY + glideDistance(v) >= e0 - SAME_PX) {
+          // up the screen from a rest, or a glide that would reach the
+          // footer: one move from where the finger let go, at its speed, on
+          // to the chosen pack; where Just Pulled is taller than the view
+          // (`freeFits` false) to the footer's rest first
+          const k =
+            table.freeFits === false && scrollY < e0 - SAME_PX
+              ? endBase()
+              : endBase() + packEnd();
+          begin(scrollY, k, now, PAGE_MS, v / FRAME_MS);
+          return;
+        }
       }
       const target = Math.min(e0 ?? Infinity, scrollY + glideDistance(v));
       // held against the edge (the follow stops there; the device-pixel
@@ -778,7 +837,10 @@ export function createFlowPager(): FlowPager {
           changedAt = now;
           return out(to, m.k, false, true, zoneOf(to));
         }
-        const y = m.from + (to - m.from) * easeOutCubic(t);
+        const y =
+          m.v0 === undefined
+            ? m.from + (to - m.from) * easeOutCubic(t)
+            : handOver(m.from, to, m.v0 * m.ms, t);
         return out(y, m.k, true, false, zoneOf(y));
       }
       if (glide) {

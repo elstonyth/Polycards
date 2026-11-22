@@ -11,6 +11,7 @@ import {
   createFlowPager,
   flowPagerTable,
   glideDistance,
+  handOver,
   RELEASE_SPEED_MAX,
   type FlowPager,
 } from '../stage-flow-pager';
@@ -1304,12 +1305,44 @@ describe('flow pager: the wrap', () => {
   });
 });
 
+describe('flow pager: handOver (the move that starts at the finger speed)', () => {
+  it('starts at the given speed, ends at rest on its target, never turns back or passes it', () => {
+    const d = 600;
+    for (const m of [0, 300, 900, 1800]) {
+      expect(handOver(0, d, m, 0)).toBe(0);
+      expect(handOver(0, d, m, 1)).toBeCloseTo(d, 9);
+      // start speed m per whole move; end speed 0
+      expect(handOver(0, d, m, 1e-6) / 1e-6).toBeCloseTo(m, 2);
+      expect((d - handOver(0, d, m, 1 - 1e-6)) / 1e-6).toBeCloseTo(0, 2);
+      let y = 0;
+      for (let s = 0.01; s <= 1; s += 0.01) {
+        const n = handOver(0, d, m, s);
+        expect(n).toBeGreaterThanOrEqual(y - 1e-9);
+        expect(n).toBeLessThanOrEqual(d + 1e-9);
+        y = n;
+      }
+    }
+    // m = 3d is the ease-out cubic; upward moves mirror
+    expect(handOver(0, d, 3 * d, 0.3)).toBeCloseTo(d * (1 - 0.7 ** 3), 9);
+    expect(handOver(d, 0, 3 * d, 0.3)).toBeCloseTo(d - d * (1 - 0.7 ** 3), 9);
+  });
+});
+
 describe('flow pager: the end (the footer, the chosen pack, the row back)', () => {
   // a slim footer: the footer rest at 11200, the pack at 12000, Last's top at 13000
   const END = { riseSection: { top: 11600, bottom: 12000 } };
   const E0 = 11200;
   const E1 = 12000;
   const C = 13000;
+  // Just Pulled that fits the view: its rest 8000, the footer (800 px) from
+  // 8600 to 9400; the footer rest 8319 (a pixel above the rise start), the pack at 9400
+  const FIT = {
+    riseSection: { top: 8600, bottom: 9400 },
+    ret: { top: 9400, height: 1000 },
+    last: { top: 10400, height: 801 },
+  };
+  const F_JP = 8000;
+  const F1 = 9400;
   /** Runs a move to its end and returns where it landed and the frames that said wrap. */
   const land = (p: FlowPager, y0: number, from: number, to: number) => {
     let y = y0;
@@ -1437,42 +1470,119 @@ describe('flow pager: the end (the footer, the chosen pack, the row back)', () =
     expect(land(p, y, 146, 200 + PAGE_MS)).toEqual({ y: E1, wraps: 0 });
   });
 
-  it('touch: a fast flick above the footer is one move on to the chosen pack and no further', () => {
+  it('touch: where Just Pulled is taller than the view, a flick above the footer is one move to its rest; one that carried the page past it goes on to the pack', () => {
+    expect(tableFor(END).freeFits).toBe(false);
     const p = make(END);
-    expect(flick(p, 10200, 5000, 1000 / 60).end).toBe(E1);
-    // the hardest flick: the follow stops at the chosen pack, never at Last's top
+    expect(flick(p, 10200, 5000, 1000 / 60).end).toBe(E0);
+    // the hardest flick: the follow passes the footer and stops at the chosen pack, never at Last's top
     const q = make(END);
     expect(flick(q, 10200, 60000, 1000 / 60).end).toBe(E1);
   });
 
-  it('touch: from the Just Pulled rest one swipe is one move on to the chosen pack, the scroll rising every frame', () => {
-    const p = make(END);
-    const jp = tableFor(END).exitEnd!;
-    let y = jp;
-    p.touchStart(200, 600, y, 0, 0);
-    p.frame(y, 0);
-    // a slow swipe: its glide alone would stay in Just Pulled
-    for (let i = 1; i <= 5; i++) {
-      y = p.touchMove(200, 600 - 20 * i, y, i * 16, i * 16).scrollTo ?? y;
-      p.frame(y, i * 16);
+  /**
+   * A free swipe: `n` moves of `step` px (finger up the screen) every 16 ms,
+   * then `back` moves of `step` px back down; let go on the last move. The
+   * scroll at the release, the finger's speed there (px/ms, + = page down)
+   * and the scroll every 16 ms after it for `ms`.
+   */
+  const freeSwipe = (
+    p: FlowPager,
+    y0: number,
+    step: number,
+    n: number,
+    back = 0,
+    ms = PAGE_MS + 200,
+  ) => {
+    let y = y0;
+    let finger = 700;
+    let now = 0;
+    p.touchStart(200, finger, y, now, now);
+    p.frame(y, now);
+    for (let i = 1; i <= n + back; i++) {
+      now += 16;
+      finger += i <= n ? -step : step;
+      y = p.touchMove(200, finger, y, now, now).scrollTo ?? y;
+      p.frame(y, now);
     }
-    p.touchEnd(y, 96, 96);
+    const release = y;
+    p.touchEnd(y, now, now);
     const ys = [y];
-    for (let now = 112; now <= 112 + PAGE_MS; now += 16) {
-      const f = p.frame(ys.at(-1)!, now);
+    for (let t = now + 16; t <= now + ms; t += 16) {
+      const f = p.frame(ys.at(-1)!, t);
       ys.push(f.scrollTo ?? ys.at(-1)!);
     }
-    const moving = ys.slice(0, ys.indexOf(E1) + 1);
-    expect(moving.at(-1)).toBe(E1);
+    return { release, finger: (back ? -step : step) / 16, ys };
+  };
+  /** The first frames' speed (px/ms) after a release. */
+  const firstSpeed = (ys: number[]) => (ys[1]! - ys[0]!) / 16;
+
+  it('touch: where Just Pulled fits the view, one swipe from its rest is one move on to the chosen pack, the scroll rising every frame', () => {
+    expect(tableFor(FIT).freeFits).toBe(true);
+    const r = freeSwipe(make(FIT), F_JP, 20, 5);
+    const moving = r.ys.slice(0, r.ys.indexOf(F1) + 1);
+    expect(moving.at(-1)).toBe(F1);
     for (let i = 1; i < moving.length; i++)
       expect(moving[i]!).toBeGreaterThan(moving[i - 1]!);
-    // the same slow swipe further into Just Pulled only glides there
+    // a slow swipe further into Just Pulled (where its glide stays short of the footer) only glides
     const q = make(END);
-    q.touchStart(200, 600, 9000, 0, 0);
-    for (let i = 1; i <= 5; i++)
-      q.touchMove(200, 600 - 20 * i, 9000, i * 16, i * 16);
-    q.touchEnd(9100, 96, 96);
-    expect(run(q, 9100, 112, 3000)).toBeLessThan(E0);
+    const g = freeSwipe(q, 9000, 20, 5, 0, 3000);
+    expect(g.ys.at(-1)!).toBeLessThan(E0);
+  });
+
+  it('touch: the move after the release starts at the finger speed (slow, normal, flick), never passes its rest and never turns back', () => {
+    for (const step of [3, 12, 20, 60]) {
+      // over 24 px in all, so the release pages
+      const r = freeSwipe(
+        make(FIT),
+        F_JP,
+        step,
+        Math.max(4, Math.ceil(30 / step)),
+      );
+      const v = firstSpeed(r.ys);
+      // the finger's speed, within 15% (a flick: the start that lands on an ease-out cubic)
+      expect(Math.abs(v - r.finger)).toBeLessThanOrEqual(
+        0.15 * r.finger + 0.05,
+      );
+      expect(r.ys.at(-1)).toBe(F1);
+      for (let i = 1; i < r.ys.length; i++) {
+        expect(r.ys[i]!).toBeGreaterThanOrEqual(r.ys[i - 1]!);
+        expect(r.ys[i]!).toBeLessThanOrEqual(F1);
+      }
+    }
+    // a hard flick arrives sooner than PAGE_MS; a slow swipe takes the whole move
+    const fast = freeSwipe(make(FIT), F_JP, 60, 4);
+    const slow = freeSwipe(make(FIT), F_JP, 3, 12);
+    expect(fast.ys.indexOf(F1) * 16).toBeLessThan(PAGE_MS - 300);
+    expect(slow.ys.indexOf(F1) * 16).toBeGreaterThan(PAGE_MS - 50);
+  });
+
+  it('touch: where Just Pulled is taller than the view, one swipe from its rest is one move to the footer rest at the finger speed; the next swipe goes on to the pack', () => {
+    const p = make(END);
+    const jp = tableFor(END).exitEnd!;
+    const r = freeSwipe(p, jp, 12, 5);
+    expect(Math.abs(firstSpeed(r.ys) - r.finger)).toBeLessThanOrEqual(
+      0.15 * r.finger,
+    );
+    expect(r.ys.at(-1)).toBe(E0);
+    for (let i = 1; i < r.ys.length; i++)
+      expect(r.ys[i]!).toBeGreaterThanOrEqual(r.ys[i - 1]!);
+    const n = freeSwipe(p, E0, 12, 5);
+    expect(n.ys.at(-1)).toBe(E1);
+  });
+
+  it('touch: a swipe that turns back up the page before the finger lets go never goes on to the pack; the page settles back where it began', () => {
+    for (const [g, y0] of [
+      [FIT, F_JP],
+      [END, 9000],
+    ] as const) {
+      const p = make(g);
+      // 200 px up the screen, then 120 px back: 80 px net, moving back at the lift
+      const r = freeSwipe(p, y0, 20, 10, 6, 4000);
+      expect(r.release).toBe(y0 + 80);
+      expect(r.ys.at(-1)).toBeCloseTo(y0, 0);
+      for (let i = 1; i < r.ys.length; i++)
+        expect(r.ys[i]!).toBeLessThanOrEqual(r.ys[i - 1]!);
+    }
   });
 
   it('touch: from the footer a swipe up the screen follows the finger, then one move on to the chosen pack; one down the screen follows the finger', () => {

@@ -731,6 +731,32 @@ describe('stage flow: the end rests (the footer, the chosen pack, the row back)'
     expect(t.ends).toEqual([11200, 12000, 13000]);
   });
 
+  it('freeFits: at the exit end (8000) only the last section is below the fold, or more of the page', () => {
+    // the band to the footer rest (3200 px) is taller than the 400 px footer: Just Pulled runs below
+    expect(table(END).freeFits).toBe(false);
+    // the band 8000 to 8319 (319 px) is within the 800 px footer: only the footer is below
+    expect(
+      table({
+        riseSection: { top: 8600, bottom: 9400 },
+        ret: { top: 9400, height: 1000 },
+        last: { top: 10400, height: 801 },
+      }).freeFits,
+    ).toBe(true);
+    // the footer rest is the footer's top - 400 here: the band at a footer top of 8800 is
+    // exactly the footer's height (fits); a pixel lower it is not
+    const at = (top: number) =>
+      table({
+        riseSection: { top, bottom: top + 400 },
+        ret: { top: top + 400, height: 1000 },
+        last: { top: top + 1400, height: 801 },
+      });
+    expect(at(8800).ends[0]! - at(8800).exitEnd).toBe(400);
+    expect(at(8800).freeFits).toBe(true);
+    expect(at(8801).freeFits).toBe(false);
+    // no end rests (no last section measured): false
+    expect(table({ riseSection: null }).freeFits).toBe(false);
+  });
+
   it('the footer rest is measured against the height seen under the header and above the tab bar', () => {
     expect(table({ ...END, view: 700 }).ends).toEqual([11300, 12000, 13000]);
   });

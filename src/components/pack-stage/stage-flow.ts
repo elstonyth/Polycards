@@ -92,6 +92,12 @@ export type FlowTable = {
    * and a Last: the free part then runs on to the wrap.
    */
   ends: readonly number[];
+  /**
+   * At the exit end (the Just Pulled rest) the free part's own content is all
+   * in view: only the last section (the footer) is below the fold. False
+   * without end rests.
+   */
+  freeFits: boolean;
 };
 
 export type FlowSpan = 'exit' | 'free' | 'rise' | 'ret' | 'last';
@@ -143,6 +149,7 @@ export function flowTable(g: FlowGeometry): FlowTable | null {
   }
   const hasLast = !!g.last && g.last.height > 0;
   const lastTop = hasLast ? Math.max(after, g.last!.top) : null;
+  const ends = endRests(exitEnd, rise, lastTop, g.view ?? vp);
   return {
     section: S,
     r0,
@@ -156,7 +163,13 @@ export function flowTable(g: FlowGeometry): FlowTable | null {
     ret,
     lastTop,
     lastHeight: hasLast ? g.last!.height : 0,
-    ends: endRests(exitEnd, rise, lastTop, g.view ?? vp),
+    ends,
+    // the band from the exit end to the footer's rest is no taller than the
+    // last section: what that band brings into view is the last section alone
+    freeFits:
+      !!g.riseSection &&
+      ends.length > 0 &&
+      ends[0]! - exitEnd <= g.riseSection.bottom - g.riseSection.top,
   };
 }
 
