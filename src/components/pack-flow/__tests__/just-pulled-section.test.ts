@@ -4,7 +4,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import type { RecentFeed, RecentPull } from '@/lib/data/packs';
-import { DRAWER_GEOMETRY } from '../drawer-model';
+import { DRAWER_GEOMETRY, DRAWER_MEDIA } from '../drawer-model';
 
 vi.mock('next/image', () => ({
   default: ({ src, alt }: { src: string; alt: string }) =>
@@ -137,6 +137,22 @@ describe('Just Pulled on the server (the no-JavaScript form, and the drawer at r
     expect(css).toContain(`--card-h: ${desktop.cardH}px;`);
     expect(css).toContain(`--tab-h: ${desktop.tabH}px;`);
     expect(css).toContain(`--behind: ${desktop.behind};`);
+    // Each short-phone tier's numbers sit in its own media block, and the
+    // tiny block's query is the one the drawer reads for its tab count.
+    const block = (query: string) => {
+      const at = css.indexOf(`@media ${query} {`);
+      expect(at, query).toBeGreaterThan(-1);
+      const end = css.indexOf('@media', at + 1);
+      return css.slice(at, end < 0 ? undefined : end);
+    };
+    const { short, tiny } = DRAWER_GEOMETRY;
+    const shortCss = block('(max-width: 1023px) and (max-height: 720px)');
+    expect(shortCss).toContain(`--card-h: ${short.cardH}px;`);
+    expect(shortCss).toContain(`--tab-h: ${short.tabH}px;`);
+    expect(shortCss).not.toContain('--behind');
+    const tinyCss = block(DRAWER_MEDIA.tiny);
+    expect(tinyCss).toContain(`--card-h: ${tiny.cardH}px;`);
+    expect(tinyCss).toContain(`--behind: ${tiny.behind};`);
     expect(css).toMatch(
       /height:\s*calc\(var\(--card-h\) \+ var\(--behind\) \* var\(--tab-h\)\)/,
     );

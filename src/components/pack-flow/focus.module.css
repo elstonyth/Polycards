@@ -208,11 +208,14 @@
 }
 
 /* Top Hits and Recent Pulls: under the raised pack (its foot is
-   --dock-bottom, set by the focus kit), down to the tab bar */
+   --dock-bottom, set by the focus kit), down to the tab bar, and short of
+   the icon column (the row shows two whole tiles and a peek; the pulls keep
+   the same clear gap from it) */
 .over .block[data-kind='tophits'],
 .over .block[data-kind='pulls'] {
   top: calc(var(--dock-bottom, 208px) + 12px);
   bottom: 12px;
+  right: 68px;
   gap: 0.5rem;
 }
 
@@ -221,22 +224,23 @@
   margin-top: 0.25rem;
 }
 
-/* the row stops short of the icon column: two whole tiles and a peek */
-.over .block[data-kind='tophits'] {
-  right: 68px;
-}
-
 .over .block[data-kind='tophits'] [data-focus-strip] > div {
   flex: 0 0 45%;
   max-width: 45%;
 }
 
+/* the list ends on a whole row: the rows the box would cut are hidden
+   (FocusStops' wholeRows), so its tray closes under the last one shown;
+   positioned, so the rows measure from it */
 .over .block[data-kind='pulls'] .pulls {
+  position: relative;
   min-height: 0;
   flex: 1 1 auto;
   overflow: hidden;
-  /* a row the panel cuts fades out instead of ending on a hard edge */
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 3.5rem), transparent);
+}
+
+.over .block[data-kind='pulls'] .pulls li[data-cut] {
+  display: none;
 }
 
 /* Recent Pulls on the stage: a chase-tier row keeps its wash but not the line

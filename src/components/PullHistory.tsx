@@ -254,9 +254,12 @@ function Row({
 function BoardRow({
   pull,
   onSelect,
+  compact = false,
 }: {
   pull: RecentPull;
   onSelect?: (pull: RecentPull) => void;
+  /** No face and tighter padding: the puller's name still reads under the card's. */
+  compact?: boolean;
 }) {
   const rgb = rarityRgb(pull.rarity);
   const top = isTopRarity(pull.rarity);
@@ -274,7 +277,7 @@ function BoardRow({
     'flex min-w-0 flex-1 items-center gap-3 rounded-xl text-left',
     focusRing,
   );
-  const avatar = (
+  const avatar = compact ? null : (
     <FramedAvatar
       src={pull.avatar}
       initial={pull.who.charAt(0).toUpperCase() || '?'}
@@ -349,12 +352,13 @@ function BoardRow({
           : undefined
       }
       className={cn(
-        'flex h-full items-center gap-3 px-4 py-3.5',
+        'flex h-full items-center gap-3',
+        compact ? 'px-3 py-2.5' : 'px-4 py-3.5',
         !tickets &&
           'transition-colors duration-300 hover:bg-white/[0.04] motion-reduce:transition-none',
       )}
     >
-      {pull.profileHandle ? (
+      {pull.profileHandle && avatar ? (
         <Link
           href={`/profile/${pull.profileHandle}?tab=activity`}
           prefetch={false}
@@ -410,6 +414,7 @@ export function PullHistory({
   heading,
   limit,
   unseeded = false,
+  compact = false,
 }: {
   /** `cards`: the panel as the home feed wears it. `board`: the pack page's
    *  soft layout (counters and filter in a side column, the pulls as one
@@ -436,6 +441,9 @@ export function PullHistory({
   /** `initial` is a placeholder (the homepage flow): until the first answer
    *  lands the empty list says nothing rather than "No pulls yet". */
   unseeded?: boolean;
+  /** Board only: tighter rows without the puller's face (the homepage flow's
+   *  stop on a phone, where a row has little width). */
+  compact?: boolean;
 }) {
   const [tab, setTab] = useState<Tab>('All');
   const { pulls, drought, pending, shownScope, shownCategory } =
@@ -584,7 +592,11 @@ export function PullHistory({
                           className="pull-row-in border-b border-white/[0.08] motion-reduce:animate-none @[46rem]:odd:border-r"
                           style={{ '--i': i } as CSSProperties}
                         >
-                          <BoardRow pull={pull} onSelect={onSelect} />
+                          <BoardRow
+                            pull={pull}
+                            onSelect={onSelect}
+                            compact={compact}
+                          />
                         </li>
                       ))}
                     </ol>

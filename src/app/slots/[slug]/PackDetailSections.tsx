@@ -178,6 +178,7 @@ export function PackRecentPulls({
   bare,
   limit,
   unseeded,
+  compact,
 }: {
   pack: Pick<Pack, 'id' | 'draft' | 'prizeType'>;
   initial: RecentFeed;
@@ -187,6 +188,8 @@ export function PackRecentPulls({
   limit?: number;
   /** `initial` is a placeholder until the first answer (the homepage flow). */
   unseeded?: boolean;
+  /** Tighter rows without faces (the homepage flow on a phone). */
+  compact?: boolean;
 }) {
   if (pack.draft) return null;
   return (
@@ -219,6 +222,7 @@ export function PackRecentPulls({
         noun={isTicketPack(pack) ? 'capsule' : 'pack'}
         limit={limit}
         unseeded={unseeded}
+        compact={compact}
       />
     </Section>
   );

@@ -22,9 +22,10 @@ const front = (cards: ReturnType<typeof stackCards>) =>
   cards.find((c) => c.d === 0 && !c.leave)?.item.id;
 
 describe('the drawer at rest', () => {
-  it('shows the front card and 2 tabs on a phone, 3 on desktop', () => {
-    expect(tabsBehind(false)).toBe(2);
-    expect(tabsBehind(true)).toBe(3);
+  it('shows the front card and 2 tabs on a phone, 1 on the shortest, 3 on desktop', () => {
+    expect(tabsBehind('phone')).toBe(2);
+    expect(tabsBehind('tiny')).toBe(1);
+    expect(tabsBehind('desktop')).toBe(3);
     const cards = stackCards(startStack('all', twelve), 2);
     expect(front(cards)).toBe('a');
     expect(cards.map((c) => c.d)).toEqual([
@@ -220,8 +221,8 @@ describe('the tier tabs and Stats', () => {
 });
 
 describe('the drawer box', () => {
-  it('shows as many tabs as the stack keeps behind the front', () => {
-    expect(DRAWER_GEOMETRY.phone.behind).toBe(tabsBehind(false));
-    expect(DRAWER_GEOMETRY.desktop.behind).toBe(tabsBehind(true));
+  // The drawer reads only the desktop and tiny queries (DRAWER_MEDIA).
+  it("keeps the phone's tabs on short phones", () => {
+    expect(DRAWER_GEOMETRY.short.behind).toBe(DRAWER_GEOMETRY.phone.behind);
   });
 });

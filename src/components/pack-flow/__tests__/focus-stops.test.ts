@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { blockOf, topHitsOf } from '../focus-stops-data';
+import { blockOf, firstCutRow, topHitsOf } from '../focus-stops-data';
 import type { PackTiers } from '@/lib/pack-tiers';
 
 const card = (n: number, rarity: string, priceMyr: number | null) => ({
@@ -64,5 +64,20 @@ describe('the block shown', () => {
     expect(blockOf(0.81, 6, true)).toBe(1);
     expect(blockOf(0.79, 6, true)).toBe(0);
     expect(blockOf(2, 6, true)).toBe(2);
+  });
+});
+
+describe('Recent Pulls on the stage ends on a whole row', () => {
+  it('cuts from the first row whose bottom passes the box', () => {
+    // rows ending at 80, 170, 250 and 330 px in a 260 px box: three whole rows
+    expect(firstCutRow([80, 170, 250, 330], 260)).toBe(3);
+    // a row ending exactly at the box's bottom is whole
+    expect(firstCutRow([80, 170, 260], 260)).toBe(3);
+  });
+
+  it('keeps every row that fits and cuts all of them when none does', () => {
+    expect(firstCutRow([60, 120], 400)).toBe(2);
+    expect(firstCutRow([], 400)).toBe(0);
+    expect(firstCutRow([300], 260)).toBe(0);
   });
 });

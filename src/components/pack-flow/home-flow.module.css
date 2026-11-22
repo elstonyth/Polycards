@@ -43,12 +43,14 @@
   overscroll-behavior-y: none;
 }
 
-/* ---- One footer: the copy inside the footer section --------------------- */
+/* ---- No site footer while the flow runs --------------------------------- */
 
-/* The layout renders the site footer as a child of <body>; on this page the
-   footer section (FlowFooter) renders the same footer, so the layout's copy is hidden
-   in every state (display: none also takes it out of the accessibility
-   tree). Browsers without :has() show both footers. */
-:global(body):has(.footer) > :global(footer[data-site-chrome]) {
+/* The layout renders the site footer as a child of <body>; while the flow
+   runs it ends on its last section and loops, so the footer is hidden
+   (display: none also takes it out of the accessibility tree). The plain
+   document (no JavaScript, reduced motion) ends on it as every page does.
+   Browsers without :has() show it after the loop's end. */
+:global(body):has(:global([data-home-flow][data-flow-on]) .spacer)
+  > :global(footer[data-site-chrome]) {
   display: none;
 }

@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 import { getRecentPulls } from '@/lib/data/packs';
 import { cached } from '@/lib/ttl-cache';
-import { FlowFooter } from './FlowFooter';
 import { FlowJustPulled } from './FlowJustPulled';
 import { FlowSpacers } from './FlowSpacers';
 
@@ -52,15 +51,14 @@ export function flowSection<K extends FlowDataKey>(
  *    entry here, in page order. New data: add a reader to FLOW_DATA above.
  *
  * Each entry is wrapped in `<div data-flow-section="<id>">`; the stage finds
- * the sections by that attribute and never by name. Keep the footer last:
- * the chosen pack rises with whichever section is last, and it carries the
- * legal links.
+ * the sections by that attribute and never by name. The chosen pack rises
+ * with whichever section is last. The page has no site footer: its links are
+ * on every other page.
  */
 export const FLOW_SECTIONS: readonly FlowSection[] = [
   flowSection('just-pulled', ['feed'], ({ feed }) => (
     <FlowJustPulled feed={feed} />
   )),
-  flowSection('footer', [], () => <FlowFooter />),
 ];
 
 /** Reads the data the given sections need, each key once. */

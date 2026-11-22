@@ -17,7 +17,10 @@ describe('the flow spacers (home-flow.module.css)', () => {
 
   it('take a height only under data-flow-on', () => {
     const sized = rules.filter(
-      (r) => r.selector.includes('.spacer') && r.selector !== '.spacer',
+      (r) =>
+        r.selector.includes('.spacer') &&
+        r.selector !== '.spacer' &&
+        /height/.test(r.body),
     );
     expect(sized.length).toBeGreaterThan(0);
     for (const r of sized)
@@ -48,8 +51,11 @@ describe('the flow spacers (home-flow.module.css)', () => {
     );
     expect(hide?.body).toMatch(/display:\s*none/);
     expect(hide?.selector).toMatch(/>\s*:global\(footer\[data-site-chrome\]\)/);
-    // keyed to the footer section's own class, not to any other section
-    expect(hide?.selector).toMatch(/:has\(\.footer\)/);
+    // only while the flow runs (the plain document keeps it), keyed to the
+    // flow page's own spacers
+    expect(hide?.selector).toMatch(
+      /:has\(:global\(\[data-home-flow\]\[data-flow-on\]\) \.spacer\)/,
+    );
   });
 });
 

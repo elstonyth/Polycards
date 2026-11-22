@@ -174,7 +174,10 @@ export function JustPulledView({
     return n == null ? [] : [[r, n] as const];
   });
   return (
-    <section aria-labelledby="jp-heading" className="mt-14 w-full">
+    <section
+      aria-labelledby="jp-heading"
+      className={cn('w-full', styles.section)}
+    >
       <div className="px-fluid lg:grid lg:grid-cols-[minmax(0,1fr)_minmax(0,560px)] lg:items-start lg:gap-x-12 lg:gap-y-5">
         <div className="flex items-center gap-3 lg:col-start-1 lg:row-start-1 lg:self-end">
           <h2
@@ -194,7 +197,12 @@ export function JustPulledView({
         </div>
 
         {droughts.length > 0 && (
-          <div className="mt-4 grid grid-cols-2 gap-2.5 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:mt-0">
+          <div
+            className={cn(
+              'mt-4 grid grid-cols-2 gap-2.5 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:mt-0',
+              styles.counters,
+            )}
+          >
             {droughts.map(([r, n]) => {
               const rgb = rarityRgb(r);
               return (
@@ -207,7 +215,12 @@ export function JustPulledView({
                   )}
                   style={{ '--t': rgb } as CSSProperties}
                 >
-                  <p className="font-heading text-[56px] leading-none tracking-[-0.02em] text-white tabular-nums lg:text-[64px]">
+                  <p
+                    className={cn(
+                      'font-heading text-[56px] leading-none tracking-[-0.02em] text-white tabular-nums lg:text-[64px]',
+                      styles.count,
+                    )}
+                  >
                     <span
                       key={n}
                       className={cn(
@@ -219,7 +232,12 @@ export function JustPulledView({
                       {n}
                     </span>
                   </p>
-                  <p className="mt-2 flex flex-wrap items-center gap-1.5 text-[12px] text-neutral-400 lg:text-[13px]">
+                  <p
+                    className={cn(
+                      'mt-2 flex flex-wrap items-center gap-1.5 text-[12px] text-neutral-400 lg:text-[13px]',
+                      styles.countLabel,
+                    )}
+                  >
                     {noun}s without <TierBadge rarity={r} />
                   </p>
                 </div>
@@ -231,7 +249,10 @@ export function JustPulledView({
         <div
           role="group"
           aria-label="Filter pulls by tier"
-          className="mt-3 grid grid-cols-[repeat(4,minmax(0,1fr))_2.75rem] gap-1 rounded-full border border-white/10 bg-neutral-900/90 p-1 lg:col-start-1 lg:row-start-2 lg:mt-0 lg:max-w-[560px]"
+          className={cn(
+            'mt-3 grid grid-cols-[repeat(4,minmax(0,1fr))_2.75rem] gap-1 rounded-full border border-white/10 bg-neutral-900/90 p-1 lg:col-start-1 lg:row-start-2 lg:mt-0 lg:max-w-[560px]',
+            styles.filter,
+          )}
         >
           {DRAWER_TABS.map((t) => (
             <button
@@ -270,7 +291,14 @@ export function JustPulledView({
         </div>
       </div>
 
-      <div className="px-fluid mt-[18px] lg:mx-auto lg:mt-10 lg:max-w-[820px] lg:px-0">
+      <div
+        className={cn(
+          // w-full: the section is a flex column, where auto margins would
+          // shrink the wrap to its absolutely placed cards (no width)
+          'px-fluid mt-[18px] w-full lg:mx-auto lg:mt-10 lg:max-w-[820px] lg:px-0',
+          styles.drawerWrap,
+        )}
+      >
         {chart ? (
           <div data-jp-stats="">{chart}</div>
         ) : (

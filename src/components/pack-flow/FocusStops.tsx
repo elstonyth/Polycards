@@ -29,7 +29,7 @@ import {
   PackRecentPulls,
   usePackCardOverlay,
 } from '@/app/slots/[slug]/PackDetailSections';
-import { blockOf, topHitsOf } from './focus-stops-data';
+import { blockOf, firstCutRow, topHitsOf } from './focus-stops-data';
 import { useFlowData } from './use-flow-data';
 import type { FlowData, FlowSeed } from './types';
 import styles from './focus.module.css';
@@ -112,6 +112,41 @@ function CompactOdds({
       ))}
     </ol>
   );
+}
+
+/**
+ * The Recent Pulls box's ref: the rows the box would cut are hidden
+ * (`data-cut`, focus.module.css), so the list ends on a whole row. It
+ * re-measures as the box resizes and as rows arrive. Rows are measured by
+ * layout (offsets), not by their boxes on screen: new rows animate in.
+ */
+function wholeRows(box: HTMLDivElement | null) {
+  if (!box) return;
+  const bottomOf = (row: HTMLElement) => {
+    let y = row.offsetHeight;
+    for (
+      let e: HTMLElement | null = row;
+      e && e !== box;
+      e = e.offsetParent as HTMLElement | null
+    )
+      y += e.offsetTop;
+    return y;
+  };
+  const fit = () => {
+    const rows = [...box.querySelectorAll('li')];
+    for (const r of rows) r.removeAttribute('data-cut');
+    const cut = firstCutRow(rows.map(bottomOf), box.clientHeight);
+    for (const r of rows.slice(cut)) r.setAttribute('data-cut', '');
+  };
+  // observe() reports the box once before the next paint: the first fit.
+  const resize = new ResizeObserver(fit);
+  resize.observe(box);
+  const arrivals = new MutationObserver(fit);
+  arrivals.observe(box, { childList: true, subtree: true });
+  return () => {
+    resize.disconnect();
+    arrivals.disconnect();
+  };
 }
 
 /** What usePackBuy reads from a detail: only whether the pool has a card. */
@@ -331,14 +366,15 @@ export function FocusStops({
         return (
           <>
             {head(k, <span className={styles.line}>Recent Pulls</span>)}
-            <div className={styles.pulls}>
+            <div className={styles.pulls} ref={wholeRows}>
               {armed ? (
                 <PackRecentPulls
                   pack={pack}
                   initial={data.recentPulls}
                   onOpenCard={overlay.open}
-                  limit={desktop ? 8 : 4}
+                  limit={desktop ? 8 : 6}
                   unseeded={seed.recentPulls === null}
+                  compact={!desktop}
                   bare
                 />
               ) : (

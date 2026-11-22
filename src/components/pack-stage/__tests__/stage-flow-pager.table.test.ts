@@ -117,8 +117,9 @@ const DESKTOP: Size = {
 };
 
 const FRAMES = [8, 16, 31] as const;
+const HEADER_PX = 69;
 /** Header plus tab bar: the panel (and the footer's view) is the viewport less this. */
-const CHROME_PX = 134;
+const CHROME_PX = HEADER_PX + 65;
 
 function geometry(s: Size): FlowGeometry {
   const panel = s.h - CHROME_PX;
@@ -143,6 +144,17 @@ function tableOf(s: Size): FlowTable {
   if (!t) throw new Error('no table');
   return t;
 }
+
+/**
+ * The page with Just Pulled last (no footer): Just Pulled is itself the
+ * section the chosen pack rises with, starting at the exit end (nothing
+ * before it) and one panel tall under the header (its content centred in it).
+ */
+const noFooter = (s: Size): Size => ({
+  ...s,
+  jp: 0,
+  footer: s.h - CHROME_PX + HEADER_PX,
+});
 
 /** Whether Just Pulled is all in view at its rest (its top at the view's top): the visitor's reading. */
 const jpInView = (s: Size): boolean => s.jp <= s.h - CHROME_PX;
@@ -751,4 +763,52 @@ describe('desktop keys from the Just Pulled rest', () => {
         );
         expect(found.join('\n')).toBe('');
       });
+});
+
+describe('the end with Just Pulled last (no footer)', () => {
+  const sizes = PHONES.filter((s) =>
+    ['390x844', '360x640', '320x568'].includes(s.name),
+  );
+  const gestures = [
+    ...GESTURES,
+    ...UP.filter((g) => !g.onlyFrom || g.onlyFrom === 'jp'),
+  ];
+  it.each(sizes)('$name: the footer rest is the Just Pulled rest', (s) => {
+    const t = tableOf(noFooter(s));
+    expect(t.ends[0]).toBe(t.exitEnd);
+    expect(t.freeFits).toBe(true);
+  });
+  for (const s of sizes)
+    for (const g of gestures)
+      for (const dt of FRAMES)
+        it(`${s.name} ${g.name} from Just Pulled @${dt}ms`, () => {
+          const t = tableOf(noFooter(s));
+          const p = createFlowPager();
+          p.setTable(flowPagerTable(t, kinds));
+          const y0 = t.exitEnd;
+          const up = g.name.startsWith('up ');
+          const back = g.name.endsWith('turned back');
+          const cancel = g.name.endsWith('touch cancel');
+          const run = playTouch(p, y0, 0, g.touch(s), dt);
+          // down: on to the chosen pack; up: the lineup; a turn back or a cancel: back home
+          const rest =
+            back || cancel
+              ? y0
+              : up
+                ? t.stops[t.stops.length - 1]!
+                : t.ends[1]!;
+          const found = faults(
+            t,
+            run,
+            {
+              rest,
+              lift: !cancel,
+              way: back || cancel ? 0 : up ? -1 : 1,
+              swipe: up ? -1 : 1,
+              settleNow: cancel,
+            },
+            g,
+          );
+          expect(found.join('\n')).toBe('');
+        });
 });

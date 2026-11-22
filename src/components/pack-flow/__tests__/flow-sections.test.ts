@@ -36,7 +36,7 @@ const ids = (text: string) =>
 describe('the sections below the lineup are one list', () => {
   it('renders the listed sections in order, each wrapped in its id', () => {
     expect(ids(html)).toEqual(FLOW_SECTIONS.map((s) => s.id));
-    expect(ids(html)).toEqual(['just-pulled', 'footer']);
+    expect(ids(html)).toEqual(['just-pulled']);
   });
 
   it('has unique kebab-case ids', () => {
@@ -49,10 +49,9 @@ describe('the sections below the lineup are one list', () => {
     expect(html).toMatch(/<div data-flow-section="just-pulled"><div data-jp/);
   });
 
-  it('ends with the footer section, which carries the one site footer', () => {
-    expect(html.match(/<footer/g)?.length).toBe(1);
-    expect(at('<footer')).toBeGreaterThan(at('data-flow-section="footer"'));
-    expect(FLOW_SECTIONS[FLOW_SECTIONS.length - 1]?.id).toBe('footer');
+  it('ends with Just Pulled and carries no site footer', () => {
+    expect(html).not.toContain('<footer');
+    expect(FLOW_SECTIONS[FLOW_SECTIONS.length - 1]?.id).toBe('just-pulled');
   });
 
   it('no longer carries the ticker, Top Collectors, the Telegram button or the trust points', () => {
@@ -60,16 +59,8 @@ describe('the sections below the lineup are one list', () => {
     expect(html).not.toContain('trust-heading');
     expect(html).not.toMatch(/WHY IT.S REAL/);
     expect(html).not.toMatch(/Top Collectors/i);
-    // the footer's own Telegram link stays; no second one outside it
-    expect(
-      html.match(/href="https:\/\/t\.me\/polycardsgg"/g)?.length ?? 0,
-    ).toBe(
-      (
-        html
-          .slice(at('<footer'))
-          .match(/href="https:\/\/t\.me\/polycardsgg"/g) ?? []
-      ).length,
-    );
+    // and, with the footer gone, no Telegram link at all
+    expect(html).not.toContain('https://t.me/polycardsgg');
     expect(html).not.toContain('YOUR CHASE');
   });
 
@@ -78,20 +69,21 @@ describe('the sections below the lineup are one list', () => {
     for (const s of ['row', 'band', 'lineup'])
       expect(at(`data-flow-spacer="${s}"`)).toBeLessThan(first);
     expect(html).not.toContain('data-flow-spacer="exit"');
+    const lastSection = html.lastIndexOf('data-flow-section=');
     for (const s of ['return', 'last'])
-      expect(at(`data-flow-spacer="${s}"`)).toBeGreaterThan(at('</footer>'));
+      expect(at(`data-flow-spacer="${s}"`)).toBeGreaterThan(lastSection);
   });
 
-  it('takes a new section with one entry: three sections render in order between the spacers', () => {
+  it('takes a new section with one entry: the sections render in order between the spacers', () => {
     const extra = flowSection('new-part', [], () =>
       createElement('p', null, 'new part'),
     );
-    const three = [FLOW_SECTIONS[0]!, extra, FLOW_SECTIONS[1]!];
-    const out = render(three);
-    expect(ids(out)).toEqual(['just-pulled', 'new-part', 'footer']);
+    const two = [FLOW_SECTIONS[0]!, extra];
+    const out = render(two);
+    expect(ids(out)).toEqual(['just-pulled', 'new-part']);
     expect(at('new part', out)).toBeGreaterThan(at('data-jp', out));
     expect(at('data-flow-spacer="return"', out)).toBeGreaterThan(
-      at('</footer>', out),
+      at('new part', out),
     );
   });
 });
@@ -106,7 +98,9 @@ describe('the page reads only what the listed sections need', () => {
 
   it('reads nothing for sections that need nothing', async () => {
     reads.feed = 0;
-    const data = await loadFlowData([FLOW_SECTIONS[1]!]);
+    const data = await loadFlowData([
+      flowSection('static-part', [], () => null),
+    ]);
     expect(reads.feed).toBe(0);
     expect(data).toEqual({});
   });

@@ -41,12 +41,25 @@ export function emptyLine(tab: DrawerTab, noun: 'pack' | 'capsule'): string {
  *  a card, and how far each tab behind it shows above it. */
 export const DRAWER_GEOMETRY = {
   phone: { cardH: 212, tabH: 38, behind: 2 },
+  /** Phones up to 720 px tall: the section still fits the panel. */
+  short: { cardH: 176, tabH: 34, behind: 2 },
+  /** Phones up to 600 px tall: one tab behind. */
+  tiny: { cardH: 160, tabH: 34, behind: 1 },
   desktop: { cardH: 316, tabH: 50, behind: 3 },
 } as const;
 
-/** Tabs shown behind the front card: 2 on a phone, 3 on desktop. */
-export function tabsBehind(desktop: boolean): number {
-  return desktop ? 3 : 2;
+export type DrawerSize = keyof typeof DRAWER_GEOMETRY;
+
+/** drawer.module.css's media queries for the sizes whose tab count differs. */
+export const DRAWER_MEDIA = {
+  desktop: '(min-width: 1024px)',
+  tiny: '(max-width: 1023px) and (max-height: 600px)',
+} as const;
+
+/** Tabs shown behind the front card: 2 on a phone, 1 on the shortest
+ *  phones, 3 on desktop. */
+export function tabsBehind(size: DrawerSize): number {
+  return DRAWER_GEOMETRY[size].behind;
 }
 
 export type DrawerStack<T extends { id: string }> = {

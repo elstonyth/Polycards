@@ -18,13 +18,14 @@ import {
   stackCards,
   startStack,
   tabsBehind,
+  DRAWER_MEDIA,
+  type DrawerSize,
   type DrawerTab,
 } from './drawer-model';
 import { JustPulledView } from './JustPulledView';
 
 /** The leave animation's length (drawer.module.css jp-leave), and a margin. */
 const LEAVE_MS = 520;
-const DESKTOP = '(min-width: 1024px)';
 
 /** A pack is focused and the visitor has not gone past its details: the
  *  focused pack polls its own pulls, so the drawer's poll waits (the stage's
@@ -46,10 +47,18 @@ export function subscribeFocusHold(onChange: () => void) {
   return () => watch.disconnect();
 }
 
-function subscribeDesktop(onChange: () => void) {
-  const m = window.matchMedia(DESKTOP);
-  m.addEventListener('change', onChange);
-  return () => m.removeEventListener('change', onChange);
+/** The drawer's size as far as its tab count goes ('short' keeps the phone's). */
+function drawerSize(): DrawerSize {
+  if (window.matchMedia(DRAWER_MEDIA.desktop).matches) return 'desktop';
+  return window.matchMedia(DRAWER_MEDIA.tiny).matches ? 'tiny' : 'phone';
+}
+
+function subscribeSize(onChange: () => void) {
+  const ms = Object.values(DRAWER_MEDIA).map((q) => window.matchMedia(q));
+  for (const m of ms) m.addEventListener('change', onChange);
+  return () => {
+    for (const m of ms) m.removeEventListener('change', onChange);
+  };
 }
 
 /**
@@ -83,14 +92,14 @@ export function JustPulledDrawer({
     });
     return () => cancelAnimationFrame(id);
   }, [initialTab]);
-  const desktop = useSyncExternalStore(
-    subscribeDesktop,
-    () => window.matchMedia(DESKTOP).matches,
-    () => false,
+  const size = useSyncExternalStore<DrawerSize>(
+    subscribeSize,
+    drawerSize,
+    () => 'phone',
   );
   // The plain list under reduced motion: no limit behind the front, so
   // nothing leaves.
-  const behind = usePrefersReducedMotion() ? Infinity : tabsBehind(desktop);
+  const behind = usePrefersReducedMotion() ? Infinity : tabsBehind(size);
   const held = useSyncExternalStore(
     subscribeFocusHold,
     focusHolds,
