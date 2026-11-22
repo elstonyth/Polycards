@@ -25,6 +25,7 @@ const DEVICES = createRequire(join(process.cwd(), 'package.json'))(
 const SIZES = {
   p320: [320, 568, 2, true],
   p360: [360, 800, 3, true],
+  p360s: [360, 640, 3, true],
   p390: [390, 844, 3, true],
   p430: [430, 932, 3, true],
   land844: [844, 390, 3, true],
@@ -33,6 +34,8 @@ const SIZES = {
   t1180: [1180, 820, 2, true],
   l1280s: [1280, 600, 1, false],
   l1366: [1366, 768, 1, false],
+  // a 1366 x 768 laptop with the browser's bars
+  l1366b: [1366, 650, 1, false],
   l1440: [1440, 900, 1, false],
   d1920: [1920, 1080, 1, false],
   d2560: [2560, 1440, 1, false],
@@ -41,8 +44,8 @@ const SIZES = {
   o2500: [2500, 1288, 1.5, false],
   // a 4K screen at ratio 1, 1.25 and 1.5 (CSS px)
   k4: [3840, 2160, 1, false],
-  k4r125: [2458, 1382, 1.25, false],
-  k4r150: [1707, 960, 1.5, false],
+  k4r125: [3072, 1728, 1.25, false],
+  k4r150: [2560, 1440, 1.5, false],
 };
 /** The WebKit pass: Playwright's iPhone and iPad descriptors, portrait and landscape. */
 const WEBKIT_DEVICES = [
@@ -489,6 +492,59 @@ async function checkRest(s, key, touch, r, label) {
       'row-centre-pack-in-view ' + tag,
       !!c && inside(c, l, l.top, l.bottom),
       c ? c.id + ' ' + fmt(c) + ' band ' + l.top + '..' + l.bottom : 'no tile',
+    );
+    // the row's buy controls: the centre pack's price and Open, fully in view above the tab bar
+    const buy = await s.page.evaluate(() => {
+      const R = (e) => {
+        const b = e.getBoundingClientRect();
+        return {
+          x: Math.round(b.left),
+          y: Math.round(b.top),
+          r: Math.round(b.right),
+          b: Math.round(b.bottom),
+        };
+      };
+      const shownEl = (e) =>
+        e.getBoundingClientRect().width > 0 &&
+        getComputedStyle(e).visibility !== 'hidden' &&
+        !e.closest('[data-testid="focus-stops"], [aria-hidden="true"]');
+      const mid = innerWidth / 2;
+      const near = (list) =>
+        list.sort(
+          (a, b) =>
+            Math.abs(R(a).x / 2 + R(a).r / 2 - mid) -
+            Math.abs(R(b).x / 2 + R(b).r / 2 - mid),
+        )[0] ?? null;
+      const open = near(
+        [...document.querySelectorAll('a, button')].filter(
+          (e) => shownEl(e) && /^Open\b/.test(e.textContent.trim()),
+        ),
+      );
+      const price = near(
+        [...document.querySelectorAll('span, p, div')].filter(
+          (e) =>
+            e.children.length === 0 &&
+            shownEl(e) &&
+            /^RM\s?[\d,.]+$/.test(e.textContent.trim()) &&
+            parseFloat(getComputedStyle(e).fontSize) >= 20,
+        ),
+      );
+      return { open: open ? R(open) : null, price: price ? R(price) : null };
+    });
+    const out = ['open', 'price'].filter(
+      (k) => !buy[k] || !inside(buy[k], l, l.top, l.bottom),
+    );
+    qa.check(
+      'row-buy-in-view ' + tag,
+      out.length === 0,
+      'open ' +
+        fmt(buy.open) +
+        ', price ' +
+        fmt(buy.price) +
+        ', band ' +
+        l.top +
+        '..' +
+        l.bottom,
     );
   }
   if (
