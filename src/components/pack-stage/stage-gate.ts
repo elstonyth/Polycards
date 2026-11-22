@@ -12,7 +12,6 @@
  * Also home of the frame-time watchdog maths (pure) and the pre-paint
  * predicate the loader's inline script inlines.
  */
-import { STAGE_CRASH_KEY } from './crash-guard';
 
 export type GateMode = '3d' | 'lite' | 'flat';
 export type StageOverride = GateMode | null;
@@ -196,36 +195,6 @@ export function browserGateEnv(): GateEnv {
 }
 
 // ---------------------------------------------------------------------------
-// Pre-paint predicate: the same cheap rules, as plain data
-// plus one self-contained JS expression the inline loader script can embed.
-
-export const STAGE_PREPAINT_RULES = Object.freeze({
-  reducedMotionQuery: REDUCED_MOTION_QUERY,
-  reducedDataQuery: REDUCED_DATA_QUERY,
-  flatMaxDeviceMemory: FLAT_MAX_DEVICE_MEMORY,
-  crashKey: STAGE_CRASH_KEY,
-});
-
-/**
- * A JS expression (no trailing semicolon) that evaluates to `true` when 3D is
- * predicted: not reduced motion, not save-data / reduced-data, not
- * `deviceMemory <= 2`, no crash flag. Anything that throws (storage, an
- * exotic `navigator`) makes it `false`, so the loader is skipped.
- */
-export function stagePrepaintExpression(): string {
-  const r = STAGE_PREPAINT_RULES;
-  return (
-    '(function(){try{' +
-    'var w=window,n=w.navigator||{},m=w.matchMedia;' +
-    `if(m&&(m(${JSON.stringify(r.reducedMotionQuery)}).matches||m(${JSON.stringify(r.reducedDataQuery)}).matches))return false;` +
-    'if(n.connection&&n.connection.saveData===true)return false;' +
-    `if(typeof n.deviceMemory==="number"&&n.deviceMemory<=${r.flatMaxDeviceMemory})return false;` +
-    `if(w.sessionStorage.getItem(${JSON.stringify(r.crashKey)})!==null)return false;` +
-    'return true}catch(e){return false}})()'
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Frame-time watchdog: p90 of rAF intervals over a window.
 
 export const WATCHDOG_WINDOW = 90;
@@ -297,9 +266,4 @@ export function stepDownAllowed(s: {
 }): boolean {
   if (s.focus > 0 || s.spin > 0 || s.exit > 0) return false;
   return !s.lap || s.lap.free;
-}
-
-/** Where a too-slow verdict takes the stage. */
-export function stepDown(mode: '3d' | 'lite'): 'lite' | 'flat' {
-  return mode === '3d' ? 'lite' : 'flat';
 }

@@ -18,7 +18,6 @@
  * `flowAt` on the old table and `flowPosition` on the new one.
  */
 import type { StageLap } from './contract';
-import { power1InOut } from './stage-focus';
 import { clamp01, easeOutCubic } from './stage-spin-math';
 
 /** One section: 1.25 panels, the same length as the row's own exit; the lineup exit runs over one section. */
@@ -196,11 +195,6 @@ function endRests(
   return out;
 }
 
-/** The paged stops: [R0, rests..., RL] (the table's own list; do not mutate). */
-export function flowStops(t: FlowTable): readonly number[] {
-  return t.stops;
-}
-
 /** The fractional index of y in an ascending list (clamped to its ends). */
 export function indexAt(y: number, stops: readonly number[]): number {
   const n = stops.length;
@@ -309,91 +303,6 @@ export function riseProgress(
 export function returnProgress(rectTop: number, height: number): number {
   if (!(height > 0)) return rectTop <= 0 ? 1 : 0;
   return clamp01((0 - rectTop) / height);
-}
-
-/**
- * What draws the 3D at P. At most two adjacent terms carry weight and the
- * weights sum to 1:
- * - `focus`: the focused view at F (0 is the row at rest);
- * - `lineup`: the tilted lineup, then its exit;
- * - `empty`: nothing drawn (the free content);
- * - `rise`: the chosen pack rising;
- * - `return`: the others sliding back to the row's rest (Last holds its end).
- */
-export type FlowTerm = 'focus' | 'lineup' | 'empty' | 'rise' | 'return';
-
-export type FlowTerms = {
-  weights: Record<FlowTerm, number>;
-  /** F for the focus term, 0..n (Closing during the hand-off). */
-  focus: number;
-  /** The hand-off h, Closing to the lineup, power1InOut of the local progress. */
-  handoff: number;
-  /** The lineup exit, 0..1. */
-  exit: number;
-  /** The rise, 0..1 (raw progress; the pose decides its own ease). */
-  rise: number;
-  /** The return, 0..1 (raw progress). */
-  ret: number;
-  /** The others' row spacing in row steps, 5 to 1 (hand-off and Return). */
-  spread: number;
-};
-
-/** The terms at a flow position, for a pack with n stops (one result object per call). */
-export function flowTerms(at: FlowAt, n: number): FlowTerms {
-  const stops = Math.max(0, Math.floor(n));
-  const r: FlowTerms = {
-    weights: { focus: 0, lineup: 0, empty: 0, rise: 0, return: 0 },
-    focus: stops,
-    handoff: 1,
-    exit: 1,
-    rise: 0,
-    ret: 0,
-    spread: FLOW_SPREAD_TO,
-  };
-  const w = r.weights;
-  if (at.zone === 'paged') {
-    const p = Math.min(stops + 1, Math.max(0, at.p));
-    r.exit = 0;
-    if (p <= stops) {
-      w.focus = 1;
-      r.focus = p;
-      r.handoff = 0;
-      r.spread = FLOW_SPREAD_FROM;
-      return r;
-    }
-    const h = power1InOut(p - stops);
-    w.lineup = h;
-    w.focus = 1 - h;
-    r.handoff = h;
-    r.spread = spreadAt(h);
-    return r;
-  }
-  const x = clamp01(at.t);
-  switch (at.span) {
-    case 'exit':
-      w.lineup = 1;
-      r.exit = x;
-      return r;
-    case 'free':
-      w.empty = 1;
-      return r;
-    case 'rise':
-      w.rise = 1;
-      r.rise = x;
-      r.spread = FLOW_SPREAD_FROM;
-      return r;
-    case 'ret':
-      w.return = 1;
-      r.rise = 1;
-      r.ret = x;
-      r.spread = spreadAt(x);
-      return r;
-    case 'last':
-      w.return = 1;
-      r.rise = 1;
-      r.ret = 1;
-      return r;
-  }
 }
 
 /**
@@ -596,9 +505,4 @@ export function wrapScrollAt(
   r0: number,
 ): number {
   return from + (r0 - from) * easeOutCubic(elapsedMs / WRAP_GUARD_MS);
-}
-
-/** The row UI's opacity after the wrap: 0 to 1 over 0.35 s. */
-export function wrapUiOpacity(elapsedMs: number): number {
-  return clamp01(elapsedMs / WRAP_UI_FADE_MS);
 }

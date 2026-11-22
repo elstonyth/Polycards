@@ -261,20 +261,6 @@ export function poseStep1(
   return { dx, dy, z, rotX, rotY, rotZ: 0, scale, dim, fx: 0, fy: 0 };
 }
 
-/** The identity pose (centred pack at rest). */
-export const REST_POSE: Readonly<Pose> = Object.freeze({
-  dx: 0,
-  dy: 0,
-  z: 0,
-  rotX: 0,
-  rotY: 0,
-  rotZ: 0,
-  scale: 1,
-  dim: 1,
-  fx: 0,
-  fy: 0,
-});
-
 /** A state at rest on the given track position. */
 export function restState(track = 0): StageState {
   return {

@@ -6,7 +6,7 @@ import {
   toStageCategories,
   toStagePack,
 } from '../stage-packs';
-import { STAGE_START_INDEX, stageStartIndex } from '../StageTrack';
+import { STAGE_START_INDEX, stageStartIndex } from '../stage-filter';
 
 const pack = (over: Partial<Pack> & Pick<Pack, 'id'>): Pack => ({
   name: over.id,

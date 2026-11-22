@@ -12,9 +12,7 @@ import {
   flowAt,
   flowPosition,
   flowSlots,
-  flowStops,
   flowTable,
-  flowTerms,
   freeAnchor,
   freeAnchorY,
   offPlace,
@@ -26,12 +24,10 @@ import {
   spreadAt,
   wrapScrollAt,
   wrapTarget,
-  wrapUiOpacity,
   type FlowAt,
   type FlowGeometry,
   type FlowTable,
 } from '../stage-flow';
-import { LINEUP_EXIT_PANELS } from '../stage-spin';
 
 // panel 800 px: one section S = 1000 px, so every rest is a round number
 const GEO: FlowGeometry = {
@@ -50,9 +46,8 @@ const table = (g: Partial<FlowGeometry> = {}): FlowTable => {
 };
 
 describe('stage flow: the section table', () => {
-  it("a section is 1.25 panels, the row exit's length; the lineup exit runs over one", () => {
+  it('a section is 1.25 panels; the lineup exit runs over one', () => {
     expect(FLOW_SECTION_PANELS).toBe(1.25);
-    expect(FLOW_SECTION_PANELS).toBe(LINEUP_EXIT_PANELS);
     expect(table().section).toBe(1000);
     const t = table();
     expect(t.exitEnd - t.exitStart).toBe(t.section);
@@ -69,13 +64,7 @@ describe('stage flow: the section table', () => {
     expect(t.exitEnd).toBe(8000);
     // the paged edge lies inside the exit, half a section past the lineup
     expect(t.edge).toBe(7500);
-    expect(flowStops(t)).toEqual([0, 1000, 2000, 3000, 4000, 5000, 6000, 7000]);
-  });
-
-  it('the stops are built once per table', () => {
-    const t = table();
     expect(t.stops).toEqual([0, 1000, 2000, 3000, 4000, 5000, 6000, 7000]);
-    expect(flowStops(t)).toBe(flowStops(t));
   });
 
   it('starts from the flow top', () => {
@@ -125,7 +114,7 @@ describe('stage flow: the section table', () => {
     const t = table({ stops: 0 });
     expect(flowSlots(0)).toEqual([]);
     expect(t.rests).toEqual([]);
-    expect(flowStops(t)).toEqual([0, 7000]);
+    expect(t.stops).toEqual([0, 7000]);
   });
 
   it("the rise runs from the last section's top at 0.35 of the viewport to its bottom at the top", () => {
@@ -405,100 +394,13 @@ describe('stage flow: rise and return progress from live rects', () => {
   });
 });
 
-describe('stage flow: term weights', () => {
-  const t = table();
-  const check = (at: FlowAt, n: number) => {
-    const w = flowTerms(at, n).weights;
-    const vals = Object.values(w);
-    const sum = vals.reduce((a, b) => a + b, 0);
-    expect(sum).toBeCloseTo(1, 9);
-    for (const v of vals) expect(v).toBeGreaterThanOrEqual(0);
-    expect(vals.filter((v) => v > 0).length).toBeLessThanOrEqual(2);
-  };
-
-  it('weights sum to 1 with at most two non-zero, over the whole page, for every variant', () => {
-    for (const n of [6, 5, 4, 0]) {
-      const tn = table({ stops: n });
-      for (let y = -100; y <= 13800; y += 10) check(flowAt(y, tn), n);
-    }
-    for (let i = 0; i <= 700; i++) check({ zone: 'paged', p: i / 100 }, 6);
-  });
-
-  it('two non-zero weights only in the hand-off, and they are adjacent: focus and lineup', () => {
-    for (let i = 0; i <= 700; i++) {
-      const p = i / 100;
-      const w = flowTerms({ zone: 'paged', p }, 6).weights;
-      const on = Object.entries(w)
-        .filter(([, v]) => v > 0)
-        .map(([k]) => k)
-        .sort();
-      if (p > 6 + 1e-9 && p < 7 - 1e-9) expect(on).toEqual(['focus', 'lineup']);
-      else expect(on.length).toBe(1);
-    }
-  });
-
-  it('the focus term carries F up to Closing; the hand-off is power1InOut of the last section', () => {
-    expect(flowTerms({ zone: 'paged', p: 2.5 }, 6)).toMatchObject({
-      focus: 2.5,
-      handoff: 0,
-      weights: { focus: 1, lineup: 0 },
-    });
-    const mid = flowTerms({ zone: 'paged', p: 6.25 }, 6);
-    expect(mid.focus).toBe(6);
-    expect(mid.handoff).toBeCloseTo(0.125, 9); // power1InOut(0.25) = 2 * 0.25^2
-    expect(mid.weights.lineup).toBeCloseTo(0.125, 9);
-    expect(mid.weights.focus).toBeCloseTo(0.875, 9);
-    expect(flowTerms({ zone: 'paged', p: 7 }, 6)).toMatchObject({
-      handoff: 1,
-      spread: 1,
-      weights: { focus: 0, lineup: 1 },
-    });
-  });
-
-  it('a capsule hands off between P 5 and 6', () => {
-    expect(flowTerms({ zone: 'paged', p: 5 }, 5).weights.lineup).toBe(0);
-    expect(flowTerms({ zone: 'paged', p: 5.5 }, 5).weights.lineup).toBeCloseTo(
-      0.5,
-      9,
-    );
-    expect(flowTerms({ zone: 'paged', p: 6 }, 5).weights.lineup).toBe(1);
-  });
-
-  it('free spans: exit on the lineup term, nothing drawn in free, then rise and return', () => {
-    expect(flowTerms(flowAt(7300, t), 6)).toMatchObject({
-      exit: 0.3,
-      handoff: 1,
-      spread: 1,
-      weights: { lineup: 1 },
-    });
-    expect(flowTerms(flowAt(7800, t), 6)).toMatchObject({
-      exit: 0.8,
-      weights: { lineup: 1 },
-    });
-    expect(flowTerms(flowAt(9500, t), 6).weights.empty).toBe(1);
-    expect(flowTerms(flowAt(11360, t), 6)).toMatchObject({
-      rise: 0.5,
-      weights: { rise: 1 },
-    });
-    expect(flowTerms(flowAt(12500, t), 6)).toMatchObject({
-      ret: 0.5,
-      spread: 3,
-      weights: { return: 1 },
-    });
-    expect(flowTerms(flowAt(13200, t), 6)).toMatchObject({
-      ret: 1,
-      spread: 1,
-      weights: { return: 1 },
-    });
-  });
-
+describe('stage flow: the row spread', () => {
   it('the spread falls from 5 row steps to 1', () => {
     expect(spreadAt(0)).toBe(5);
     expect(spreadAt(0.5)).toBe(3);
     expect(spreadAt(1)).toBe(1);
     expect(spreadAt(-1)).toBe(5);
     expect(spreadAt(2)).toBe(1);
-    expect(flowTerms({ zone: 'paged', p: 6 }, 6).spread).toBe(5);
   });
 });
 
@@ -526,10 +428,6 @@ describe('stage flow: the wrap', () => {
 
   it('the row UI fades back in over 0.35 s', () => {
     expect(WRAP_UI_FADE_MS).toBe(350);
-    expect(wrapUiOpacity(0)).toBe(0);
-    expect(wrapUiOpacity(175)).toBeCloseTo(0.5, 9);
-    expect(wrapUiOpacity(350)).toBe(1);
-    expect(wrapUiOpacity(-10)).toBe(0);
   });
 });
 

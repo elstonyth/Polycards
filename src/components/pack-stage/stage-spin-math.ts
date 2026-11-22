@@ -4,7 +4,6 @@
  * so the first load, which imports that module, never carries them: only the
  * lazily loaded chunks (spin, runtime, focus) reach this one. Pure.
  */
-import { slotIntroLinear } from './stage-pose';
 
 /** Packs' lean mode amplitude, radians. */
 export const LEAN = 0.61;
@@ -25,12 +24,4 @@ export function easeOutCubic(t: number): number {
 export function smoothstep(e0: number, e1: number, x: number): number {
   const t = clamp01((x - e0) / (e1 - e0));
   return t * t * (3 - 2 * t);
-}
-
-/**
- * Float-in visibility (as the loader leaves): each pack fades in over the first third of its rise, like the CSS
- * `stage-in` fade, so an arrival at `intro` 0 draws nothing.
- */
-export function introOpacity(intro: number, d: number): number {
-  return smoothstep(0, 0.35, slotIntroLinear(intro, d));
 }

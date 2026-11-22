@@ -1,119 +1,32 @@
 /**
- * Pack stage: the scroll spin section's pose. Pure: no DOM, no three.js, no clock, no React.
+ * Pack stage: the scroll spin section's pose, the packshot lineup row and its
+ * exit. Pure: no DOM, no three.js, no clock, no React.
  *
- * `spin` (`s`) runs 0..1 through the pinned section. Three phases:
- * - gather, s 0..0.15: the carousel closes into one tilted row (smoothstep);
- * - travel and turn, s 0.15..0.85: the row travels left through every pack
- *   once (wrapping) while each pack turns about its own axis, neighbours
- *   `K` apart, plus one extra full turn (power1.inOut);
- * - hold, s 0.85..1: the row is back in its starting order, fronts facing.
- *
- * `spinPose` replaces ONLY the rest-carousel block of `poseAt` (lerp by the
- * gather weight); float-in, swap, pointer and idle terms are added on top by
- * the caller (`stage-pose-step2.ts` shows the composition).
+ * `lineupPose` replaces ONLY the rest-carousel block of `poseAt` as the row
+ * forms (`spin`, 0..1) and leaves (`exit`); float-in, swap, pointer and idle
+ * terms are added on top by the caller (`stage-pose-compose.ts`).
  *
  * First-load JS: this module is NOT imported by the pose module. The runtime
- * chunk imports it statically; the CSS tiles import it at idle and pass it as
- * `ctx.spinPose`.
+ * chunk imports it statically; the CSS tiles import it at idle and pass
+ * `lineupPose` and `lineupOpacity` as `ctx.spinPose` and `ctx.spinOpacity`.
  */
 import type { StageLayout } from './contract';
 import type {
-  PoseBlock,
-  SpinCtx,
   SpinPanel,
   SpinPoseBlock,
   SpinPoseFn,
   StageState,
 } from './contract';
 import { slotOpacity } from './stage-pose';
-import { SPIN_LOCK } from './stage-pose';
-import { SPIN_GATHER, clamp01, smoothstep } from './stage-spin-math';
+import { clamp01 } from './stage-spin-math';
 import { CAPSULE_LIMITS } from './stage-capsule-lean';
 
-export { SPIN_LOCK, smoothstep };
-
 const DEG = Math.PI / 180;
-const TAU = 2 * Math.PI;
 
-export type SpinConfig = {
-  /** Row scale (one size for every pack). */
-  S: number;
-  /** Row step in pack widths at scale S. */
-  GAP: number;
-  /** Row roll, radians (negative: rising to the right). */
-  ROLL: number;
-  /** Packs drawn in the row: |d'| < REACH + 1. */
-  REACH: number;
-  /** Fewer packs than this: no travel, they spin in place (a wrapped row would show a pack twice). */
-  MIN_TRAVEL_N: number;
-};
-
-// S tuned 2026-11-20 against measured reference frames: the packshot cans
-// stand about 340 CSS px on a 1440x900 desktop and 285-300 on a 390x844
-// phone; at 0.62 / 0.55 ours were 218 / 308. Now about 282 / 336.
-export const SPIN_PHONE: Readonly<SpinConfig> = Object.freeze({
-  S: 0.8,
-  GAP: 1.15,
-  ROLL: -7 * DEG,
-  REACH: 1,
-  MIN_TRAVEL_N: 4,
-});
-
-export const SPIN_DESKTOP: Readonly<SpinConfig> = Object.freeze({
-  S: 0.6,
-  GAP: 1.5,
-  ROLL: -9 * DEG,
-  REACH: 2,
-  MIN_TRAVEL_N: 6,
-});
-
-export function spinConfig(desktop: boolean): Readonly<SpinConfig> {
-  return desktop ? SPIN_DESKTOP : SPIN_PHONE;
-}
-
-/** End of the gather. */
-export const GATHER = SPIN_GATHER;
-/** Start of the hold. */
-export const HOLD = 0.85;
-/** Own-axis yaw between neighbours, radians per slot (34 degrees). */
-export const K = 0.6;
-/** Pitch ramp: tops toward the viewer, more to the right. */
-export const PITCH0 = 0.1;
-export const PITCH_K = 0.035;
-/** Pitch never above +5 degrees in any spin pose (positive = top away). */
-export const PITCH_MAX = 0.087;
-/** Height wave along the row, in art heights, and its phase per slot. */
-export const WAVE_A = 0.05;
-export const WAVE_W = 1.1;
-/** Row arcs back by this many art heights per slot. */
-export const ARC = 0.1;
 /** Pack aspect used when the layout gives no `artW` (step 1 CSS: --art-w = 0.54 art heights). */
 export const DEFAULT_ART_ASPECT = 0.54;
-/** `data-spinning` hysteresis around SPIN_LOCK. */
-const SPIN_LOCK_HYSTERESIS = 0.005;
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-
-/** Gather weight g: 0 at s = 0, 1 from s = 0.15. */
-export function spinGather(s: number): number {
-  return smoothstep(0, GATHER, s);
-}
-
-/** Eased travel/turn progress `ce` (power1.inOut over 0.15..0.85). */
-export function spinPhase(s: number): number {
-  const c = clamp01((s - GATHER) / (HOLD - GATHER));
-  return 0.5 - 0.5 * Math.cos(Math.PI * c);
-}
-
-/** True when this many packs travel (wrap) instead of spinning in place. */
-export function spinTravels(count: number, desktop: boolean): boolean {
-  return count >= spinConfig(desktop).MIN_TRAVEL_N;
-}
-
-/** Travel T in packs (0 when the row spins in place). */
-export function spinTravel(s: number, count: number, desktop: boolean): number {
-  return spinTravels(count, desktop) ? count * spinPhase(s) : 0;
-}
 
 /** Wraps x into [-n/2, n/2). */
 export function wrapRow(x: number, n: number): number {
@@ -122,137 +35,6 @@ export function wrapRow(x: number, n: number): number {
   const r = (((x + h) % n) + n) % n;
   return r - h + 0; // +0 normalises -0
 }
-
-/** The pack's row position d' during the spin. */
-export function spinRowPosition(
-  s: number,
-  i: number,
-  track: number,
-  count: number,
-  desktop: boolean,
-): number {
-  const d = i - track;
-  if (!spinTravels(count, desktop)) return d;
-  return wrapRow(d - spinTravel(s, count, desktop), count);
-}
-
-/**
- * The continuous centre of the wrapped row in pack-index space (track + T),
- * for residency: pass `wrappedIndex(i, centre, n)` as each pack's index and
- * `centre` as the track (fronts keep today's residency on the wrapped spin
- * centre).
- */
-export function spinCentre(
-  s: number,
-  track: number,
-  count: number,
-  desktop: boolean,
-): number {
-  return track + spinTravel(s, count, desktop);
-}
-
-/** The integer index of pack i nearest the wrapped centre: i + k*n, within [-n/2, n/2) of it. */
-export function wrappedIndex(i: number, centre: number, count: number): number {
-  return centre + wrapRow(i - centre, count);
-}
-
-/**
- * The glare pass band. Periodic, odd, monotone, piecewise linear: the
- * output bands 150..170 and 190..210 degrees (and every 360-degree copy) each
- * come from only 5 degrees of input (slope 4); the other 320 output degrees
- * from the other 350 input degrees. passBand(0) = 0, passBand(2 pi) = 2 pi.
- */
-export const PASS_BAND = Object.freeze({
-  /** Output band edges, degrees. */
-  lo: 150,
-  hi: 170,
-  /** Input degrees that map into one band. */
-  input: 5,
-});
-const PB_SLOPE = 320 / 350;
-const PB_IN_A = PASS_BAND.lo / PB_SLOPE; // 164.0625
-const PB_IN_B = PB_IN_A + PASS_BAND.input; // 169.0625
-const PB_TAIL_SLOPE = (180 - PASS_BAND.hi) / (180 - PB_IN_B);
-
-function passBandHalfDeg(x: number): number {
-  if (x <= PB_IN_A) return x * PB_SLOPE;
-  if (x <= PB_IN_B) return PASS_BAND.lo + (x - PB_IN_A) * 4;
-  return PASS_BAND.hi + (x - PB_IN_B) * PB_TAIL_SLOPE;
-}
-
-export function passBand(phi: number): number {
-  const deg = phi / DEG;
-  const m = ((deg % 360) + 360) % 360;
-  const base = deg - m;
-  const out = m <= 180 ? passBandHalfDeg(m) : 360 - passBandHalfDeg(360 - m);
-  return (base + out) * DEG + 0;
-}
-
-/** Row step in host px: GAP * S * artW. */
-export function spinRowStep(
-  l: Readonly<StageLayout>,
-  desktop: boolean,
-): number {
-  const c = spinConfig(desktop);
-  const artW = l.artW && l.artW > 0 ? l.artW : l.artH * DEFAULT_ART_ASPECT;
-  return c.GAP * c.S * artW;
-}
-
-/**
- * The spin's pose for pack i. `rest` is `poseAt`'s rest-carousel block
- * (before float-in, swap, pointer and idle). s <= 0 returns `rest` unchanged.
- */
-export const spinPose: SpinPoseFn = (rest, st, i, l, desktop, ctx) => {
-  const s = clamp01(st.spin);
-  if (!(s > 0)) return { ...rest };
-  const n = ctx.count;
-  const c = spinConfig(desktop);
-  const g = spinGather(s);
-  const ce = spinPhase(s);
-  const d = i - st.track;
-  const travels = spinTravels(n, desktop);
-  const dp = travels ? wrapRow(d - n * ce, n) : d;
-  const w = spinRowStep(l, desktop);
-
-  const x = dp * w;
-  const row: PoseBlock = {
-    dx: x - d * l.step,
-    dy:
-      -x * Math.tan(Math.abs(c.ROLL)) + WAVE_A * l.artH * Math.sin(WAVE_W * dp),
-    z: -ARC * l.artH * Math.abs(dp),
-    rotX: Math.min(PITCH_MAX, -(PITCH0 + PITCH_K * dp)),
-    rotY: 0,
-    rotZ: c.ROLL,
-    scale: c.S,
-    // the row drops the desktop distance dim; only sold out stays dimmed
-    dim: ctx.soldOut ? SOLD_OUT_DIM : 1,
-  };
-  const theta = passBand(-K * dp + TAU * ce);
-  const turn = clamp01(ctx.turn);
-  row.rotY = turn * theta + (1 - turn) * ctx.lean * Math.sin(theta);
-
-  // A pack that wraps to the other side of the row (only ever one that is
-  // invisible at rest, |d| > n/2) takes its row slot outright and fades in
-  // there (spinOpacity); lerping it from its rest slot would fly it across.
-  const wrapped = travels && Math.abs(wrapRow(d, n) - d) > 1e-9;
-  if (wrapped) return applyExit(normalise(row), d, l, ctx);
-
-  return applyExit(
-    normalise({
-      dx: lerp(rest.dx, row.dx, g),
-      dy: lerp(rest.dy, row.dy, g),
-      z: lerp(rest.z, row.z, g),
-      rotX: lerp(rest.rotX, row.rotX, g),
-      rotY: lerp(rest.rotY, row.rotY, g),
-      rotZ: lerp(rest.rotZ, row.rotZ, g),
-      scale: lerp(rest.scale, row.scale, g),
-      dim: lerp(rest.dim, row.dim, g),
-    }),
-    d,
-    l,
-    ctx,
-  );
-};
 
 // --- The packshot lineup row and its exit ---------------------------------
 
@@ -354,9 +136,6 @@ function lineupLight(cam: Readonly<LineupCamera>): number {
 export function lineupPackStep(artAspect: number): number {
   return (LINEUP_ROW.canWorldH * artAspect) / LINEUP_ROW.fill;
 }
-
-/** Exit length after the pin, in panel heights (one section, 1.25 viewports). */
-export const LINEUP_EXIT_PANELS = 1.25;
 
 export function lineupCameraAt(exit: number): LineupCamera {
   const e = quadInOut(exit);
@@ -654,119 +433,12 @@ export function lineupOpacity(
   return lerp(restOp, reachOpacity(dp, reach), quadInOut(s));
 }
 
-/**
- * The exit for the full-turn row: the same camera move as the lineup's leave,
- * applied to the row on screen about the panel centre (zoom as the camera
- * comes closer, the drop, the roll levelling, the light out).
- */
-function applyExit(
-  b: PoseBlock,
-  d: number,
-  l: Readonly<StageLayout>,
-  ctx: Readonly<SpinCtx>,
-): SpinPoseBlock {
-  const exit = clamp01(ctx.exit ?? 0);
-  if (!(exit > 0)) return b;
-  const panel = ctx.panel ?? DEFAULT_PANEL;
-  const r = lineupRatio(panel.w);
-  const cam = lineupCameraAt(exit);
-  const a0 = lineupView(0, LINEUP_REST_CAMERA, r);
-  const a1 = lineupView(0, cam, r);
-  const zoom = a0.depth / a1.depth;
-  const lev = quadInOut(exit);
-  const yc = (panel.anchorY - 0.5) * panel.h;
-  const X = d * l.step + b.dx;
-  const Y = yc + b.dy;
-  // the full-turn row keeps its own rest light and dims like the lineup on the exit
-  const light = lineupLight(cam) / LINEUP_ROW.restLight;
-  return {
-    dx: X * zoom - d * l.step + 0,
-    dy: Y * zoom - yc + 0,
-    z: b.z,
-    rotX: b.rotX,
-    rotY: b.rotY,
-    rotZ: b.rotZ * (1 - lev) + 0,
-    scale: b.scale * zoom,
-    dim: b.dim * light,
-    fx: 0,
-    // the camera drop moves the row up the screen
-    fy: -(a1.sy - a0.sy) / 2 + 0,
-  };
-}
-
 /** stage-pose.ts's private sold-out dim (0.4), mirrored. */
 const SOLD_OUT_DIM = 0.4;
-
-function normalise(p: PoseBlock): PoseBlock {
-  return {
-    dx: p.dx + 0,
-    dy: p.dy + 0,
-    z: p.z + 0,
-    rotX: p.rotX + 0,
-    rotY: p.rotY + 0,
-    rotZ: p.rotZ + 0,
-    scale: p.scale,
-    dim: p.dim,
-  };
-}
 
 /** Opacity with a given reach: 1 within it, fading to 0 one slot beyond. */
 export function reachOpacity(d: number, reach: number): number {
   return clamp01(reach + 1 - Math.abs(d));
-}
-
-/**
- * The spin's reach fade: lerp(slotOpacity(d), reach fade of d', g).
- * Multiply by the swap fade and `introOpacity` as `stageOpacity` does.
- */
-export function spinOpacity(
-  st: Readonly<StageState>,
-  i: number,
-  desktop: boolean,
-  count: number,
-): number {
-  const d = i - st.track;
-  const s = clamp01(st.spin);
-  if (!(s > 0)) return slotOpacity(d, desktop);
-  const g = spinGather(s);
-  const dp = spinRowPosition(s, i, st.track, count, desktop);
-  const spin = reachOpacity(dp, spinConfig(desktop).REACH);
-  const travels = spinTravels(count, desktop);
-  const restOp = slotOpacity(d, desktop);
-  // a wrapped pack is invisible at rest (see spinPose)
-  return lerp(
-    travels && Math.abs(wrapRow(d, count) - d) > 1e-9 ? 0 : restOp,
-    spin,
-    g,
-  );
-}
-
-/**
- * `data-spinning` toggle: on above 0.02, off below 0.015 (hysteresis
- * 0.005), so a follow settling near the edge never flickers.
- */
-export function spinningFlag(prev: boolean, s: number): boolean {
-  return prev ? s > SPIN_LOCK - SPIN_LOCK_HYSTERESIS : s >= SPIN_LOCK;
-}
-
-/** Turn weight tween length. */
-export const TURN_WEIGHT_MS = 400;
-
-/**
- * One frame of a tile's turn weight. It starts moving only when `canFlip`
- * (spin 0, or the pack is off screen); a tween already under way finishes.
- */
-export function stepTurnWeight(
-  w: number,
-  target: 0 | 1,
-  dtMs: number,
-  canFlip: boolean,
-): number {
-  if (w === target) return w;
-  const moving = w > 0 && w < 1;
-  if (!canFlip && !moving) return w;
-  const step = Math.max(0, dtMs) / TURN_WEIGHT_MS;
-  return target > w ? Math.min(target, w + step) : Math.max(target, w - step);
 }
 
 /** Re-exported so callers can type the lazily imported module. */

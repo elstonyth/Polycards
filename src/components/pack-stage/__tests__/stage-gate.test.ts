@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import { STAGE_CRASH_KEY } from '../crash-guard';
 import {
   COARSE_POINTER_QUERY,
   FLOW_OFF_QUERY,
@@ -12,8 +11,6 @@ import {
   percentile,
   probeWebGL2,
   readCheapSignals,
-  stagePrepaintExpression,
-  stepDown,
   stepDownAllowed,
   type GateEnv,
   type StageSignals,
@@ -255,53 +252,6 @@ describe('gateStage', () => {
   });
 });
 
-describe('stagePrepaintExpression', () => {
-  function run(f: Fake & { crash?: string | null; storageThrows?: boolean }) {
-    const storage = {
-      getItem: (k: string) => {
-        if (f.storageThrows) throw new Error('SecurityError');
-        return k === STAGE_CRASH_KEY ? (f.crash ?? null) : null;
-      },
-    };
-    const win = {
-      navigator: {
-        connection:
-          f.saveData === undefined ? undefined : { saveData: f.saveData },
-        deviceMemory: f.deviceMemory,
-      },
-      matchMedia: (q: string) => ({ matches: (f.queries ?? []).includes(q) }),
-      sessionStorage: storage,
-    };
-    return new Function('window', `return ${stagePrepaintExpression()};`)(
-      win,
-    ) as boolean;
-  }
-
-  it('predicts 3D on a clean, capable browser', () => {
-    expect(run({})).toBe(true);
-    expect(run({ deviceMemory: 4 })).toBe(true);
-  });
-
-  it('follows the same cheap rules as the gate', () => {
-    expect(run({ queries: [REDUCED_MOTION_QUERY] })).toBe(false);
-    expect(run({ queries: [REDUCED_DATA_QUERY] })).toBe(false);
-    expect(run({ saveData: true })).toBe(false);
-    expect(run({ deviceMemory: 2 })).toBe(false);
-    expect(run({ crash: 'boot' })).toBe(false);
-    expect(run({ crash: 'crashed' })).toBe(false);
-  });
-
-  it('is false when storage throws', () => {
-    expect(run({ storageThrows: true })).toBe(false);
-  });
-
-  it('is a single expression with no free references beyond window', () => {
-    const src = stagePrepaintExpression();
-    expect(src.trim().endsWith(';')).toBe(false);
-    expect(src).toContain(JSON.stringify(STAGE_CRASH_KEY));
-  });
-});
-
 describe('frame watchdog', () => {
   it('percentile', () => {
     expect(percentile([], 0.9)).toBe(0);
@@ -341,11 +291,6 @@ describe('frame watchdog', () => {
     for (let k = 0; k < 5; k++)
       tripped = w.sample(50, 2000 + k * 50) || tripped;
     expect(tripped).toBe(true);
-  });
-
-  it('steps 3d -> lite -> flat', () => {
-    expect(stepDown('3d')).toBe('lite');
-    expect(stepDown('lite')).toBe('flat');
   });
 });
 

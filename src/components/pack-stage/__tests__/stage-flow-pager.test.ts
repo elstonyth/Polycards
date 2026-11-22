@@ -22,7 +22,6 @@ import {
   SAME_FRAMING_MS,
   TOUCH_PAGE_PX,
   WHEEL_GAP_MS,
-  createPager,
 } from '../stage-pager';
 
 // panel 800: S = 1000; rests 1000..6000, RL 7000, edge 7500, exit end 8000
@@ -815,11 +814,9 @@ describe('flow pager: a re-measure', () => {
   });
 });
 
-describe('flow pager: agrees with the focus pager at the rests', () => {
-  it('a notch and a swipe from a rest reach the same next stop', () => {
+describe('flow pager: a table without a lineup', () => {
+  it('a notch from a rest reaches the next stop, either way', () => {
     const stops = [0, 1000, 2000, 3000];
-    const a = createPager();
-    a.setStops(stops);
     const b = createFlowPager();
     b.setTable({
       stops,
@@ -832,16 +829,11 @@ describe('flow pager: agrees with the focus pager at the rests', () => {
       [1000, 100, 10000],
       [2000, -100, 20000],
     ] as const) {
-      a.wheel(dy, 0, false, from, t0);
       b.wheel(dy, 0, false, from, t0);
-      let ya: number = from;
       let yb: number = from;
       for (let t = t0; t <= t0 + 1600; t += 16) {
-        const fa = a.frame(ya, t);
         const fb = b.frame(yb, t);
-        if (fa.scrollTo !== null) ya = fa.scrollTo;
         if (fb.scrollTo !== null) yb = fb.scrollTo;
-        expect(yb).toBeCloseTo(ya, 6);
       }
       expect(yb).toBe(from + Math.sign(dy) * 1000);
     }

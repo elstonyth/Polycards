@@ -39,9 +39,6 @@ import { stageStartIndex } from './stage-filter';
 import StageTile, { tileVars } from './StageTile';
 import styles from './pack-stage.module.css';
 
-// The start rule lives with the row filter (pure, shared with the chips).
-export { STAGE_START_INDEX, stageStartIndex } from './stage-filter';
-
 /**
  * Where a released swipe lands: the nearest pack to where the release speed
  * would carry the track, at least one pack on from where the swipe started

@@ -2,9 +2,7 @@
  * Pack stage: the one pager of the full-page flow. Pure: no DOM, no clock (the caller passes `now` and
  * `scrollY`, and writes `scrollTo` to the window each frame).
  *
- * Built from the focus pager's rules (`createPager` stays the tested core
- * of the focused view); this one owns the whole paged part and the free
- * part's touch:
+ * It owns the whole paged part and the free part's touch:
  *
  * - Stops: [R0, the pack's rests, RL]; a down gesture from the last stop
  *   pages on to the exit end (the start of the free part) when there is one.
@@ -231,8 +229,8 @@ export type FlowPagerFrame = {
   zone: FlowZone;
   /**
    * Ms since the wrap while its lock runs (0 on the wrap frame itself: set
-   * `track` to the chosen pack and hide the row UI; fade it in with
-   * `wrapUiOpacity`). Absent or null: no wrap running.
+   * `track` to the chosen pack and hide the row UI; it fades back in over
+   * `WRAP_UI_FADE_MS`). Absent or null: no wrap running.
    */
   wrap?: number | null;
   /** Which lock runs: the wrap from Last, or `home` from a paged rest; null: none. */

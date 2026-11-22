@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
-import type { StageLayout, StageState } from '../contract';
+import type { Pose, StageLayout, StageState } from '../contract';
 import {
   IDLE_SWAY_RAD,
   POINTER_LEAN_RAD,
-  REST_POSE,
   labelIntro,
   poseAt,
   restState,
@@ -12,6 +11,20 @@ import {
   slotOpacity,
   stageOpacity,
 } from '../stage-pose';
+
+/** The identity pose (centred pack at rest). */
+const REST_POSE: Readonly<Pose> = Object.freeze({
+  dx: 0,
+  dy: 0,
+  z: 0,
+  rotX: 0,
+  rotY: 0,
+  rotZ: 0,
+  scale: 1,
+  dim: 1,
+  fx: 0,
+  fy: 0,
+});
 
 const PHONE: StageLayout = { cx: 195, cy: 330, step: 210, artH: 352 };
 const DESK: StageLayout = { cx: 720, cy: 430, step: 330, artH: 560 };
