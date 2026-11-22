@@ -1422,7 +1422,7 @@ describe('flow pager: the end (the footer, the chosen pack, the row back)', () =
     expect(r).toEqual({ y: 0, wraps: 1 });
   });
 
-  it('touch: a drag that reaches the footer rest stops there, and its release rests there', () => {
+  it('touch: a drag that reaches the footer rest follows on past it, and its release is one move on to the chosen pack', () => {
     const p = make(END);
     let y = 11000;
     p.touchStart(200, 700, y, 0, 0);
@@ -1431,25 +1431,58 @@ describe('flow pager: the end (the footer, the chosen pack, the row back)', () =
       y = p.touchMove(200, 700 - 60 * i, y, i * 16, i * 16).scrollTo ?? y;
       p.frame(y, i * 16);
     }
-    expect(y).toBe(E0); // the follow stops at the footer
+    expect(y).toBe(11480); // the follow runs on past the footer
     p.touchEnd(y, 130, 130);
-    expect(run(p, y, 146, 3000)).toBe(E0);
+    expect(p.busy()).toBe(true);
+    expect(land(p, y, 146, 200 + PAGE_MS)).toEqual({ y: E1, wraps: 0 });
   });
 
-  it('touch: a fast flick above the footer glides to its rest and no further', () => {
+  it('touch: a fast flick above the footer is one move on to the chosen pack and no further', () => {
     const p = make(END);
-    const r = flick(p, 10200, 5000, 1000 / 60);
-    expect(r.end).toBe(E0);
+    expect(flick(p, 10200, 5000, 1000 / 60).end).toBe(E1);
+    // the hardest flick: the follow stops at the chosen pack, never at Last's top
+    const q = make(END);
+    expect(flick(q, 10200, 60000, 1000 / 60).end).toBe(E1);
   });
 
-  it('touch: from the footer a swipe up the screen is one move to the chosen pack; one down the screen follows the finger', () => {
+  it('touch: from the Just Pulled rest one swipe is one move on to the chosen pack, the scroll rising every frame', () => {
+    const p = make(END);
+    const jp = tableFor(END).exitEnd!;
+    let y = jp;
+    p.touchStart(200, 600, y, 0, 0);
+    p.frame(y, 0);
+    // a slow swipe: its glide alone would stay in Just Pulled
+    for (let i = 1; i <= 5; i++) {
+      y = p.touchMove(200, 600 - 20 * i, y, i * 16, i * 16).scrollTo ?? y;
+      p.frame(y, i * 16);
+    }
+    p.touchEnd(y, 96, 96);
+    const ys = [y];
+    for (let now = 112; now <= 112 + PAGE_MS; now += 16) {
+      const f = p.frame(ys.at(-1)!, now);
+      ys.push(f.scrollTo ?? ys.at(-1)!);
+    }
+    const moving = ys.slice(0, ys.indexOf(E1) + 1);
+    expect(moving.at(-1)).toBe(E1);
+    for (let i = 1; i < moving.length; i++)
+      expect(moving[i]!).toBeGreaterThan(moving[i - 1]!);
+    // the same slow swipe further into Just Pulled only glides there
+    const q = make(END);
+    q.touchStart(200, 600, 9000, 0, 0);
+    for (let i = 1; i <= 5; i++)
+      q.touchMove(200, 600 - 20 * i, 9000, i * 16, i * 16);
+    q.touchEnd(9100, 96, 96);
+    expect(run(q, 9100, 112, 3000)).toBeLessThan(E0);
+  });
+
+  it('touch: from the footer a swipe up the screen follows the finger, then one move on to the chosen pack; one down the screen follows the finger', () => {
     const p = make(END);
     p.frame(E0, 0);
     const [a, b] = swipe(p, E0, 100, 0, -80);
     expect(a!.consumed && b!.consumed).toBe(true);
-    expect(b!.scrollTo).toBe(E0); // held at the footer while the finger moves
+    expect(b!.scrollTo).toBe(E0 + 80); // the page follows the finger
     expect(p.busy()).toBe(true);
-    expect(land(p, E0, 164, 300 + PAGE_MS).y).toBe(E1);
+    expect(land(p, E0 + 80, 164, 300 + PAGE_MS).y).toBe(E1);
     const q = make(END);
     q.touchStart(200, 300, E0, 0, 0);
     const m = q.touchMove(200, 380, E0, 16, 16);

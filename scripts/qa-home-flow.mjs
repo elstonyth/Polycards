@@ -2346,15 +2346,6 @@ for (const size of sizes) {
         links.every((l) => l.inView && l.hits),
       `y ${Math.round(atFooter.y)} (footer rest ${F0}); links ${links.map((l) => l.text + (l.hits ? ' ok' : ' covered') + (l.inView ? '' : ' (out of view)')).join(', ')}`,
     );
-    // arriving: one gesture down from just above the footer rests on it
-    await to(F0 - (s.cdp ? 150 : 60), 600);
-    await gesture(s, 1);
-    const arrived = await settle();
-    report(
-      'wp67-arrival-rests-at-the-footer-' + size,
-      Math.abs(arrived.y - F0) < 1 && arrived.free,
-      `from ${F0 - (s.cdp ? 150 : 60)} one gesture down: y ${Math.round(arrived.y)} (footer rest ${F0}, pack rest ${F1})`,
-    );
     /**
      * Records every frame (scroll, lap, drawn packs) from now until the flow
      * has moved and then rested for 400 ms (or 5 s): run it, then make the
@@ -2414,7 +2405,33 @@ for (const size of sizes) {
       const b = fr.find((f) => Math.abs(f.y - y1) < 0.5);
       return a && b ? Math.round(b.t - a.t) : null;
     };
+    // arriving: one wheel notch down from just above the footer rests on it;
+    // a swipe there (phone) does not stop at the footer: one move on to the
+    // chosen pack, the scroll rising every frame until it is there
+    await to(F0 - (s.cdp ? 150 : 60), 600);
+    const arrRec = await gestureRecorded(1);
+    const arrived = await settle();
+    // from the release on (the pager's move runs; the finger's own moves come
+    // further apart than frames in headless Chrome)
+    const arrFrom = arrRec.findIndex((f) => f.busy);
+    const arrStill = arrRec.filter(
+      (f, i) =>
+        arrFrom > 0 &&
+        i > arrFrom &&
+        f.y < F1 - 3 &&
+        Math.abs(f.y - arrRec[i - 1].y) < 0.5,
+    ).length;
+    report(
+      'wp67-arrival-' +
+        (s.cdp ? 'swipe-goes-on-to-the-chosen-pack-' : 'rests-at-the-footer-') +
+        size,
+      s.cdp
+        ? Math.abs(arrived.y - F1) < 1 && arrFrom > 0 && arrStill === 0
+        : Math.abs(arrived.y - F0) < 1 && arrived.free,
+      `from ${F0 - (s.cdp ? 150 : 60)} one gesture down: y ${Math.round(arrived.y)} (footer rest ${F0}, pack rest ${F1})${s.cdp ? '; ' + arrStill + ' still frame(s) from the release on' : ''}, the move took ${moveMs(arrRec)} ms`,
+    );
     // one gesture at the footer: one smooth move to the chosen pack at rest
+    await to(F0, 600);
     const toPack = await gestureRecorded(1);
     const atPack = await settle();
     const riseMid = toPack.find(
@@ -2621,7 +2638,7 @@ for (const size of sizes) {
         .join('; '),
     );
     // free touch (phone): follow, glide, a tap during the glide; a diagonal
-    // drag that reaches the footer rests there (it does not page on)
+    // drag that reaches the footer goes on to the chosen pack (no stop there)
     if (s.cdp) {
       await page.keyboard.press('End');
       await page.waitForTimeout(200);
@@ -2653,12 +2670,12 @@ for (const size of sizes) {
       await page.waitForTimeout(1500);
       const yC = (await lapState()).y;
       report(
-        'wp67-free-touch-follows-a-tap-stops-the-glide-the-footer-holds-phone',
+        'wp67-free-touch-follows-a-tap-stops-the-glide-the-footer-is-no-stop-phone',
         yA > y0 + 80 &&
           yA < tt.ends[0] &&
           Math.abs(yB - yA) < 2 &&
-          Math.abs(yC - tt.ends[0]) < 1,
-        `start ${Math.round(y0)}; after a 120 px swipe and a tap 80 ms later ${Math.round(yA)}, 1.2 s on ${Math.round(yB)}; a diagonal swipe then ${Math.round(yC)} (footer rest ${tt.ends[0]})`,
+          Math.abs(yC - tt.ends[1]) < 1,
+        `start ${Math.round(y0)}; after a 120 px swipe and a tap 80 ms later ${Math.round(yA)}, 1.2 s on ${Math.round(yB)}; a diagonal swipe then ${Math.round(yC)} (footer rest ${tt.ends[0]}, chosen pack ${tt.ends[1]})`,
       );
     }
     report(

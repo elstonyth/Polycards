@@ -1420,10 +1420,18 @@ async function driveStep(s, p, dir) {
   return rest(page);
 }
 
-/** Scroll down normally until goal(p), recording the rest indexes passed. */
+/**
+ * Scroll down normally until goal(p), recording the rest indexes passed. A
+ * phone swipe down from Just Pulled goes on to the single pack, past the free
+ * span: from there one swipe up comes back to the footer's rest (the free
+ * span's end), as a visitor reads Just Pulled.
+ */
 async function driveDown(s, p, goal, visited) {
   for (let i = 0; i < 150 && !goal(p); i++) {
-    p = await driveStep(s, p, 1);
+    const e0 = p.ends?.[0];
+    const pastFree =
+      e0 !== undefined && p.y > e0 + 1 && p.y < (p.lastTop ?? Infinity);
+    p = await driveStep(s, p, pastFree ? -1 : 1);
     const k = restIndex(p);
     if (k >= 0) visited.add(k);
   }
@@ -1667,7 +1675,8 @@ async function touchcancelPart(size) {
   q = await driveDown(s, q, (r) => r.free && r.y >= freeMiddle(r), new Set());
   await page.waitForTimeout(800);
   q = await rest(page);
-  await drag(s, 195, 650, 500, { steps: 6, delay: 30, end: 'touchCancel' });
+  // up the page (finger down the screen): the free span is above the footer's rest
+  await drag(s, 195, 500, 650, { steps: 6, delay: 30, end: 'touchCancel' });
   await page.waitForTimeout(100);
   const ya = await page.evaluate(() => scrollY);
   await page.waitForTimeout(1200);

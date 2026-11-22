@@ -1,9 +1,12 @@
 // qa-home-flick.mjs: a finger flick in the free part of /home-preview (phone).
 // Replaces the old "flick-across-last-wraps-once" check, which released in the
 // same task as the last move and so never saw a frame between them.
-//   Claim 1: three 32 px moves about 16 ms apart and the lift right behind
-//            them, all sent under a 400 ms long task (several times the
-//            gesture, so the two clocks differ) and handled in a burst:
+//   Claim 1: from the footer's rest, three 32 px moves down the screen
+//            about 24 ms apart and the lift right behind them (the page
+//            glides back up into Just Pulled; going down a swipe there pages
+//            on to the single pack, so the glide is read going up), all sent
+//            under a 400 ms long task (several times the gesture, so the two
+//            clocks differ) and handled in a burst:
 //            the glide matches the finger's speed by the touch events' own
 //            times, and is far from what the times they were handled at
 //            would give (the sample is invalid unless the two differ).
@@ -11,8 +14,9 @@
 //            footer) is one move to the row back: the page wraps once and
 //            rests at the row, never paging on past it.
 //   Claim 3: a finger held still 200 ms before lifting does not glide.
-//   Claim 4: a long fast flick in Just Pulled glides to the footer's rest and
-//            stops there.
+//   Claim 4: a long fast flick in Just Pulled does not stop at the footer's
+//            rest: it is one move on to the single pack, which it never
+//            passes (no wrap).
 // The free part ends at the footer's rest (a short span on a phone), so the
 // flicks in it start just past the lineup's exit, and the expected glides are
 // cut at that rest.
@@ -32,7 +36,9 @@ const BURST_MS = 4;
 const MOVES = 3;
 const BURST_MOVES = 3;
 const BURST_STEP = 32;
-const BURST_GAP_MS = 16;
+const BURST_GAP_MS = 24;
+/** Claim 1's finger starts here and moves down the screen. */
+const BURST_Y0 = 300;
 const LONG_TASK_MS = 400;
 /** The event clock fits when an event's time is at most this ahead of its handling (the gate's slack). */
 const CLOCK_SLACK_MS = 1;
@@ -50,6 +56,8 @@ const arm = (s) =>
   s.page.evaluate(() => {
     const w = window;
     w.__fl = { moves: [], end: null, ys: [] };
+    // one frame loop at a time: an older arm's loop stops
+    const gen = (w.__flGen = (w.__flGen ?? 0) + 1);
     if (!w.__flOn) {
       w.__flOn = true;
       const log = (e) => {
@@ -64,6 +72,7 @@ const arm = (s) =>
       });
     }
     const f = () => {
+      if (w.__flGen !== gen) return;
       w.__fl.ys.push(scrollY);
       if (w.__fl.ys.length < 600) requestAnimationFrame(f);
     };
@@ -99,13 +108,14 @@ async function flick(s, holdMs = 0, liftNow = false, step = STEP) {
 
 /**
  * Claim 1's flick: the touchstart, then a 400 ms long task on the page; under
- * it three 32 px moves about 16 ms apart and the lift right behind the last,
+ * it three 32 px moves down the screen about 24 ms apart and the lift right
+ * behind the last,
  * sent without waiting for the page (it is busy), so it handles them in a
  * burst. The task outlasts the gesture several times over: a gesture as long
  * as the task reads the same speed on both clocks.
  */
 async function burstFlick(s) {
-  await send(s, 'touchStart', [[X, Y0]]);
+  await send(s, 'touchStart', [[X, BURST_Y0]]);
   const busy = s.page.evaluate((ms) => {
     const t = performance.now();
     while (performance.now() - t < ms);
@@ -114,7 +124,7 @@ async function burstFlick(s) {
   const sent = [];
   for (let i = 1; i <= BURST_MOVES; i++) {
     if (i > 1) await wait(BURST_GAP_MS);
-    sent.push(send(s, 'touchMove', [[X, Y0 - BURST_STEP * i]]));
+    sent.push(send(s, 'touchMove', [[X, BURST_Y0 + BURST_STEP * i]]));
   }
   sent.push(send(s, 'touchEnd', []));
   await Promise.all([busy, ...sent]);
@@ -177,16 +187,21 @@ try {
     // Claim 1: moves handled in a burst glide by the events' own times
     const footer = t.ends?.[0] ?? Infinity;
     const mid = Math.round(t.exitEnd + 20);
-    await place(mid);
+    await place(footer);
     await arm(s);
     await burstFlick(s);
     await s.settle({ quiet: 400, timeout: 6000 });
     let log = await read(s);
-    let e = expected(log, 0, footer - log.end[2]);
-    const h = expected(log, 1, footer - log.end[2]);
+    let e = expected(log, 0);
+    const h = expected(log, 1);
     let end = await s.page.evaluate(() => scrollY);
     let glide = end - log.end[2];
-    await s.capture('burst flick from ' + mid + ': glide ' + Math.round(glide));
+    await s.capture(
+      'burst flick up from the footer at ' +
+        Math.round(footer) +
+        ': glide ' +
+        Math.round(glide),
+    );
     const tol = tolerance(e.glide);
     // the page falls back to its handling clock for event times that do not
     // fit it; the sample counts only when the two clocks ask different glides
@@ -196,7 +211,9 @@ try {
       clockFits &&
       e.gap !== null &&
       e.gap < HOLD_MS &&
-      e.glide > 40 &&
+      e.glide < -40 &&
+      // a free glide: it stops short of the paged edge (no hand-over to the lineup)
+      log.end[2] + e.glide > t.edge + 4 &&
       Math.abs(e.glide - h.glide) > 2 * tol;
     const times = log.moves
       .map((m) => r1(m[0]) + '/+' + r1(m[1] - m[0]))
@@ -304,23 +321,52 @@ try {
         ' px',
     );
 
-    // Claim 4: a long fast flick in Just Pulled stops at the footer's rest
+    // Claim 4: a long fast flick in Just Pulled is one move on to the single
+    // pack: no stop at the footer, never past the pack (no wrap)
     await place(mid);
     await arm(s);
     await flick(s, 0, true);
-    await s.settle({ quiet: 600, timeout: 6000 });
+    await s.settle({ quiet: 600, timeout: 8000 });
     end = await s.page.evaluate(() => scrollY);
+    log = await read(s);
+    const peak = Math.max(...log.ys);
+    wraps = 0;
+    for (let i = 1; i < log.ys.length; i++)
+      if (log.ys[i - 1] - log.ys[i] > 1000) wraps++;
+    // frames that held still on the way (after the lift, short of the pack)
+    let still = 0;
+    for (let i = 1; i < log.ys.length; i++)
+      if (
+        log.ys[i - 1] > log.end[2] &&
+        log.ys[i] < (pack ?? Infinity) - 3 &&
+        Math.abs(log.ys[i] - log.ys[i - 1]) < 0.5
+      )
+        still++;
     await s.capture('long flick in Just Pulled: rests at ' + Math.round(end));
     check(
-      'long-flick-stops-at-the-footer [phone]',
-      Math.abs(end - footer) < 1,
+      'long-flick-goes-on-to-the-single-pack [phone]',
+      pack !== undefined &&
+        Math.abs(end - pack) < 1 &&
+        wraps === 0 &&
+        peak < (t.lastTop ?? Infinity) &&
+        still === 0,
       'from ' +
         mid +
         ': rests at ' +
         r1(end) +
-        ' (footer rest ' +
+        ' (single pack ' +
+        r1(pack ?? null) +
+        ', footer rest ' +
         r1(footer) +
-        ')',
+        '); highest ' +
+        r1(peak) +
+        ' (Last top ' +
+        r1(t.lastTop) +
+        '); ' +
+        wraps +
+        ' wrap(s); ' +
+        still +
+        ' still frame(s) on the way',
     );
 
     s.checkNoErrors();
