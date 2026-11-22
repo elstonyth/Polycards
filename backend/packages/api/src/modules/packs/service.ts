@@ -5021,8 +5021,15 @@ class PacksModuleService extends MedusaService({
     input: {
       id: string;
       from: string | null;
-      to: string;
+      /** null releases the link (a Credit from gateway entry the ledger
+       *  refused after the entry was reserved). */
+      to: string | null;
       entryId: string | null;
+      /** Also require the row to be in one of these statuses. Credit from
+       *  gateway entry reserves and releases only on an unsettled row, so a
+       *  credit that landed meanwhile can never have its entry swapped away
+       *  (code review, 2026-11-21). */
+      status?: string[];
       /** Plain columns written in the same statement (the audit note). */
       set?: Record<string, unknown>;
       audit?: AdminAuditRow;
@@ -5033,7 +5040,10 @@ class PacksModuleService extends MedusaService({
     const rows = await claimRows(em, {
       table: 'gateway_deposit',
       ids: [input.id],
-      where: { gateway_adjustment_ref: input.from },
+      where: {
+        gateway_adjustment_ref: input.from,
+        ...(input.status ? { status: input.status } : {}),
+      },
       set: {
         ...(input.set ?? {}),
         gateway_adjustment_ref: input.to,

@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Container, Heading, Text, Table, Select } from '@medusajs/ui';
-import type { RouteConfig } from '@mercurjs/dashboard-sdk';
+import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
+import { usePermissions } from '@mercurjs/admin';
 import { useGatewayDeposits } from '../../lib/queries';
 import type { GatewayDepositView } from '../../lib/admin-rest';
 import { paymentMethodLabel, rm } from '../../lib/format';
@@ -11,6 +12,8 @@ import { useTableSort } from '../../lib/use-table-sort';
 import { Pager } from '../../components/Pager';
 import { LoadingSkeleton } from '../../components/LoadingSkeleton';
 import { depositStatusBadge } from '../../components/PaymentStatusBadge';
+import { CreditFromEntry } from './CreditFromEntry';
+import { canCreditFromEntry } from './credit-from-entry';
 
 export const config: RouteConfig = {
   label: 'pcNav.deposits',
@@ -71,6 +74,12 @@ const DepositsPage = () => {
   };
 
   const stuckOnPage = data?.deposits.filter((d) => d.stuck).length ?? 0;
+  // Credit from gateway entry asks payment:update, like Settlement's writes.
+  const canEdit = usePermissions().hasPermission(
+    'payment:update' as Permission,
+  );
+  const actions =
+    canEdit && (data?.deposits.some((d) => canCreditFromEntry(d)) ?? false);
 
   return (
     <div className="flex flex-col gap-y-3">
@@ -142,6 +151,11 @@ const DepositsPage = () => {
                   </Table.HeaderCell>
                   <Table.HeaderCell>{t('deposits.status')}</Table.HeaderCell>
                   <Table.HeaderCell>{t('deposits.reference')}</Table.HeaderCell>
+                  {actions && (
+                    <Table.HeaderCell>
+                      <span className="sr-only">{t('deposits.actions')}</span>
+                    </Table.HeaderCell>
+                  )}
                 </Table.Row>
               </Table.Header>
               <Table.Body>
@@ -209,6 +223,13 @@ const DepositsPage = () => {
                         </div>
                       )}
                     </Table.Cell>
+                    {actions && (
+                      <Table.Cell className="text-right whitespace-nowrap">
+                        {canCreditFromEntry(d) ? (
+                          <CreditFromEntry deposit={d} />
+                        ) : null}
+                      </Table.Cell>
+                    )}
                   </Table.Row>
                 ))}
               </Table.Body>

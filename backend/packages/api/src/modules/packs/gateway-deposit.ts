@@ -718,8 +718,13 @@ export type DepositOutcome =
        *   ever gets here.
        * - `'admin'` — an operator's Credit deposit (creditDepositByAdmin). A
        *   person chose this row, so it takes the callback's fence.
+       * - `'entry'` — an operator's Credit from gateway entry
+       *   (creditFromAdjustmentEntry): the gateway's own manual entry for what
+       *   arrived, read live, through the row's FX lock. It differs from the
+       *   ask by design, so it cannot take the equality fence; the caller
+       *   bounds it to a band around the ask, and the ceiling still applies.
        */
-      source: 'callback' | 'requery' | 'admin';
+      source: 'callback' | 'requery' | 'admin' | 'entry';
       /** What the gateway says was paid. Credited verbatim (a `'callback'`
        *  is fenced against the row first). */
       amount: number;
@@ -838,7 +843,11 @@ export async function applyDepositOutcome(
     const ceiling = gateway
       ? GATEWAYS[gateway].limits.depositMax
       : GATEWAY_MAX_RM;
-    if (amount !== Number(deposit.amount_requested) || amount > ceiling) {
+    // An entry credit keeps the ceiling but not the equality: what arrived
+    // differing from the ask is the whole case (its caller bounds the band).
+    const unequal =
+      outcome.source !== 'entry' && amount !== Number(deposit.amount_requested);
+    if (unequal || amount > ceiling) {
       return { applied: false, reason: 'amount-mismatch' };
     }
   }
@@ -942,7 +951,8 @@ export async function applyDepositOutcome(
  *
  * Only on the gateway's own word, read now, and only for exactly what the row
  * asked for (`source: 'admin'` takes the callback's fence). A short or over
- * payment stays an engineer's call: 2026-10-26's short USDT is the example.
+ * payment the gateway booked as its own manual entry goes through Credit from
+ * gateway entry instead (creditFromAdjustmentEntry).
  *
  * Audited after the credit, so the log never claims one that was refused. A
  * crash in between leaves the credit and its ledger row as the record, and the
