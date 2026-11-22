@@ -588,6 +588,52 @@ const plainLayout = (page) =>
     if (tall.length) bad.push(tall.length + ' spacer(s) with height');
     return bad;
   });
+/**
+ * The plain page shows the row as at its start: its heading and chips in
+ * view, no focus on, nothing of the focus view on screen.
+ */
+const plainRowShown = (page, atRow = true) =>
+  page.evaluate((atRow) => {
+    const bad = [];
+    const top = document.querySelector('header')?.offsetHeight ?? 0;
+    const shown = (el) => {
+      if (!el) return false;
+      const cs = getComputedStyle(el);
+      if (cs.visibility === 'hidden' || cs.display === 'none') return false;
+      for (let e = el; e; e = e.parentElement)
+        if (Number(getComputedStyle(e).opacity) < 0.5) return false;
+      const r = el.getBoundingClientRect();
+      return (
+        r.width > 0 && r.height > 0 && r.bottom > top && r.top < innerHeight
+      );
+    };
+    const visible = (sel) =>
+      [...document.querySelectorAll(sel)].some((el) => shown(el));
+    if (atRow && !visible('[data-stage-head]'))
+      bad.push("the row's heading is not shown");
+    if (atRow && !visible('[data-stage-chips]'))
+      bad.push("the row's chips are not shown");
+    if (document.querySelector('[data-focus-on]'))
+      bad.push('a focus is still on (data-focus-on)');
+    const ps = window.__packStage;
+    if (ps?.focus?.()?.on) bad.push('the focused view is still on');
+    if ((ps?.state?.focus ?? 0) !== 0)
+      bad.push(
+        'the 3D pack is held in a focus pose (focus ' + ps.state.focus + ')',
+      );
+    const stops = document.querySelector('[data-testid="focus-stops"]');
+    if (
+      stops &&
+      [...stops.querySelectorAll('*')].some(
+        (el) => shown(el) && (el.textContent?.trim() || el.clientHeight <= 4),
+      )
+    )
+      bad.push(
+        'the focus view (stop text, progress line or back arrow) is on screen',
+      );
+    return bad;
+  }, atRow);
+
 /** Packs the 3D draws now. */
 const drawnCount = (page) =>
   page.evaluate(
@@ -648,6 +694,13 @@ async function sidewaysPart(size) {
     const want =
       { row: 'row', stop3: 'row', lineup: 'row' }[name] ??
       (name === 'just-pulled' ? 'just-pulled' : 'footer');
+    // what the row's start shows: the row's heading and chips, and nothing of
+    // a focus (no stop text, progress line or back arrow, no pack held in a
+    // focus pose); read after the row UI's fade-in. The heading and chips
+    // are in view only where the plain page opens at the row
+    await page.waitForTimeout(400);
+    for (const b of await plainRowShown(page, want === 'row'))
+      bad.push('on its side: ' + b);
     const seen =
       q1.y <= 2
         ? 'row'
@@ -720,6 +773,35 @@ async function sidewaysPart(size) {
           ' pack(s) drawn, ' +
           back +
           stepText,
+    );
+  }
+  // reduced motion switched on at a detail stop takes the same way: the
+  // plain page with the row as at its start; switched off at the row, the
+  // flow is back
+  {
+    const bad = [];
+    await walkTo(s, 3);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.waitForTimeout(1200);
+    const q = await probe(page);
+    if (q.flowOn) bad.push('reduced motion: the flow is still on');
+    for (const b of await plainRowShown(page)) bad.push('reduced motion: ' + b);
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.waitForTimeout(800);
+    const q2 = await rest(page);
+    if (!q2.flowOn || restIndex(q2) !== 0)
+      bad.push(
+        'motion back at the top: flow ' +
+          (q2.flowOn ? 'on' : 'off') +
+          ', rest ' +
+          restIndex(q2),
+      );
+    report(
+      'reduced-motion-at-a-stop-' + size,
+      bad.length === 0,
+      bad.join('; ') ||
+        'switched on at stop 3: the plain page with the row as at its start; off at the top: the flow on at the row',
     );
   }
   report(
