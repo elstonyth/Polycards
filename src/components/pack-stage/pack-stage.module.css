@@ -888,21 +888,6 @@
   transition-duration: 150ms;
 }
 
-/* Once the spin has started the row is the scroll's: a tap on a pack
-   is a scroll gesture, the discs and the info block take no hits. The tabs
-   and the sort control stay live: a pick plays the usual sink and rise. */
-.stage[data-spinning] .pose,
-.stage[data-spinning] .label,
-.stage[data-spinning] [data-stage-nav],
-.stage[data-spinning] [data-stage-info] {
-  pointer-events: none;
-}
-
-/* The capsules' CSS sway would double the row's own lean. */
-.stage[data-spinning] .sway {
-  animation-play-state: paused;
-}
-
 /* ---- Reduced motion ------------------------------------------------------- */
 
 /* and a view too short for the flow (a phone on its side: FLOW_OFF_QUERY) */
