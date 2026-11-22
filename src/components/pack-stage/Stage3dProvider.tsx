@@ -11,7 +11,7 @@
  * double effects and a same-tick detach/attach on a category switch are safe.
  *
  * Page usage (WP-A):
- *   <Stage3dProvider override={stage} debug={debug}>      // preview passes ?stage=, ?debug=
+ *   <Stage3dProvider override={stage}>                    // preview passes ?stage=
  *     <section className="relative">                      // the stage section only
  *       <Stage3dCanvas />                                 // first child, under the tiles
  *       ...tiles...
@@ -240,7 +240,6 @@ export class StageEngine {
   private sourceIndex = new Map<string, number>();
   private trackUnsub: (() => void) | null = null;
   private pendingDetach: StageSlotSource | null = null;
-  private layout: StageLayout | null = null;
 
   private createFn: CreateStageRuntime | null = null;
   private runtime: StageRuntime | null = null;
@@ -509,7 +508,7 @@ export class StageEngine {
 
   // --- Lifecycle -----------------------------------------------------------
 
-  start(opts: { override: StageOverride; debug: boolean }) {
+  start(opts: { override: StageOverride }) {
     if (this.started) return;
     this.started = true;
     const gen = ++this.gen;
@@ -517,11 +516,6 @@ export class StageEngine {
     this.watchdogOn = opts.override === null;
     if (this.host) this.bindHost(this.host);
     this.bindDocument();
-    // ?debug=1: window.__packStage, loaded on demand (removed on stop)
-    if (opts.debug)
-      void import('./stage-debug').then((m) =>
-        this.cleanups.push(m.exposeStageDebug(this)),
-      );
 
     if (this.failedForPage) {
       this.settleFlat();
@@ -776,7 +770,6 @@ export class StageEngine {
       l = null;
     }
     if (!l) return; // hidden panel: keep the previous layout, re-measured on resize
-    this.layout = l;
     const rt = this.runtime;
     if (rt) this.safe(() => rt.setLayout(l));
   }
@@ -829,11 +822,7 @@ export class StageEngine {
   private resetLive() {
     for (const el of this.live.values()) el.dataset.live = '0';
     this.live = new Map();
-    this.drawn = [];
   }
-
-  /** What the canvas drew in its last frame (QA: `__packStage.live()`). */
-  private drawn: readonly string[] = [];
 
   private detachSource() {
     this.resetLive();
@@ -913,7 +902,6 @@ export class StageEngine {
       this.fail('error');
       return;
     }
-    this.drawn = out.live;
     this.applyLive(out.live, now);
     // A row with no 3D tile (Poly) ran only to upload a prefetch: stop with it.
     if (!this.liveCapable && !out.wantsFrame) {
@@ -1117,13 +1105,10 @@ const EngineContext = createContext<StageEngine | null>(null);
 export function Stage3dProvider({
   children,
   override = null,
-  debug = false,
 }: {
   children: ReactNode;
   /** Preview only: `?stage=flat|3d|lite`, passed in by the server page. */
   override?: StageOverride;
-  /** Preview only: `?debug=1` exposes `window.__packStage`. */
-  debug?: boolean;
 }) {
   const [engine] = useState(() => new StageEngine());
   const snap = useSyncExternalStore(
@@ -1133,9 +1118,9 @@ export function Stage3dProvider({
   );
 
   useEffect(() => {
-    engine.start({ override, debug });
+    engine.start({ override });
     return () => engine.stop();
-  }, [engine, override, debug]);
+  }, [engine, override]);
 
   const api = useMemo<Stage3dStage>(
     () => ({

@@ -615,10 +615,6 @@ export function startSpin(host: SpinHost): SpinControl {
     return !!e?.closest('header');
   };
 
-  /** ?debug=1 only: [time, scrollY after the write, P] per frame, and gesture times. */
-  let trace: number[][] | null = null;
-  let gestures: number[] | null = null;
-
   const tick = (data: FrameData) => {
     const t = data.timestamp;
     if (!src || !flowOn()) {
@@ -634,13 +630,6 @@ export function startSpin(host: SpinHost): SpinControl {
     if (lockWas === 'home' && !f.lock && src) fadeUiIn(src);
     lockWas = f.lock ?? null;
     const y = window.scrollY;
-    const p =
-      f.at === null
-        ? 0
-        : f.at.zone === 'paged'
-          ? f.at.p
-          : f.focus + f.handoff + f.exit;
-    if (trace && trace.push([t, y, p]) > 4000) trace.splice(0, 2000);
     setPanel(f, y);
     const rest = focus?.active()
       ? focus.frame(t, {
@@ -722,7 +711,6 @@ export function startSpin(host: SpinHost): SpinControl {
     }
     // a down notch at the row before the focused view has loaded: load it
     if (!focus) void loadFocus();
-    gestures?.push(now());
     if (input.wheel(wheelPx(e), e.deltaX, e.shiftKey, window.scrollY, now()))
       e.preventDefault();
     downHeld();
@@ -778,10 +766,7 @@ export function startSpin(host: SpinHost): SpinControl {
   };
   const onTouchEnd = (e: TouchEvent) => {
     const t = now();
-    if (touch.end(window.scrollY, t, e.timeStamp)) {
-      gestures?.push(now());
-      downHeld();
-    }
+    if (touch.end(window.scrollY, t, e.timeStamp)) downHeld();
     wake();
   };
   // a touch the system takes (a gesture, a dialog) is dropped, never a release
@@ -1159,30 +1144,6 @@ export function startSpin(host: SpinHost): SpinControl {
     } else input.measure(null, window.scrollY);
     wake();
   };
-
-  // ?debug=1 (the preview): QA reads the driver here.
-  const dbg = (window as unknown as { __packStage?: Record<string, unknown> })
-    .__packStage;
-  if (dbg) {
-    trace = [];
-    gestures = [];
-    dbg.spinTrace = () => ({ trace, gestures });
-    dbg.focusKit = () =>
-      import(/* webpackChunkName: "pack-stage-focus" */ './stage-focus-kit');
-    dbg.focus = () => focus?.debug() ?? null;
-    dbg.flow = () => ({
-      on: flowOn(),
-      bound: src !== null,
-      looping,
-      table: input.table(),
-      stops: input.stops(),
-      busy: input.busy(),
-      focusFailed: fload.failed(),
-      inert,
-      lap: stage.state.lap ?? null,
-      line: input.lineState(),
-    });
-  }
 
   return {
     bind,

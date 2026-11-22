@@ -131,7 +131,7 @@ function seedsOf(
  * (as /loader-preview).
  *
  * Query (preview only, read here and passed down as props):
- * `?stage=flat|3d|lite` forces the 3D mode; `?debug=1` shows the stage state;
+ * `?stage=flat|3d|lite` forces the 3D mode;
  * `?soldout=<id>,<id>` shows those packs sold out (QA); `?jp=<id>,<id>` marks
  * those packs Japanese (the language control's preview). `?loader=always|never`
  * (forces or skips the brand loader) is read by the layout's pre-paint script.
@@ -153,7 +153,6 @@ export default async function HomePreviewPage({
     typeof query[key] === 'string' ? (query[key] as string) : '';
   const stage: StageOverride =
     STAGE_MODES.find((m) => m === one('stage')) ?? null;
-  const debug = one('debug') === '1';
   // QA only: `?soldout=gold-pack,cr` shows those packs sold out, since the live
   // catalogue may have none.
   const forcedSoldOut = new Set(one('soldout').split(',').filter(Boolean));
@@ -247,7 +246,7 @@ export default async function HomePreviewPage({
         }}
       />
       <ShelfCategoryProvider categories={tabs}>
-        <Stage3dProvider override={stage} debug={debug}>
+        <Stage3dProvider override={stage}>
           {/* The page below the stage, in the flow's order:
               PackStage lays it out after the pin, and it rises over the
               pinned panel during the spin's exit. */}

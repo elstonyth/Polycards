@@ -117,7 +117,7 @@ describe('stage teardown', () => {
 
     const e = new StageEngine();
     e.setHost(host);
-    e.start({ override: null, debug: false });
+    e.start({ override: null });
     await vi.waitFor(() => expect(engine.created).toBe(1));
     expect(host.querySelectorAll('canvas')).toHaveLength(1);
     expect(observing).toBe(2);

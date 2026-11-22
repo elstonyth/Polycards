@@ -24,7 +24,6 @@ import type {
   ComposeCtx,
   FocusCtx,
   PackBackDetails,
-  SpotRect,
   StageFocusOn,
   StageLayout,
   StageRuntime,
@@ -184,72 +183,9 @@ type FocusBack = {
   readyAt: number;
 };
 
-/** QA: one pack drawn in the last frame (world units). */
-export type DrawnPack = {
-  id: string;
-  index: number;
-  opacity: number;
-  x: number;
-  y: number;
-  z: number;
-  scale: number;
-  /** The frame time it was posed for. */
-  at: number;
-};
-
-export type StageRuntimeDebug = {
-  slots: {
-    id: string;
-    index: number;
-    half: VariantState | null;
-    full: VariantState | null;
-    drawn: Res | null;
-  }[];
-  loads: number;
-  disposals: number;
-  /** Prefetched slots for the coming list (their half variant's state). */
-  staged: string[];
-  /** Current slots a pending prefetch keeps for the coming list. */
-  kept: number;
-  uploads: number;
-  draws: number;
-  pixelRatio: number;
-  drawingBuffer: [number, number];
-  samples: number;
-  environmentBytes: number;
-  bufferBytes: number;
-  textureBytes: number;
-  budgetBytes: number;
-  /** Draw calls and triangles of the last frame drawn. */
-  calls: number;
-  triangles: number;
-  failed: StageRuntimeFailReason | null;
-  /** Spin row repeats drawn in the last frame, and whether the band covers the host. */
-  copies: number;
-  /** The packs drawn in the last frame (copies left out). */
-  drawn: DrawnPack[];
-  spinBand: boolean;
-  bandH: number;
-  /** The spotlight last set on the focused pack. */
-  spot: { on: number; rect: SpotRect } | null;
-  /** The focused back: state, GPU bytes, peak print bytes, canvas bytes held, turn weight. */
-  focusBack: {
-    id: string;
-    state: FocusBack['state'];
-    bytes: number;
-    transient: number;
-    canvasBytes: number;
-    backW: number;
-  } | null;
-};
-
 export type StageRuntimeBench = StageRuntime & {
   /** Optional start centre (the contract's prepare() takes none). */
   prepare(track?: number): Promise<void>;
-  /** Bench and QA only. */
-  debug(): StageRuntimeDebug;
-  /** QA only: draw on the whole host (true) or the band (false). */
-  debugFullCanvas(on: boolean): void;
 };
 
 function slotKey(p: StageRuntimePack): string {
@@ -306,10 +242,6 @@ export function createStageRuntime(
   let viewH = 0;
   /** The canvas covers the whole host while the spin or its exit is under way. */
   let spinBand = false;
-  /** Repeats (clones) drawn in the last frame. */
-  let lastCopies = 0;
-  /** QA: the packs drawn in the last frame, with their opacity and depth. */
-  let lastDrawn: DrawnPack[] = [];
   /** The focused pack's back (one at a time). */
   let focusBack: FocusBack | null = null;
   let backW = 0;
@@ -318,7 +250,6 @@ export function createStageRuntime(
   /** The material the spotlight was last set on. */
   let spotted: PackFoilMaterial | null = null;
   let lastFocusOn: StageFocusOn | null = null;
-  let lastSpot: { on: number; rect: SpotRect } | null = null;
 
   let inflight = 0;
   let uploadedBytes = 0;
@@ -328,7 +259,6 @@ export function createStageRuntime(
   let lastLive: string[] = [];
   const seenShared = new Set<THREE.Texture>();
 
-  const counters = { loads: 0, disposals: 0, uploads: 0, draws: 0 };
   const frustum = new THREE.Frustum();
   const projScreen = new THREE.Matrix4();
 
@@ -513,7 +443,6 @@ export function createStageRuntime(
     v.model = null;
     v.capsule = null;
     v.handle.dispose();
-    counters.disposals++;
     needsDraw = true;
   };
 
@@ -569,7 +498,6 @@ export function createStageRuntime(
       baseGlow: 0,
       copies: new Map(),
     };
-    counters.loads++;
     inflight++;
     const failVariant = () => {
       if (v.state === 'disposed') return;
@@ -635,7 +563,6 @@ export function createStageRuntime(
     st.scene.add(model);
     v.state = 'uploaded';
     uploadedBytes += v.bytes;
-    counters.uploads++;
     needsDraw = true;
   };
 
@@ -783,15 +710,11 @@ export function createStageRuntime(
    * perspective origin and the pixel-to-world mapping are unchanged.
    */
   let band = { y: 0, h: 0 };
-  /** QA only (`__packStage.fullCanvas`): the whole host, as before the band. */
-  let fullCanvas = false;
   // The spin row and its exit reach every part of the panel (the row climbs
   // to the right and leaves through the top): while either runs, the whole
   // host. Switched once as the spin leaves 0 and once as it comes back.
   const bandFor = () =>
-    fullCanvas || spinBand
-      ? { y: 0, h: Math.round(hostH) }
-      : stageBand(hostH, layout);
+    spinBand ? { y: 0, h: Math.round(hostH) } : stageBand(hostH, layout);
   const applyBand = () => {
     const st = stage;
     if (!st || dead()) return;
@@ -800,7 +723,7 @@ export function createStageRuntime(
       // the whole host can cost more than the GPU cap (MSAA at 2560x1200 at
       // ratio 1: ~123 MB, leaving no pack 3D): its buffer gets half the cap
       st.renderer.setPixelRatio(
-        fullCanvas || spinBand
+        spinBand
           ? fitPixelRatio(
               pixelRatio,
               hostW,
@@ -1197,8 +1120,6 @@ export function createStageRuntime(
           viewH: viewH || hostH,
         };
         const rise = 1 - stageSpring(clamp01(s.swap));
-        let copiesDrawn = 0;
-        const drawnNow: typeof lastDrawn = [];
         for (const slot of slots) {
           const shown = drawnVariant(slot);
           for (const v of [slot.half, slot.full]) {
@@ -1318,7 +1239,6 @@ export function createStageRuntime(
               spin: { ...ctx.spin!, copy: o },
             });
             paint(c, cpose, op);
-            copiesDrawn++;
           }
           // The same fade as the CSS tiles: reach (the row's, in the spin) and the category switch.
           const opacity =
@@ -1329,16 +1249,6 @@ export function createStageRuntime(
           }
           const pose = poseAt(s, slot.index, l, desktop, slot.soldOut, ctx);
           paint(model, pose, opacity);
-          drawnNow.push({
-            id: slot.id,
-            index: slot.index,
-            opacity,
-            x: model.position.x,
-            y: model.position.y,
-            z: model.position.z,
-            scale: model.scale.x,
-            at: now,
-          });
           const sleeve = shown.model;
           if (focused && fo && fctx && sleeve) {
             const sp = fo.spot(s.focus, fctx);
@@ -1346,7 +1256,6 @@ export function createStageRuntime(
               spotted.setSpot({ on: 0, rect: sp.rect });
             sleeve.material.setSpot(sp);
             spotted = sleeve.material;
-            lastSpot = sp;
           }
           // a capsule has no spotlight: the last one set goes out
           if (focused && !sleeve && spotted) {
@@ -1356,11 +1265,8 @@ export function createStageRuntime(
           const bounds = sleeve ? sleeve.mesh : shown.capsule?.meshes.cap;
           if (bounds && frustum.intersectsObject(bounds)) live.push(slot.id);
         }
-        lastCopies = copiesDrawn;
-        lastDrawn = drawnNow;
         st.renderer.render(st.scene, st.camera);
         if (seenShared.size === 0) sharedTextures(st);
-        counters.draws++;
         needsDraw = false;
         lastLive = live;
       } else if (!canDraw) {
@@ -1417,55 +1323,6 @@ export function createStageRuntime(
             ? focusBack.v.handle.canvasBytes()
             : 0)
         : 0,
-    };
-  };
-
-  const debug = (): StageRuntimeDebug => {
-    const gl = stage?.renderer.getContext();
-    return {
-      slots: slots.map((s) => {
-        const d = drawnVariant(s);
-        return {
-          id: s.id,
-          index: s.index,
-          half: s.half?.state ?? (s.halfFailed ? 'failed' : null),
-          full: s.full?.state ?? (s.fullFailed ? 'failed' : null),
-          drawn: d ? d.res : null,
-        };
-      }),
-      ...counters,
-      staged: [...staged.values()].map((s) => s.half?.state ?? 'none'),
-      kept: keep.size,
-      pixelRatio: stage?.renderer.getPixelRatio() ?? pixelRatio,
-      drawingBuffer: gl
-        ? [gl.drawingBufferWidth, gl.drawingBufferHeight]
-        : [0, 0],
-      samples: stage?.samples ?? 0,
-      environmentBytes: stage?.environmentBytes ?? 0,
-      bufferBytes,
-      textureBytes: uploadedBytes + capsuleShared(),
-      budgetBytes: budget(),
-      calls: stage?.renderer.info.render.calls ?? 0,
-      triangles: stage?.renderer.info.render.triangles ?? 0,
-      failed,
-      copies: lastCopies,
-      drawn: lastDrawn,
-      spinBand,
-      bandH: band.h,
-      spot: lastSpot,
-      focusBack: focusBack
-        ? {
-            id: focusBack.slot.id,
-            state: focusBack.state,
-            bytes: focusBack.bytes,
-            transient: focusBack.transient,
-            canvasBytes:
-              focusBack.v.state === 'disposed'
-                ? 0
-                : focusBack.v.handle.canvasBytes(),
-            backW,
-          }
-        : null,
     };
   };
 
@@ -1539,10 +1396,5 @@ export function createStageRuntime(
     render,
     stats,
     dispose,
-    debug,
-    debugFullCanvas: (on: boolean) => {
-      fullCanvas = on;
-      applyBand();
-    },
   };
 }

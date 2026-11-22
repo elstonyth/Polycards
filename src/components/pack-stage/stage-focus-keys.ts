@@ -38,9 +38,6 @@ const CAPSULE_ODDS_LEAN = -10;
 
 export type FocusVariant = 'sleeve' | 'capsule' | 'noOdds';
 
-export const FOCUS_DURATIONS = POSES.durations;
-export const FOCUS_WINDOW = POSES.window;
-
 /** The stop kinds of a variant, in order. */
 export function focusStops(variant: FocusVariant): StageStopKind[] {
   if (variant === 'capsule') return POSES.variants.capsule as StageStopKind[];

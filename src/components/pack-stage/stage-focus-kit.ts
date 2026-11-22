@@ -50,8 +50,6 @@ import { STAGE_DESKTOP_QUERY } from './stage-gate';
 import { frame } from './stage-motion';
 import { entryPlaced, pendingEntry } from './stage-entry-cover';
 
-export { FOCUS_DURATIONS, FOCUS_WINDOW } from './stage-focus-keys';
-export { blockAt, power1InOut } from './stage-focus';
 export { focusStops };
 
 /** The active block fades this long before "All packs" returns to the row. */
@@ -184,8 +182,6 @@ export type FocusRun = {
    * that pack. `instant`: the page is placed on the entry's stop with no move.
    */
   resume(instant?: boolean): boolean;
-  /** Debug: the stops and timing of the last moves. */
-  debug(): unknown;
   stop(): void;
 };
 
@@ -221,12 +217,6 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
   const subs = new Set<(f: number) => void>();
   let lastF = -1;
   const offs: (() => void)[] = [];
-  /** ?debug=1 only: [time, scrollY, focus] per frame, and move starts. */
-  const trace: number[][] | null = (
-    window as unknown as { __packStage?: unknown }
-  ).__packStage
-    ? []
-    : null;
   const now = () => performance.now();
 
   /** `mount`: the first render of a focus, as a transition (below). */
@@ -461,7 +451,6 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       // which lets go once the pack rests on that stop
       entryCover = pendingEntry() !== null;
       if (page) d.go(at, o.instant ? { ms: 1 } : undefined);
-      trace?.push([now(), -1, 1]);
       d.loop();
       return true;
     },
@@ -539,8 +528,6 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       // the address: the pack's while in the details, the base path past them
       past = !!f.past;
       if (!leaving) addr.show(!past);
-      if (trace && trace.push([t, window.scrollY, f.focus]) > 4000)
-        trace.splice(0, 2000);
       if (f.focus !== lastF) {
         lastF = f.focus;
         d.state.focus = Math.max(1e-6, f.focus);
@@ -588,17 +575,6 @@ export function createFocusRun(d: FocusRunDeps): FocusRun {
       return f.idle && !leaving && restingSince === null;
     },
     resume: (instant) => resumeEntry(instant),
-    debug: () => ({
-      on,
-      kinds,
-      stops: d.stops(),
-      focus: lastF,
-      busy: d.busy(),
-      past,
-      entry: addr.entry(),
-      onPack: addr.onPack(),
-      trace,
-    }),
     stop() {
       window.removeEventListener('popstate', onPop);
       if (on) end();
