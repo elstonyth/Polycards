@@ -21,6 +21,10 @@
  *   ignored: the move always lands (the opposite of the reference's fault).
  * - Snap: at rest in the paged zone the scroll is always on a rest; a page
  *   left off one glides to the nearest after 150 ms of quiet, in 600 ms.
+ *   A cancelled touch has no quiet to wait out: it settles on the next frame
+ *   (in the paged zone and the end as above; in the half-empty band over the
+ *   lineup, and where Just Pulled fits up to the footer, on the nearest of
+ *   RL, the Just Pulled rest and the footer's).
  * - End: below the free part, three rests: the footer in view, the chosen
  *   pack alone (the rise's end) and Last's top (the row back). The zone
  *   stays free; there one gesture (wheel, key, touch over 24 px) is one
@@ -46,12 +50,15 @@
  *   The move to Last's top ends on the wrap frame, with no lock to wait out.
  * - Free part: the wheel and the keys are native, except an up notch that
  *   would cross the edge, which pages to RL (whatever its size: never to the
- *   exit end). Touch follows the finger 1:1 (from RL to the chosen pack's
+ *   exit end), and, where Just Pulled is all in view, a down key above the
+ *   footer, which goes to the next rest below (Just Pulled's, then the
+ *   footer's; the browser's PageDown would skip it). Touch follows the finger 1:1 (from RL to the chosen pack's
  *   rest, never past either); on release it glides
  *   `sign * |v|^1.7` px (v: the finger's speed over its moves in the 100 ms
  *   up to the last one, timed by the touch events' own times, as px per 60
  *   Hz frame; 0 when the finger has not moved for 100 ms before the lift),
- *   eased by lerp 0.075 per 60 Hz frame. An
+ *   eased by lerp 0.075 per 60 Hz frame and never slower than 1 px a frame
+ *   (the tail would otherwise crawl its last pixels). An
  *   up glide that comes within a few px of the edge pages to RL: scrolling
  *   back always stops at the lineup. A re-measure keeps a glide unless the
  *   paged part changed shape.
@@ -99,6 +106,8 @@ const BURST_MS = 4;
 export const RELEASE_SPEED_MAX = 100;
 /** An up glide this close to the paged edge hands over to the move to RL. */
 export const GLIDE_HANDOFF_PX = 4;
+/** A glide never moves slower than this, px per 60 Hz frame (its exponential tail would crawl). */
+export const GLIDE_MIN_PX = 1;
 /** Positions this close count as the same. */
 const SAME_PX = 0.5;
 const FRAME_MS = 1000 / 60;
@@ -433,6 +442,8 @@ export function createFlowPager(): FlowPager {
   /** The wrap's locked scroll to the row. */
   let lock: Lock | null = null;
   let quiet = false;
+  /** A touch was cancelled: the next idle frame settles the page at once. */
+  let cancelled = false;
   let lastWheel = Number.NEGATIVE_INFINITY;
   let lastAbs = 0;
   let seenY: number | null = null;
@@ -516,6 +527,25 @@ export function createFlowPager(): FlowPager {
     }
     glide = null;
     return true;
+  };
+  /**
+   * The rest a page left by a cancelled touch settles on, in the free part
+   * above the footer: the band over the lineup (where Just Pulled fits, up to
+   * the footer) goes to the nearest of RL, the Just Pulled rest and the
+   * footer's; null elsewhere (a tall Just Pulled is read freely).
+   */
+  const bandRest = (y: number): number | null => {
+    const xe = table?.exitEnd ?? null;
+    if (!table || xe === null || y <= table.edge) return null;
+    const e0 = endsOf()[0];
+    const fits = table.freeFits !== false && e0 !== undefined;
+    if (y >= (fits ? e0! : xe) - SAME_PX) return null;
+    const ks = [table.stops.length - 1, table.stops.length];
+    if (fits) ks.push(endBase());
+    let best = ks[0]!;
+    for (const k of ks)
+      if (Math.abs(ext[k]! - y) < Math.abs(ext[best]! - y)) best = k;
+    return best;
   };
   /** Where a free finger puts the page: between RL and the chosen pack's rest. */
   const followOf = (t: Touch, y: number): number =>
@@ -669,6 +699,24 @@ export function createFlowPager(): FlowPager {
     },
     step(dir, scrollY, now) {
       refusedEntry = false;
+      // where Just Pulled is all in view, a down key above the footer goes to
+      // the next rest below (Just Pulled's, then the footer's), as a wheel
+      // notch arrives at the footer; the browser's own key would skip it
+      const e0 = endsOf()[0];
+      const xe = table?.exitEnd ?? null;
+      if (
+        table &&
+        dir > 0 &&
+        !locked() &&
+        table.freeFits !== false &&
+        e0 !== undefined &&
+        xe !== null &&
+        zoneOf(scrollY) === 'free' &&
+        scrollY < e0 - SAME_PX
+      ) {
+        const k = scrollY < xe - SAME_PX ? table.stops.length : endBase();
+        return begin(scrollY, k, now) ? 'moved' : 'swallowed';
+      }
       return key(scrollY, () => targetFrom(scrollY, dir), now);
     },
     goTo(k, scrollY, now, ms) {
@@ -692,6 +740,7 @@ export function createFlowPager(): FlowPager {
         return;
       }
       glide = null; // a touch stops a glide
+      cancelled = false;
       const e0 = endsOf()[0];
       const end = endAt(scrollY);
       // on the footer's rest the finger may scroll Just Pulled back up, so
@@ -819,6 +868,7 @@ export function createFlowPager(): FlowPager {
     },
     touchCancel() {
       touch = null;
+      cancelled = true;
     },
     frame(scrollY, now) {
       const dt = lastFrame === null ? FRAME_MS : Math.max(0, now - lastFrame);
@@ -873,7 +923,14 @@ export function createFlowPager(): FlowPager {
       }
       if (glide) {
         const g = glide;
-        g.y += (g.target - g.y) * (1 - Math.exp((-GLIDE_LERP * dt) / FRAME_MS));
+        const gap = g.target - g.y;
+        const step = gap * (1 - Math.exp((-GLIDE_LERP * dt) / FRAME_MS));
+        // the exponential tail would crawl its last pixels: a floor speed ends it
+        const floor = (GLIDE_MIN_PX * dt) / FRAME_MS;
+        g.y +=
+          Math.abs(step) >= floor
+            ? step
+            : Math.sign(gap) * Math.min(Math.abs(gap), floor);
         const over = wrapTarget(scrollY, g.y, lastTop);
         if (over !== null) return startWrap(over, now);
         if (g.toEdge && g.y - g.target <= GLIDE_HANDOFF_PX) {
@@ -893,7 +950,16 @@ export function createFlowPager(): FlowPager {
         seenY = scrollY;
         changedAt = now;
       }
+      // a cancelled touch settles at once: the finger is gone, no quiet to wait out
+      const settleNow = cancelled && !touch;
+      cancelled = false;
+      const quietOver = settleNow || now - changedAt >= SNAP_QUIET_MS;
       if (zone === 'free') {
+        if (settleNow) {
+          const k = bandRest(scrollY);
+          if (k !== null && begin(scrollY, k, now, SNAP_MS))
+            return out(null, k, true, false, zone);
+        }
         if (touch || !endAt(scrollY))
           return out(null, null, false, !touch, zone);
         // the end keeps the snap: a page left off its rests glides to the nearest
@@ -903,22 +969,13 @@ export function createFlowPager(): FlowPager {
           if (Math.abs(scrollY - e[i]!) < Math.abs(scrollY - e[j]!)) j = i;
         const off = Math.abs(scrollY - e[j]!) > SAME_PX;
         const k = endBase() + j;
-        if (
-          off &&
-          now - changedAt >= SNAP_QUIET_MS &&
-          begin(scrollY, k, now, SNAP_MS)
-        )
+        if (off && quietOver && begin(scrollY, k, now, SNAP_MS))
           return out(null, k, true, false, zone);
         return out(null, null, false, !off, zone);
       }
       const k = nearest(scrollY);
       const off = Math.abs(scrollY - table.stops[k]!) > SAME_PX;
-      if (
-        off &&
-        !touch &&
-        now - changedAt >= SNAP_QUIET_MS &&
-        begin(scrollY, k, now, SNAP_MS)
-      )
+      if (off && !touch && quietOver && begin(scrollY, k, now, SNAP_MS))
         return out(null, k, true, false, zone);
       return out(null, k, false, !off && !touch, zone);
     },

@@ -35,6 +35,10 @@
  * above it). A drag longer than the band to the paged edge checks that the
  * finger never holds the page still there.
  *
+ * A cancelled touch settles from the next frame onto a rest (never left in the
+ * half-empty band over the lineup), and a swipe turned back settles without
+ * crawling: its last 5 px take at most 120 ms.
+ *
  * Desktop (wheel and keys, from the footer's rest): rules 1, 4, 5, and one
  * gesture lands on the pack (a reversed notch mid-move is swallowed; a
  * Shift wheel moves nothing).
@@ -150,7 +154,7 @@ type TouchEv = {
 };
 type DeskEv =
   | { t: number; kind: 'wheel'; dy: number; shift?: boolean }
-  | { t: number; kind: 'key'; dir: 1 | -1 };
+  | { t: number; kind: 'key'; dir: 1 | -1; px?: number };
 
 /** Moves every `every` ms from `from` (cumulative page-down px) by `step`, starting after `t0`. */
 const moves = (
@@ -172,6 +176,8 @@ type Gesture = {
   from: 'jp' | 'footer';
   /** The page goes down the document: the swipe heads for the pack. */
   down: boolean;
+  /** Up rows only: played from this rest alone. */
+  onlyFrom?: 'jp' | 'footer';
   touch: (s: Size) => TouchEv[];
   desk: () => DeskEv[];
 };
@@ -319,6 +325,18 @@ const UP: Gesture[] = [
     },
     desk: () => [],
   },
+  {
+    // 180 px up the page from the Just Pulled rest, then the touch is cancelled: in the band over the lineup
+    name: 'up touch cancel',
+    from: 'jp',
+    down: false,
+    onlyFrom: 'jp',
+    touch: () => {
+      const m = moves(6, 62, -30);
+      return [START, ...m, { t: 430, kind: 'cancel', dy: -180 }];
+    },
+    desk: () => [],
+  },
 ];
 
 /** Runs after the last event: the longest move (1.5 s) plus a snap and a margin. */
@@ -404,7 +422,7 @@ function playDesk(p: FlowPager, y0: number, ev: DeskEv[], dt: number): Played {
         const dx = e.shift ? e.dy : 0;
         const dy = e.shift ? 0 : e.dy;
         if (!p.wheel(dy, dx, !!e.shift, y, now)) y += dy;
-      } else if (p.step(e.dir, y, now) === 'free') y += 40 * e.dir;
+      } else if (p.step(e.dir, y, now) === 'free') y += (e.px ?? 40) * e.dir;
     }
     const f = p.frame(y, now);
     if (f.scrollTo !== null) y = f.scrollTo;
@@ -435,7 +453,12 @@ type Expect = {
   way: number;
   /** The swipe's way before a turn back: down the page (+1, the default) or up (-1). */
   swipe?: 1 | -1;
+  /** A cancelled touch: the settle starts on the next frame. */
+  settleNow?: boolean;
 };
+
+/** A turned-back swipe's last 5 px take at most this long. */
+const TAIL_MS = 120;
 
 /** The visitor's rules over one played gesture; returns the faults found (empty: none). */
 function faults(t: FlowTable, run: Played, x: Expect, g: Gesture): string[] {
@@ -510,8 +533,18 @@ function faults(t: FlowTable, run: Played, x: Expect, g: Gesture): string[] {
       );
   }
 
-  // 3. turned back: never on, back where it began
+  if (x.settleNow && settle > L && first > L + 1)
+    out.push(`settle: waited ${first - L - 1} frames after the cancel`);
+
+  // 3. turned back: never on, back where it began, with no crawl at the end
   if (g.name.endsWith('turned back') && x.lift) {
+    const tail = f.findIndex(
+      (fr, j) => j > L && j <= settle && Math.abs(fr.y - final) <= 5,
+    );
+    if (tail >= 0 && f[settle]!.now - f[tail]!.now > TAIL_MS)
+      out.push(
+        `turned back: crawled its last 5 px for ${Math.round(f[settle]!.now - f[tail]!.now)} ms`,
+      );
     const yl = f[L]!.y;
     const sw = x.swipe ?? 1;
     const k = f.findIndex((fr, j) => j > L && (fr.y - yl) * sw > SAME);
@@ -584,7 +617,12 @@ describe('phone swipe from Just Pulled', () => {
           const found = faults(
             t,
             one,
-            { rest, lift: g.name !== 'touch cancel', way: g.down ? 1 : 0 },
+            {
+              rest,
+              lift: g.name !== 'touch cancel',
+              way: g.down ? 1 : 0,
+              settleNow: g.name === 'touch cancel',
+            },
             g,
           );
           if (twoStep) {
@@ -609,6 +647,7 @@ describe('phone swipe up from Just Pulled and the footer rest', () => {
     for (const g of UP)
       for (const from of ['jp', 'footer'] as const)
         for (const dt of FRAMES) {
+          if (g.onlyFrom && g.onlyFrom !== from) continue;
           it(`${s.name} ${g.name} from ${from} @${dt}ms`, () => {
             const t = tableOf(s);
             const p = createFlowPager();
@@ -618,14 +657,23 @@ describe('phone swipe up from Just Pulled and the footer rest', () => {
             const ev = g.touch(s);
             const one = playTouch(p, y0, 0, ev, dt);
             const back = g.name.endsWith('turned back');
+            const cancel = g.name.endsWith('touch cancel');
             // short screens stop at Just Pulled's top, unless the finger already carried the page above it
             const yLift = one.frames[one.lift]?.y ?? y0;
-            const twoStep = !back && !jpInView(s) && yLift > t.exitEnd + SAME;
-            const rest = back ? y0 : twoStep ? t.exitEnd : lineup;
+            const twoStep =
+              !back && !cancel && !jpInView(s) && yLift > t.exitEnd + SAME;
+            // a cancel settles on the nearer rest: here Just Pulled's
+            const rest = back || cancel ? y0 : twoStep ? t.exitEnd : lineup;
             const found = faults(
               t,
               one,
-              { rest, lift: true, way: back ? 0 : -1, swipe: -1 },
+              {
+                rest,
+                lift: !cancel,
+                way: back || cancel ? 0 : -1,
+                swipe: -1,
+                settleNow: cancel,
+              },
               g,
             );
             if (twoStep) {
@@ -670,4 +718,37 @@ describe('desktop wheel and keys from the footer rest', () => {
         expect(found.join('\n')).toBe('');
       });
     }
+});
+
+describe('desktop keys from the Just Pulled rest', () => {
+  for (const [label, px] of [
+    ['ArrowDown', 40],
+    ['PageDown', Math.round(0.875 * DESKTOP.h)],
+  ] as const)
+    for (const dt of FRAMES)
+      it(`${DESKTOP.name} ${label} @${dt}ms rests on the footer`, () => {
+        const t = tableOf(DESKTOP);
+        const p = createFlowPager();
+        p.setTable(flowPagerTable(t, kinds));
+        const run = playDesk(
+          p,
+          t.exitEnd,
+          [{ t: 0, kind: 'key', dir: 1, px }],
+          dt,
+        );
+        const g: Gesture = {
+          name: label,
+          from: 'jp',
+          down: true,
+          touch: () => [],
+          desk: () => [],
+        };
+        const found = faults(
+          t,
+          run,
+          { rest: t.ends[0]!, lift: false, way: 1 },
+          g,
+        );
+        expect(found.join('\n')).toBe('');
+      });
 });
