@@ -362,18 +362,45 @@ describe("a pack's own address under the home preview switch", () => {
     const res = get('/slots/151?utm_source=ad');
     expect(res?.status).toBe(307);
     expect(res?.headers.get('location')).toBe(
-      'https://polycards.gg/home-preview?utm_source=ad&focus=151',
+      'https://polycards.gg/?utm_source=ad&focus=151',
     );
     // never kept by a cache: the same address serves the pack page with the
     // switch off
     expect(res?.headers.get('cache-control')).toBe('no-store');
     expect(get('/slots/151/')?.headers.get('location')).toBe(
-      'https://polycards.gg/home-preview?focus=151',
+      'https://polycards.gg/?focus=151',
     );
     expect(get('/slots/a%20b')?.headers.get('location')).toBe(
-      'https://polycards.gg/home-preview?focus=a+b',
+      'https://polycards.gg/?focus=a+b',
     );
     expect(get('/slots/151', {}, 'HEAD')?.status).toBe(307);
+  });
+
+  it('switch on: "/" serves the flow page, document loads and moves inside the site alike', () => {
+    vi.stubEnv('HOME_PREVIEW', '1');
+    const rewritten = (r: Response | undefined | null) =>
+      r?.headers.get('x-middleware-rewrite');
+    expect(rewritten(get('/'))).toBe('https://polycards.gg/home-preview');
+    expect(rewritten(get('/', { rsc: '1' }))).toBe(
+      'https://polycards.gg/home-preview',
+    );
+    expect(rewritten(get('/?focus=151&utm_source=ad'))).toBe(
+      'https://polycards.gg/home-preview?focus=151&utm_source=ad',
+    );
+    expect(rewritten(get('/', {}, 'HEAD'))).toBe(
+      'https://polycards.gg/home-preview',
+    );
+    // the form POST guard still answers first
+    expect(post('/', { 'content-type': FORM })?.status).toBe(405);
+    expect(get('/home-preview')).toBeUndefined();
+  });
+
+  it('switch off or development alone: "/" passes through untouched', () => {
+    vi.stubEnv('HOME_PREVIEW', '');
+    expect(get('/')).toBeUndefined();
+    expect(get('/', { rsc: '1' })).toBeUndefined();
+    vi.stubEnv('NODE_ENV', 'development');
+    expect(get('/')).toBeUndefined();
   });
 
   it("switch on: the pack page's own links, moves inside the site and other paths are untouched", () => {

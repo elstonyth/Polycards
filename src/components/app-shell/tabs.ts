@@ -9,6 +9,17 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
+/**
+ * Fired on window, cancelable, when the Home tab is tapped: a page that
+ * handles the tap itself (the home flow takes it back to its row) cancels it,
+ * and the tab then neither scrolls nor navigates.
+ */
+export const HOME_TAP_EVENT = 'home-tab-tap';
+
+/** Fires HOME_TAP_EVENT (a tap on Home or the logo); true when a page took it. */
+export const homeTapTaken = (): boolean =>
+  !window.dispatchEvent(new Event(HOME_TAP_EVENT, { cancelable: true }));
+
 export type Tab = {
   label: string;
   href: string;
@@ -68,7 +79,9 @@ export function isTabActive(tab: Tab, pathname: string): boolean {
       pathname.startsWith('/vault/coin-flip/'))
   )
     return false;
-  if (tab.href === '/') return pathname === '/';
+  // The home preview serves "/" under its switch, and the server renders it
+  // with the preview's own path: both light Home, so hydration agrees.
+  if (tab.href === '/') return pathname === '/' || pathname === '/home-preview';
   if (pathname === tab.href || pathname.startsWith(`${tab.href}/`)) return true;
   return (tab.match ?? []).some(
     (p) => pathname === p || pathname.startsWith(`${p}/`),

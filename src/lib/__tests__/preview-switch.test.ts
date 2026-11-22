@@ -36,18 +36,18 @@ describe("packFlowAddress: where a pack's own address opens under the switch", (
   const q = (s: string) => new URLSearchParams(s);
 
   it('the flow page focused on the pack', () => {
-    expect(packFlowAddress('151', q(''))).toBe('/home-preview?focus=151');
+    expect(packFlowAddress('151', q(''))).toBe('/?focus=151');
   });
 
   it('keeps the other query, never a focus of its own', () => {
     expect(packFlowAddress('151', q('utm_source=ad&focus=ah'))).toBe(
-      '/home-preview?utm_source=ad&focus=151',
+      '/?utm_source=ad&focus=151',
     );
   });
 
   it('drops a key given more than once', () => {
     expect(packFlowAddress('151', q('fbclid=a&fbclid=b&utm_source=ad'))).toBe(
-      '/home-preview?utm_source=ad&focus=151',
+      '/?utm_source=ad&focus=151',
     );
   });
 
@@ -59,11 +59,11 @@ describe("packFlowAddress: where a pack's own address opens under the switch", (
           'soldout=151&jp=151&debug=1&stage=flat&loader=never&hide=cr&more=4&no3d=151&group=ah&utm_source=ad',
         ),
       ),
-    ).toBe('/home-preview?utm_source=ad&focus=151');
+    ).toBe('/?utm_source=ad&focus=151');
   });
 
   it('encodes the pack id', () => {
-    expect(packFlowAddress('a b&c', q(''))).toBe('/home-preview?focus=a+b%26c');
+    expect(packFlowAddress('a b&c', q(''))).toBe('/?focus=a+b%26c');
   });
 
   it("none for the pack page's own links (any count, even empty or repeated)", () => {

@@ -10,7 +10,7 @@ import { useDrawDot } from './DrawDotProvider';
 import { useVaultDot } from './VaultDotProvider';
 import { openGames } from './games';
 import { preloadGamesSheet } from './GamesSheet';
-import { TABS, isTabActive, type Tab } from './tabs';
+import { TABS, homeTapTaken, isTabActive, type Tab } from './tabs';
 
 /** How long a gated tap made while auth is still loading waits for the answer
  *  before it navigates anyway (the server gate then covers it, as before). */
@@ -119,6 +119,10 @@ export function TabLink({ tab, variant }: { tab: Tab; variant: Variant }) {
     // A modified click (new tab, new window) is the browser's, as with Link.
     const modified =
       e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey;
+    if (tab.href === '/' && !modified && homeTapTaken()) {
+      e.preventDefault();
+      return;
+    }
     // The tab you are on: back to the top instead of re-navigating. Only on
     // the bare page: from /?category=poly or /lucky-draw?open=1 the tap still
     // goes to the plain href, clearing the query as it always did.

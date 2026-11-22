@@ -37,7 +37,8 @@ const QA_SWITCHES = new Set([
 
 /**
  * Where the pack's own address (`/slots/<slug>`) opens under the switch: the
- * flow page focused on that pack, its other query kept (each key given once;
+ * home address, which serves the flow page under the switch (proxy.ts),
+ * focused on that pack, its other query kept (each key given once;
  * `focus` is ours; the preview's QA switches never ride on a public link).
  * Null when the address carries a `count` (the pack page's own links always
  * do, so those keep the pack page).
@@ -52,5 +53,5 @@ export function packFlowAddress(
     if (k !== 'focus' && !QA_SWITCHES.has(k) && query.getAll(k).length === 1)
       q.set(k, query.get(k) ?? '');
   q.set('focus', slug);
-  return `/home-preview?${q.toString()}`;
+  return `/?${q.toString()}`;
 }

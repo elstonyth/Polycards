@@ -22,9 +22,20 @@ import CookieConsent from '@/components/CookieConsent';
 import MetaPixel from '@/components/MetaPixel';
 import { SITE_URL } from '@/lib/site';
 import { BUYBACK_RATE_LABEL } from '@/lib/buyback-copy';
-import { stageLoaderScript } from '@/components/pack-stage/stage-loader-script';
+import {
+  STAGE_LOADER_PATHS,
+  stageLoaderScript,
+} from '@/components/pack-stage/stage-loader-script';
+import { packFlowOn } from '@/lib/preview-switch';
 
 const STAGE_LOADER_SCRIPT = stageLoaderScript();
+// Under the preview switch "/" serves the flow page (proxy.ts), so the loader
+// acts there too. Chosen per render: "/" is then always the flow page's
+// dynamic render, while prerendered pages keep the build's list.
+const STAGE_LOADER_HOME_SCRIPT = stageLoaderScript([
+  ...STAGE_LOADER_PATHS,
+  '/',
+]);
 
 const SITE_DESCRIPTION = `Rip packs. Pull real cards. Hold, redeem, or sell from your vault at ${BUYBACK_RATE_LABEL} of card value.`;
 
@@ -93,7 +104,13 @@ export default async function RootLayout({
             paints, so the header never shows ahead of the loader's cover;
             inert on every path but STAGE_LOADER_PATHS (stage-loader-script.ts).
             Reads no cookie or header: the routes stay route-cacheable. */}
-        <script dangerouslySetInnerHTML={{ __html: STAGE_LOADER_SCRIPT }} />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: packFlowOn()
+              ? STAGE_LOADER_HOME_SCRIPT
+              : STAGE_LOADER_SCRIPT,
+          }}
+        />
       </head>
       <body
         suppressHydrationWarning

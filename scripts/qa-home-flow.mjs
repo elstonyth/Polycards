@@ -3230,7 +3230,7 @@ for (const size of sizes) {
       `reload-at-middle-stop-${size}`,
       // under the preview switch a load of the pack's address opens the flow
       // on that pack at Front (a fresh entry: no saved stop)
-      x.served?.path === PREVIEW &&
+      x.served?.path === '/' &&
         x.served.focus === SLUG &&
         x.served.qa.length === 0 &&
         x.r.path === `/slots/${SLUG}` &&

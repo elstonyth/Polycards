@@ -221,6 +221,28 @@ describe('TabLink: re-tapping the tab you are on', () => {
     vi.unstubAllGlobals();
   });
 
+  test('Home is lit on the home preview, which serves "/" under its switch', async () => {
+    nav.pathname = '/home-preview';
+    await render('Home');
+    expect(container.querySelector('a')?.getAttribute('aria-current')).toBe(
+      'page',
+    );
+  });
+
+  test('a page that takes the Home tap itself cancels the scroll and the move', async () => {
+    const scrollTo = vi.fn();
+    vi.stubGlobal('scrollTo', scrollTo);
+    const take = (e: Event) => e.preventDefault();
+    window.addEventListener('home-tab-tap', take);
+    nav.pathname = '/slots/151';
+    await render('Home');
+    await click(container.querySelector('a'));
+    expect(navigations).toEqual([null]);
+    expect(scrollTo).not.toHaveBeenCalled();
+    window.removeEventListener('home-tab-tap', take);
+    vi.unstubAllGlobals();
+  });
+
   test('a tab lit by a page under it still navigates to its own page', async () => {
     const scrollTo = vi.fn();
     vi.stubGlobal('scrollTo', scrollTo);

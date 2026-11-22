@@ -15,7 +15,7 @@ import NotificationBell from '@/components/NotificationBell';
 import { Pill } from '@/components/ui/pill';
 import { useTopUp } from './TopUpProvider';
 import { TabLink } from './TabLink';
-import { TABS } from './tabs';
+import { TABS, homeTapTaken } from './tabs';
 
 /**
  * App header: logo left, balance chip + top-up entry right (90scard's
@@ -46,6 +46,15 @@ export default function AppHeader() {
             href="/"
             className="flex min-h-11 shrink-0 items-center"
             aria-label="Polycards home"
+            onClick={(e) => {
+              const modified =
+                e.button !== 0 ||
+                e.metaKey ||
+                e.ctrlKey ||
+                e.shiftKey ||
+                e.altKey;
+              if (!modified && homeTapTaken()) e.preventDefault();
+            }}
           >
             {/* Under 430px the wordmark, mute, bell and balance chip do not
                 fit side by side (the mute button sat on the wordmark), so

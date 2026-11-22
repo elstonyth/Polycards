@@ -182,7 +182,8 @@ export default function PackStage({
     if (s.category !== active) pick(s.category);
     startEntry(window.history, window.location, {
       id: s.id,
-      base: '/home-preview',
+      // the page the flow was loaded on: "/" under the switch, or /home-preview
+      base: window.location.pathname,
       now: Date.now(),
     });
     // mount only: a later tab pick is the visitor's

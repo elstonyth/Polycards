@@ -130,6 +130,17 @@ function packFlowRedirect(request: NextRequest): NextResponse | null {
   return res;
 }
 
+// The home preview only: the address "/" serves the flow page, the address
+// bar keeping "/". RSC and prefetch requests too, so a move inside the site
+// to "/" gets the same page as a document load.
+function homeFlowRewrite(request: NextRequest): NextResponse | null {
+  if (request.nextUrl.pathname !== '/') return null;
+  if (request.method !== 'GET' && request.method !== 'HEAD') return null;
+  const url = request.nextUrl.clone();
+  url.pathname = '/home-preview';
+  return NextResponse.rewrite(url);
+}
+
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   if (bypassedEdge(request)) {
@@ -149,7 +160,7 @@ export function proxy(request: NextRequest) {
   if (pathname.startsWith('/api/')) return;
   if (!isKnownRoute(pathname)) return notFound();
   if (packFlowOn()) {
-    const toFlow = packFlowRedirect(request);
+    const toFlow = packFlowRedirect(request) ?? homeFlowRewrite(request);
     if (toFlow) return toFlow;
   }
   if (

@@ -66,6 +66,7 @@ import {
 } from './stage-flow-gate';
 import { placeInstantly } from './stage-entry-cover';
 import { SLOT_PATH } from './stage-focus-address';
+import { HOME_TAP_EVENT } from '@/components/app-shell/tabs';
 
 /**
  * The measured stage a CSS row is projected into (host px; the art box is
@@ -1032,6 +1033,19 @@ export function startSpin(host: SpinHost): SpinControl {
     else if (Math.abs(window.scrollY - tb.r0) >= 1) go(0);
   };
   window.addEventListener('keydown', onKey);
+  // The Home tab over the flow: back to the row, as the Home key (a focused
+  // pack leaves first). In the free part it is the tab's own scroll to the top.
+  const onHomeTap = (e: Event) => {
+    if (!flowOn() || !input.table()) return;
+    if (!held()) {
+      const r = input.key('first', window.scrollY, now(), false);
+      if (r === 'free') return;
+      if (r === 'leave') focus?.leave();
+      wake();
+    }
+    e.preventDefault();
+  };
+  window.addEventListener(HOME_TAP_EVENT, onHomeTap);
   const idleLoad = setTimeout(() => void loadFocus(), 2500);
   const atEntry = () => {
     const st: unknown = window.history.state;
@@ -1180,6 +1194,7 @@ export function startSpin(host: SpinHost): SpinControl {
       bind(null);
       focus?.stop();
       window.removeEventListener('keydown', onKey);
+      window.removeEventListener(HOME_TAP_EVENT, onHomeTap);
       stopLoop();
       window.removeEventListener('wheel', onWheel);
       window.removeEventListener('pointerdown', onPointerDown);
