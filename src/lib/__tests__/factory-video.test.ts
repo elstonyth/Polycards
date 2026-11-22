@@ -18,6 +18,7 @@ describe('factoryVideo', () => {
       'kanto',
       'lucky',
       'delta',
+      'prismatic',
       'capsulebronze',
       'capsulesilver',
       'capsulegold',
