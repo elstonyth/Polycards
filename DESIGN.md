@@ -541,9 +541,11 @@ Spec: `docs/superpowers/specs/2026-10-24-lucky-draw-design.md`. Has its own
   each. Every disc wears its owner's own picture, the same `person.avatar` as every
   other surface, and the table holds still up to 1.5 s for them so it opens on faces.
   Twenty seconds on the clock, the winner told at 18.3.
-- **The Lucky Draw frame** ("Smoked", 2026-11-02) — the Rank Reward frame's exact
-  shape in dark smoked glass with one holo line on each edge, like a watch bezel. Art
-  from `scripts/compose-lucky-draw-frame.mjs`, cut to the prism frame's own alpha.
+- **The Lucky Draw frame** ("Black lacquer", 2026-11-24; it replaced "Smoked") — the
+  tier frames' glass rod in near-black, with one thin line of lilac light down its
+  middle. Rendered in Blender by `scripts/render-glass-tier-frames.py --frame
+lucky-draw` and cut by `scripts/compose-glass-tier-frames.mjs --only lucky-draw`.
+  On a big single card it carries the tier frames' travelling light.
   It marks a card as a Lucky Draw prize wherever it shows: the draw (`PrizeArt`) and
   the winner's vault, history, delivery and card page. `SlabImage` draws all of them,
   and `prizeFrameVariant` is the one rule, so the draw and the vault can't disagree.
@@ -594,7 +596,7 @@ drawStop/drawWin` in `src/lib/slot-sfx.ts`, header mute applies): only in the fu
 - **Don't** touch "web3 / NFT" purple degen gradients or glossy 3D coins (PRODUCT.md anti-reference) — Diamond Purple lives on tier cards only.
 - **Don't** build a "generic e-commerce" product grid; the hub is an experience shelf, not a catalog (PRODUCT.md anti-reference).
 - **Don't** use gradient text, side-stripe borders (`border-left` accent), or decorative grid/stripe backgrounds. Prohibited outright. Data marquees (see Drop Board) are the one sanctioned moving band — decorative word loops stay banned.
-- **Don't** invent new translucent surfaces. Liquid glass is sanctioned ONLY through the three `.glass-*` roles (panel / chrome / scrim — see components above, 2026-07-17): overlays, sheets, chrome, and scrims that float over content. In-flow cards and page sections stay matte charcoal; the slab tier frame stays pure CSS (refraction there was tried and rejected — reads as a zoom-in on card art). (PrizeReveal was the third example here until the daily box it belonged to was removed, 2026-08-25.)
+- **Don't** invent new translucent surfaces. Liquid glass is sanctioned ONLY through the three `.glass-*` roles (panel / chrome / scrim — see components above, 2026-07-17): overlays, sheets, chrome, and scrims that float over content. In-flow cards and page sections stay matte charcoal; the slab tier frame is the one exception, and only inside its own band: since 2026-11-23 it is pre-rendered coloured glass over a bed engraved with two fine lines that follow the frame (a Blender render, `scripts/render-glass-tier-frames.py`), with one slow travelling light on a big single slab (`.tier-frame-light`). Its window stays a clean hole: runtime refraction over the card was tried and rejected — reads as a zoom-in on card art. (PrizeReveal was the third example here until the daily box it belonged to was removed, 2026-08-25.)
 - **Don't** put body text below Silver (#a3a3a3) on dark surfaces; muted-gray-on-charcoal is the #1 legibility failure.
 - **Don't** round containers past 16px or add drop shadows to buttons/cards — matte surfaces, hairline edges, earned glow only.
 - **Don't** gate content behind animations; a reveal enhances an already-visible default.

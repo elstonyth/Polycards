@@ -1,9 +1,13 @@
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
   isGraded,
   slabAmbient,
   slabGlowRgb,
+  SlabImage,
   VARIANT_RGB,
+  type FrameVariant,
 } from '@/components/SlabImage';
 import { RARITY_RGB } from '@/lib/rarity';
 
@@ -29,6 +33,41 @@ describe('slabGlowRgb', () => {
     // two are silently merged.
     expect(slabGlowRgb(null)).toBe(RARITY_RGB.Common);
     expect(slabGlowRgb('Nonsense')).toBe(RARITY_RGB.Common);
+  });
+});
+
+describe('travelling light', () => {
+  const html = (frameVariant?: FrameVariant): string =>
+    renderToStaticMarkup(
+      createElement(SlabImage, {
+        card: {
+          name: 'x',
+          image: '/a.png',
+          slabImage: '/s.png',
+          rarity: 'Rare',
+        },
+        frameVariant,
+        animated: true,
+      }),
+    );
+
+  it('shows the lit render of the frame the slab is wearing', () => {
+    expect(html()).toContain('rare-lit.webp');
+    // A prize frame's own lit file, never the tier fallback (common-lit).
+    expect(html('lucky-draw')).toContain('lucky-draw-lit.webp');
+    expect(html('lucky-draw')).not.toContain('common');
+    // A raw card (no baked slab) takes the raw band's lit file the same way.
+    const raw = renderToStaticMarkup(
+      createElement(SlabImage, {
+        card: { name: 'x', image: '/a.png', slabImage: null, rarity: null },
+        frameVariant: 'lucky-draw',
+        animated: true,
+      }),
+    );
+    expect(raw).toContain('raw-frames%2Flucky-draw-lit.webp');
+    expect(raw).not.toContain('common');
+    // prism has no lit render to ask for.
+    expect(html('prism')).not.toContain('-lit.webp');
   });
 });
 

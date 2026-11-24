@@ -182,8 +182,53 @@
   }
 }
 
+/* The glass tier frame's travelling light (SlabImage `animated`: big single
+   slabs only, the card page and the reveal; operator 2026-11-23, with the
+   glass frame). The frame's LIT render (white-hot glass) lies over the still
+   one and shows through a comet-shaped wedge that turns once every 16s: a
+   short bright head with a long fading tail, so one light glides round the
+   glass. A wide soft wedge over a mildly brighter render read as "the same"
+   to the operator (2026-11-24). It is not the flat gradient sweep the operator
+   cut on 2026-07-17, which ran on every card. The angle is a registered
+   property so the wedge turns smoothly; a browser without @property shows the
+   light resting at the top. Reduced motion gets no light layer at all: a
+   fixed white-hot patch is not a still frame. */
+@property --frame-light {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes frameLightOrbit {
+  to {
+    --frame-light: 360deg;
+  }
+}
+@layer utilities {
+  .tier-frame-light {
+    display: none;
+    /* The light moves clockwise and its head ends at --frame-light: a 70deg
+       tail rising to full, a 6deg head, a 12deg leading edge. The 0deg
+       fallback is for a browser without @property: there a bare var() would
+       void the mask and light the whole frame. */
+    mask-image: conic-gradient(
+      from calc(var(--frame-light, 0deg) - 88deg) at 50% 50%,
+      transparent 0deg,
+      rgb(0 0 0 / 0.2) 36deg,
+      #000 70deg,
+      #000 76deg,
+      transparent 88deg
+    );
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .tier-frame-light {
+      display: block;
+      animation: frameLightOrbit 16s linear infinite;
+    }
+  }
+}
+
 /* /card/[handle] — the slab fades up in place. Opacity ONLY: the operator
-   removed the slab's idle float (2026-07-18) and the tier frame's traveling
+   removed the slab's idle float (2026-07-18) and the tier frame's old traveling
    light sweep (2026-07-17), so nothing here scales, drifts, or ramps the halo.
    The rarity glow renders at full strength from the first frame, exactly as it
    does today. */

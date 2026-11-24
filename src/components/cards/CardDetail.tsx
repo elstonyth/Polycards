@@ -90,8 +90,10 @@ export function CardDetail({
           one viewport (no overlay scrolling).
           `entrance` adds a plain opacity fade and NOTHING else: no scale, no
           drift, and the halo is at full strength on frame one. The float
-          (2026-07-18) and the frame's light sweep (2026-07-17) were both cut
-          by the operator — this is a one-shot arrival, not their return. */}
+          (2026-07-18) and the frame's old light sweep (2026-07-17) were both
+          cut by the operator — this is a one-shot arrival, not their return.
+          `animated` is the glass frame's own slow travelling light, asked for
+          with the glass (2026-11-23): big single slabs only. */}
       <div
         className={cn(
           'relative mx-auto w-[min(62vw,26dvh)] max-w-[320px] md:w-full md:max-w-[420px]',
@@ -111,6 +113,7 @@ export function CardDetail({
             frameVariant={frameVariant}
             sizes="(max-width: 768px) 62vw, 420px"
             priority
+            animated
             className="w-full"
           />
         </div>

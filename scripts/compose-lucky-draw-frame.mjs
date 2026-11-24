@@ -1,3 +1,8 @@
+// SUPERSEDED 2026-11-24: the Lucky Draw frame is now "Black lacquer", a Blender
+// render (scripts/render-glass-tier-frames.py --frame lucky-draw, cut by
+// scripts/compose-glass-tier-frames.mjs --only lucky-draw). Running this file
+// overwrites it with the old art; it is kept for the record of the old recipe.
+//
 // Builds the Lucky Draw frame ("Smoked", picked 2026-11-02) from its generated master:
 // the art comes from Codex, the shape from the prism frame's own alpha, so it fits a
 // slab exactly as every other frame does.

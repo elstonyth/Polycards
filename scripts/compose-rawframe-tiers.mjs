@@ -1,3 +1,7 @@
+// SUPERSEDED for the six tiers (2026-11-23): they are Blender glass now, built
+// by render-glass-tier-frames.py + compose-glass-tier-frames.mjs. Running this
+// overwrites them with the old flat bands; it is kept for the prism frame.
+//
 // Build the SHIPPED raw-card tier frames — the "glass border" candidate picked
 // from scripts/compose-rawframe-variants.mjs, hue-tinted per gacha rarity
 // (colors = RARITY_RGB in src/lib/rarity.ts) plus the prism cosmetic variant

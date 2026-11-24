@@ -2,7 +2,7 @@
 'use client';
 
 // The prize as a REAL graded slab (spec decisions #6-7): back = plastic case
-// seen from behind with a rainbow-holo Polycards monogram; front = the actual
+// seen from behind, holding the Polycards card back; front = the actual
 // slab photo (card.image). Flip = "The Whip": lift → fast rotateY with a glare
 // sweep → settle; top rarities get a pre-flip hover + shimmer after.
 // Entrance (spec #16): SHAPE-SYNCED MORPH — the card animates from the landed
@@ -35,7 +35,10 @@ export const CARD_BACK_SRC = '/images/app/polycards-slab-back.webp';
  *  component the front uses) rather than by hand, so both faces resolve to the
  *  identical card rect and the flip has no size jump. NOT exported: it goes out
  *  through next/image, so the machine's plain-path preload can't warm it (the
- *  `priority` prop on that SlabImage is what preloads it). */
+ *  `priority` prop on that SlabImage is what preloads it).
+ *  The art is "Raised mark" (operator, 2026-11-24): a matte black card with the
+ *  logo raised from it in white, a Blender render (scripts/render-card-back.py,
+ *  steps in scripts/compose-card-back.mjs). Face only: no corners, no border. */
 const RAW_CARD_BACK_SRC = '/images/app/polycards-card-back.webp';
 
 export function SlabCard({
@@ -182,8 +185,8 @@ export function SlabCard({
         }}
       >
         {/* BACK — GRADED: the Polycards slab seen from behind (acrylic case,
-            branded label + QR, matte black card with the flat white monogram
-            inside; asset baked to SLAB_ASPECT from the SnapGen render). Opaque
+            branded label + QR, and inside it the SAME card back a raw pull
+            shows — scripts/compose-card-back.mjs lays that render into the case; asset baked to SLAB_ASPECT from the SnapGen render). Opaque
             raster, so rarity color rides on the outer glow only.
             RAW: the bare card back, drawn by SlabImage so it lands on the exact
             rect the front's card art occupies — same size through the flip, and
@@ -301,6 +304,7 @@ export function SlabCard({
             card={card}
             sizes="(max-width: 640px) 64vw, 300px"
             className="absolute inset-0"
+            animated
           />
           {/* Glare sweep removed (decision #24): it parked at x:110% off the
               card's right edge and read as a weird persistent "glass" streak. */}

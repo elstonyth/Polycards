@@ -26,16 +26,21 @@ const CARD_ASPECT_RAW = 5 / 7;
 export const FRAME_BAND = 5;
 
 /**
- * Tier frame LOCKED IN 2026-07-17, made STATIC 2026-07-17 (operator change):
- * the band itself is pre-rendered art — public/images/slab-frames/<tier>.webp,
- * one per gacha rarity (SnapGen dark-glass master, geometry-guided via
- * scripts/compose-frame-variant.mjs --guide, hue-tinted per tier from ONE
- * master so lighting is identical across tiers). The webp already carries
- * the transparent window cut to the measured slab geometry, so no runtime
- * masking of the band is needed; CSS adds only a static breathing-halo glow
- * (box-shadow, no animation — the traveling light sweep was removed).
- * Deliberately NO refraction/displacement — an earlier liquid-glass rim
- * (src/lib/liquid-glass.ts) magnified the case edge and was rejected.
+ * Tier frame, GLASS since 2026-11-23 (operator: "a realistic glass frame",
+ * "elegant, premium, minimalistic", "some patterns to it"): the band is
+ * pre-rendered art — public/images/slab-frames/<tier>.webp, one per gacha
+ * rarity. Each is a Blender render of ONE coloured-glass rod over a metal bed
+ * engraved with two fine lines (scripts/render-glass-tier-frames.py, cut by
+ * scripts/compose-glass-tier-frames.mjs), lit by the same studio for every
+ * tier so only the colour differs. The webp already carries the transparent
+ * window cut to the measured slab geometry, so no runtime masking of the band
+ * is needed; CSS adds a static halo glow (box-shadow) and, on a big single
+ * slab only, one travelling light (`animated`, below).
+ * Deliberately NO refraction/displacement over the card — an earlier
+ * liquid-glass rim (src/lib/liquid-glass.ts) magnified the case edge and was
+ * rejected. The glass is in the band's own pixels; the window stays a hole.
+ * (prism and lucky-draw are prize frames, not tiers — see VARIANT_RGB below.
+ * lucky-draw is the same glass rod in black; prism is still its own flat art.)
  *
  * Uniform-thickness band: the outer box shares the slab's aspect, so a
  * frame at inset 0 would get 1/aspect≈1.67× thicker top/bottom bands. The
@@ -71,9 +76,10 @@ const FRAME_TIERS = new Set([
   'uncommon',
   'common',
 ]);
-function frameSrc(rarity: string): string {
+/** `lit` = the same glass with a light over all of it (see `animated`). */
+function frameSrc(rarity: string, lit = false): string {
   const key = rarity.toLowerCase();
-  return `/images/slab-frames/${FRAME_TIERS.has(key) ? key : 'common'}.webp`;
+  return `/images/slab-frames/${FRAME_TIERS.has(key) ? key : 'common'}${lit ? '-lit' : ''}.webp`;
 }
 
 /**
@@ -132,9 +138,9 @@ const RAW_BARE_INSET = rawInset(
   (RAW_BARE_W * RAW_BOX_W) / CARD_ASPECT_RAW,
   ART_CENTER_Y,
 );
-function rawFrameSrc(rarity: string): string {
+function rawFrameSrc(rarity: string, lit = false): string {
   const key = rarity.toLowerCase();
-  return `/images/raw-frames/${FRAME_TIERS.has(key) ? key : 'common'}.webp`;
+  return `/images/raw-frames/${FRAME_TIERS.has(key) ? key : 'common'}${lit ? '-lit' : ''}.webp`;
 }
 
 /**
@@ -143,15 +149,20 @@ function rawFrameSrc(rarity: string): string {
  * spectrally tinted (see the prism recipe); it marks Weekly Pulled Value
  * Challenge reward cards on /leaderboard. A variant overrides BOTH the band art
  * and the halo colour, since `rarityRgb` has no entry for it and would fall
- * back to Common gray. `lucky-draw` ("Smoked", 2026-11-02) is the same shape in dark
- * smoked glass with holo lines; it marks a Lucky Draw prize, in the draw and in the
- * winner's vault (prizeFrameVariant in src/lib/prize-frame.ts is the one rule).
+ * back to Common gray. `lucky-draw` ("Black lacquer", operator 2026-11-24) is the
+ * tier frames' own glass rod in near-black, with one thin line of lilac light down
+ * its middle (scripts/render-glass-tier-frames.py --frame lucky-draw); it marks a
+ * Lucky Draw prize, in the draw and in the winner's vault (prizeFrameVariant in
+ * src/lib/prize-frame.ts is the one rule).
  */
 export type { FrameVariant };
 export const VARIANT_RGB: Record<FrameVariant, string> = {
   prism: '255, 255, 255', // white — the gradient's own endpoints
-  'lucky-draw': '216, 200, 255', // the holo foil's violet: the band's own light
+  'lucky-draw': '216, 200, 255', // lilac: the band's one line of light
 };
+/** Prize frames with a lit render for the travelling light (`animated`).
+ *  prism is flat art with none, so it must never ask for a `-lit` file. */
+const LIT_VARIANTS: ReadonlySet<FrameVariant> = new Set(['lucky-draw']);
 
 /**
  * THE colour a slab is wearing — the one place that knows a variant overrides
@@ -298,6 +309,7 @@ export function SlabImage({
   frameVariant,
   glowScale = 1,
   plain = false,
+  animated = false,
 }: {
   /** The card being shown — its art, its name, and its tier. */
   card: Pick<CardView, 'name' | 'image' | 'slabImage' | 'rarity'>;
@@ -315,8 +327,33 @@ export function SlabImage({
   /** Draw the art with a plain <img>: a prize's picture can be free text, and
    *  next/image throws during render on a host outside remotePatterns. */
   plain?: boolean;
+  /** One light travels slowly round the glass band (`.tier-frame-light`): the
+   *  frame's LIT render shows through a turning wedge. Only for a surface
+   *  showing ONE big slab — the card page, the reveal (operator, 2026-11-23).
+   *  The moving layer repaints as it turns, which a grid of slabs would pay for
+   *  on a phone, and at tile size the glint is under a pixel wide. Tier frames,
+   *  and the prize frames that have a lit render (LIT_VARIANTS). */
+  animated?: boolean;
 }) {
   const { image: src, slabImage: slabSrc, rarity } = card;
+  const light = (litSrc: string) => (
+    <Image
+      src={litSrc}
+      alt=""
+      fill
+      sizes={sizes}
+      className="tier-frame-light object-fill"
+    />
+  );
+  // The band art: a prize variant's own file, else the tier's. A variant never
+  // goes through frameSrc/rawFrameSrc, which would turn its name into `common`.
+  const band = (kind: 'slab' | 'raw', isLit = false): string =>
+    frameVariant
+      ? `/images/${kind}-frames/${frameVariant}${isLit ? '-lit' : ''}.webp`
+      : (kind === 'slab' ? frameSrc : rawFrameSrc)(rarity ?? '', isLit);
+  const lit =
+    animated &&
+    (frameVariant ? LIT_VARIANTS.has(frameVariant) : Boolean(rarity));
   const label = alt ?? card.name;
   const art = (url: string, fit: 'object-contain' | 'object-cover') =>
     plain ? (
@@ -340,11 +377,6 @@ export function SlabImage({
     );
   // A variant frames the slab on its own — no `rarity` needed at the call site.
   const framed = frameVariant ?? rarity;
-  const bandSrc = frameVariant
-    ? `/images/slab-frames/${frameVariant}.webp`
-    : rarity
-      ? frameSrc(rarity)
-      : null;
   const glowRgb = slabGlowRgb(rarity, frameVariant);
   return (
     <span
@@ -357,7 +389,7 @@ export function SlabImage({
       style={{ aspectRatio: String(SLAB_ASPECT) }}
     >
       {slabSrc ? (
-        framed && bandSrc ? (
+        framed ? (
           <>
             <span
               aria-hidden
@@ -370,13 +402,14 @@ export function SlabImage({
               style={{ inset: FRAME_INSET }}
             >
               <Image
-                src={bandSrc}
+                src={band('slab')}
                 alt=""
                 fill
                 sizes={sizes}
                 priority={priority}
                 className="object-fill"
               />
+              {lit && light(band('slab', true))}
             </span>
             <span className="absolute" style={{ inset: `${FRAME_BAND}%` }}>
               {art(slabSrc, 'object-contain')}
@@ -400,17 +433,14 @@ export function SlabImage({
             style={{ inset: RAW_BAND_INSET }}
           >
             <Image
-              src={
-                frameVariant
-                  ? `/images/raw-frames/${frameVariant}.webp`
-                  : rawFrameSrc(rarity ?? '')
-              }
+              src={band('raw')}
               alt=""
               fill
               sizes={sizes}
               priority={priority}
               className="object-fill"
             />
+            {lit && light(band('raw', true))}
           </span>
           <span
             className="absolute overflow-hidden"
