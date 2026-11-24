@@ -64,6 +64,7 @@ const event = (over: Partial<AdminLuckyDrawEvent> = {}): AdminLuckyDrawEvent => 
   status: 'published',
   draw_mode: 'one_winner',
   seed_hash: 'a'.repeat(64),
+  forced_winner_id: null,
   total_tickets: 0,
   entrant_count: 0,
   prizes: [prize(), prize({ id: 'ldprz_2' })],

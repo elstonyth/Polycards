@@ -6864,6 +6864,23 @@ class PacksModuleService extends MedusaService({
     );
   }
 
+  @InjectTransactionManager()
+  async forceLuckyDrawWinner(
+    input: {
+      id: string;
+      customerId: string | null;
+      adminId: string;
+      reason: string;
+    },
+    @MedusaContext() sharedContext: Context = {},
+  ): Promise<{ forced_winner_id: string | null }> {
+    return luckyDraw.forceLuckyDrawWinner(
+      this.luckyDrawPort(),
+      input,
+      sharedContext,
+    );
+  }
+
   @InjectManager()
   async drawDueLuckyDrawPrizes(
     deps: {
@@ -7142,6 +7159,7 @@ class PacksModuleService extends MedusaService({
       disabledCustomerIds: this.disabledCustomerIds.bind(this),
       drawLuckyDrawPrize: this.drawLuckyDrawPrize.bind(this),
       drawLuckyDrawEvent: this.drawLuckyDrawEvent.bind(this),
+      forceLuckyDrawWinner: this.forceLuckyDrawWinner.bind(this),
     };
   }
 

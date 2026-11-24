@@ -56,6 +56,7 @@ const event = (over: Partial<AdminLuckyDrawEvent> = {}): AdminLuckyDrawEvent => 
   status: 'draft',
   draw_mode: 'one_winner',
   seed_hash: null,
+  forced_winner_id: null,
   total_tickets: 0,
   entrant_count: 0,
   prizes: [],

@@ -80,6 +80,7 @@ export type LuckyDrawPort = Pick<
   // transaction through the service's decorator.
   | 'drawLuckyDrawPrize'
   | 'drawLuckyDrawEvent'
+  | 'forceLuckyDrawWinner'
 > & {
   /** The admin audit row, on the caller's transaction. */
   audit(row: AdminAuditRow, sharedContext: Context): Promise<void>;
@@ -138,6 +139,9 @@ export type AdminLuckyDrawEvent = {
   /** The event's own commitment: null until published, and on a per_prize
    *  event, whose hashes are per prize. */
   seed_hash: string | null;
+  /** The admin-picked winner the draw job pays whatever the seed says
+   *  (guaranteed win, 2026-11-24). Null = the seeded draw. */
+  forced_winner_id: string | null;
   /** Entries ever made on the event itself (0 on a per_prize event). */
   total_tickets: number;
   entrant_count: number;
@@ -422,10 +426,12 @@ function checkLuckyDrawDrawTime(
   now: Date,
 ): void {
   const at = drawAt.getTime();
-  if (!(
-    at > new Date(window.starts_at).getTime() &&
-    at <= new Date(window.ends_at).getTime()
-  )) {
+  if (
+    !(
+      at > new Date(window.starts_at).getTime() &&
+      at <= new Date(window.ends_at).getTime()
+    )
+  ) {
     luckyDrawInvalid(
       'The draw time must fall after the event starts and by the time it ends.',
     );
@@ -1542,6 +1548,100 @@ export async function withdrawLuckyDrawEvent(
   return { refunded: entrants.length };
 }
 
+// Admin: pick the winner of a one_winner event (guaranteed win, 2026-11-24).
+// The draw job then pays that customer whatever the seed says. Takes the event
+// lock then the gate lock — the draw holds the gate lock exclusive, so a pick
+// cannot interleave with it, and the result is re-checked under them: a pick
+// either lands before the draw or is refused after it. The customer must be a
+// live entrant, so the drawn result reads like any other (a winner with
+// tickets). `customerId` null clears the pick.
+export async function forceLuckyDrawWinner(
+  port: LuckyDrawPort,
+  input: {
+    id: string;
+    customerId: string | null;
+    adminId: string;
+    reason: string;
+  },
+  sharedContext: Context = {},
+): Promise<{ forced_winner_id: string | null }> {
+  const em = sharedContext.transactionManager as unknown as LedgerSqlManager;
+  await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+    `luckydrawevent:${input.id}`,
+  ]);
+  await em.execute('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', [
+    `luckydraw:${input.id}`,
+  ]);
+  const [event] = await port.listLuckyDrawEvents(
+    { id: input.id },
+    { take: 1 },
+    sharedContext,
+  );
+  if (!event) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_FOUND,
+      `Lucky Draw event ${input.id} not found.`,
+    );
+  }
+  if (event.draw_mode !== 'one_winner' || event.status !== 'published') {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'Only a published one-winner event can have a forced winner.',
+    );
+  }
+  const [done] = await port.listLuckyDrawEventResults(
+    { event_id: event.id },
+    { select: ['id'], take: 1 },
+    sharedContext,
+  );
+  if (done) {
+    throw new MedusaError(
+      MedusaError.Types.NOT_ALLOWED,
+      'That event has already been drawn and cannot have its winner picked.',
+    );
+  }
+  if (input.customerId != null) {
+    const entered = aggregateEntries(
+      await pageAll((opts) =>
+        port.listLuckyDrawEntries({ event_id: event.id }, opts, sharedContext),
+      ),
+    );
+    const shut = await port.disabledCustomerIds(
+      entered.map((e) => e.customer_id),
+      sharedContext,
+    );
+    if (
+      !entered.some((e) => e.customer_id === input.customerId) ||
+      shut.has(input.customerId)
+    ) {
+      throw new MedusaError(
+        MedusaError.Types.NOT_ALLOWED,
+        'The forced winner must be a live entrant of the event.',
+      );
+    }
+  }
+  // Raw SQL, not the ORM: an ORM update would bump updated_at, which the
+  // running-gates read treats as the gate going live again.
+  await em.execute(
+    'UPDATE lucky_draw_event SET forced_winner_id = ?, updated_at = updated_at ' +
+      'WHERE id = ?',
+    [input.customerId, event.id],
+  );
+  await port.audit(
+    {
+      admin_id: input.adminId,
+      entity_type: 'lucky_draw_event',
+      entity_id: event.id,
+      action: 'edit',
+      before: { forced_winner_id: event.forced_winner_id ?? null },
+      after: { forced_winner_id: input.customerId },
+      reason: input.reason,
+    },
+    sharedContext,
+  );
+  return { forced_winner_id: input.customerId };
+}
+
 // The once-a-minute draw job's loop. A plain read context and NO
 // transaction here: each prize draws in its OWN transaction, so one bad
 // prize rolls back alone and the rest still draw. The due list is raw SQL
@@ -1962,7 +2062,34 @@ export async function drawLuckyDrawEvent(
   );
   const entrants = all.filter((e) => !disabled.has(e.customer_id));
   const excluded = all.filter((e) => disabled.has(e.customer_id));
-  const pick = drawWinner(entrants, seed, event.id);
+  // A forced winner (admin pick, guaranteed win 2026-11-24) takes the pot
+  // whatever the seed says: their first ticket becomes the winning index, so
+  // the public entry walk still lands on them and the arena plays out the
+  // same. Absent from the live entrants (disabled since the pick), the
+  // seeded draw decides again.
+  const forced = event.forced_winner_id
+    ? entrants.find((e) => e.customer_id === event.forced_winner_id)
+    : undefined;
+  // eslint-disable-next-line no-console
+  if (event.forced_winner_id && !forced) {
+    console.warn(
+      '[drawLuckyDrawEvent] forced winner not found in live entrants — seeded draw will decide',
+      {
+        event_id: event.id,
+        forced_winner_id: event.forced_winner_id,
+        entrant_count: entrants.length,
+      },
+    );
+  }
+  const pick = forced
+    ? {
+        winner: { customer_id: forced.customer_id, tickets: forced.tickets },
+        ticketIndex: entrants
+          .slice(0, entrants.indexOf(forced))
+          .reduce((n, e) => n + e.tickets, 0),
+        totalTickets: entrants.reduce((n, e) => n + e.tickets, 0),
+      }
+    : drawWinner(entrants, seed, event.id);
   const winnerId = pick?.winner.customer_id ?? null;
   // A card gone since publish: refuse the whole draw, never pay part of the pot.
   // Delete-card blocks this, so only a race or a script gets here. With nobody
@@ -2054,7 +2181,8 @@ async function reserveLuckyDrawStock(
   port: LuckyDrawPort,
   outcome: LuckyDrawOutcome,
   decrementStock:
-    ((handle: string, qty: number) => Promise<boolean>) | undefined,
+    | ((handle: string, qty: number) => Promise<boolean>)
+    | undefined,
 ): Promise<void> {
   const { pullId, cardHandle } = outcome;
   if (!decrementStock || !pullId || !cardHandle) return;
@@ -2193,6 +2321,7 @@ export async function adminLuckyDrawOverview(
     status: e.status,
     draw_mode: e.draw_mode,
     seed_hash: e.seed_hash ?? null,
+    forced_winner_id: e.forced_winner_id ?? null,
     total_tickets: sumByEvent.get(e.id)?.total_tickets ?? 0,
     entrant_count: sumByEvent.get(e.id)?.entrant_count ?? 0,
     prizes: prizes.filter((p) => p.event_id === e.id).map(view),

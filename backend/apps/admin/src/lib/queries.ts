@@ -168,6 +168,7 @@ import {
   saveLuckyDrawEvent,
   publishLuckyDrawEvent,
   withdrawLuckyDrawEvent,
+  forceLuckyDrawWinner,
   saveLuckyDrawPrize,
   cancelLuckyDrawPrize,
   listLuckyDrawEntries,
@@ -2351,6 +2352,12 @@ export const usePublishLuckyDrawEvent = () =>
 export const useWithdrawLuckyDrawEvent = () =>
   useLuckyDrawWrite((v: { id: string; reason: string }) =>
     withdrawLuckyDrawEvent(v.id, v.reason),
+  );
+
+export const useForceLuckyDrawWinner = () =>
+  useLuckyDrawWrite(
+    (v: { id: string; customerId: string | null; reason: string }) =>
+      forceLuckyDrawWinner(v.id, v.customerId, v.reason),
   );
 
 export const useSaveLuckyDrawPrize = () =>

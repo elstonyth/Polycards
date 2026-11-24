@@ -42,7 +42,8 @@ const LuckyDrawArtFrameSchema = z
   .catch(null);
 export type LuckyDrawArtFrame = z.infer<typeof LuckyDrawArtFrameSchema>;
 
-/** A drawn prize. `seed` exists only here, after the draw. */
+/** A drawn prize. `seed` exists only here, after the draw (optional: admin can
+ *  hide it for a forced winner, 2026-11-24). */
 const LuckyDrawResultSchema = z.looseObject({
   prize_id: z.string(),
   title: z.string(),
@@ -54,8 +55,8 @@ const LuckyDrawResultSchema = z.looseObject({
   winner_tickets: finite,
   total_tickets: finite,
   entrant_count: finite,
-  seed: z.string(),
-  seed_hash: z.string(),
+  seed: z.string().optional().catch(''),
+  seed_hash: z.string().optional().catch(''),
   // One-winner rows of the results feed. Caught: a row never drops over them.
   event_id: z.string().optional().catch(undefined),
   draw_mode: z.string().optional().catch(undefined),
@@ -66,14 +67,15 @@ const LuckyDrawResultSchema = z.looseObject({
 export type LuckyDrawResult = z.infer<typeof LuckyDrawResultSchema>;
 
 /** A drawn one-winner event: the proof, once for the whole pot. `seed` exists
- *  only here, after the draw. */
+ *  only here, after the draw (optional: admin can hide it for a forced winner,
+ *  2026-11-24). */
 export const LuckyDrawEventResultSchema = z.looseObject({
   winner: LuckyDrawPersonSchema.nullable(),
   winner_tickets: finite,
   total_tickets: finite,
   entrant_count: finite,
-  seed: z.string(),
-  seed_hash: z.string(),
+  seed: z.string().optional().catch(''),
+  seed_hash: z.string().optional().catch(''),
   drawn_at: z.string(),
 });
 export type LuckyDrawEventResult = z.infer<typeof LuckyDrawEventResultSchema>;
