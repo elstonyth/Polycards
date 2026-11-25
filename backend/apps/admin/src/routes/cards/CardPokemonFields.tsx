@@ -230,8 +230,10 @@ const CardPokemonFields = ({
       derived === 'pokemon' ? autoResolveQuery(autoResolveName) : null;
     if (derived === 'pokemon' && !pokemonQ) return;
     let stale = false;
+    let answered = false;
     (pokemonQ ? fetchSeededCandidates(pokemonQ) : fetchOnePieceRoster())
       .then((rows) => {
+        answered = true;
         if (stale) return;
         const entry = pokemonQ
           ? matchSeededEntry(autoResolveName, rows)
@@ -245,6 +247,9 @@ const CardPokemonFields = ({
       .catch(() => {}); // best-effort — the operator can still link by hand
     return () => {
       stale = true;
+      // An attempt cut off before its answer (StrictMode's mount/unmount/mount
+      // in dev) never ran, so the next run may try the same key again.
+      if (!answered && autoTried.current === tryKey) autoTried.current = null;
     };
   }, [autoResolveName, linked, derived, manualDeck]);
 
