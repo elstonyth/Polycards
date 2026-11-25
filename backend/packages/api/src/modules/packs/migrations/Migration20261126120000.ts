@@ -11,9 +11,15 @@ export class Migration20261126120000 extends Migration {
     this.addSql(
       `create table if not exists "card_art" ("code" text not null, "image_url" text not null, "updated_at" timestamptz not null default now(), constraint "card_art_pkey" primary key ("code"));`,
     );
+    // card_list — every printing of the card database the art is checked
+    // against (Card art page, "Missing"); replaced whole by its refresh.
+    this.addSql(
+      `create table if not exists "card_list" ("code" text not null, "name" text not null, "fetched_at" timestamptz not null default now(), constraint "card_list_pkey" primary key ("code"));`,
+    );
   }
 
   override async down(): Promise<void> {
+    this.addSql(`drop table if exists "card_list";`);
     this.addSql(`drop table if exists "card_art";`);
   }
 }

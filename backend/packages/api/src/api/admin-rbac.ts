@@ -185,6 +185,8 @@ export const ADMIN_ROUTES: readonly AdminRoute[] = [
     method: 'POST',
     limits: ['admin-action', 'assistant-speak'],
   },
+  // Card art: re-reading the card list fetches ~150 pages from Limitless.
+  { matcher: '/admin/card-art/card-list', method: 'POST', limits: ACTION },
   // Saving a note or task the person tapped Save on (confirm.ts).
   { matcher: '/admin/assistant/confirm', method: 'POST', limits: ACTION },
   {

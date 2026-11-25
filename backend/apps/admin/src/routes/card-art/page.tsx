@@ -17,6 +17,8 @@ import {
 } from '@tanstack/react-query';
 import {
   deleteCardArt,
+  getCardArtMissing,
+  refreshCardList,
   listCardArt,
   saveCardArt,
   uploadImage,
@@ -50,6 +52,85 @@ type Run = {
 // Card art — the clean, stamp-free image of every card printing. Files are
 // named by card code; a new set is one folder upload. The PriceCharting
 // import attaches the matching image (lib/card-art.ts pickCardArt).
+// "Missing": the stored card list (every One Piece printing, re-read from
+// Limitless by the refresh button) minus the uploaded art. Keyed under
+// 'card-art' so uploads and deletes refresh it too.
+const MissingArt = () => {
+  const qc = useQueryClient();
+  const [refreshing, setRefreshing] = useState(false);
+  const { data, isError } = useQuery({
+    queryKey: ['card-art', 'missing'],
+    queryFn: getCardArtMissing,
+  });
+  const refresh = async () => {
+    setRefreshing(true);
+    try {
+      const r = await refreshCardList();
+      toast.success(
+        `Card list refreshed: ${r.count} printings` +
+          (r.previous ? ` (was ${r.previous}).` : '.'),
+      );
+      qc.invalidateQueries({ queryKey: ['card-art'] });
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+  return (
+    <section
+      aria-labelledby="card-art-missing"
+      className="border-ui-border-base flex flex-col gap-y-2 rounded-lg border p-4"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-col">
+          <Text size="small" weight="plus" id="card-art-missing">
+            Missing
+          </Text>
+          <Text size="small" className="text-ui-fg-subtle">
+            {isError
+              ? 'Could not load the missing list.'
+              : !data
+                ? 'Loading…'
+                : data.total === 0
+                  ? 'No card list yet. Refresh it to see which cards have no clean art.'
+                  : `${data.missing} of ${data.total} printings have no clean art` +
+                    (data.fetched_at
+                      ? ` · card list from ${new Date(data.fetched_at).toLocaleDateString()}`
+                      : '')}
+          </Text>
+        </div>
+        <Button
+          size="small"
+          variant="secondary"
+          isLoading={refreshing}
+          onClick={() => void refresh()}
+        >
+          Refresh card list
+        </Button>
+      </div>
+      {data && data.sets.length > 0 && (
+        <div className="flex flex-col gap-1">
+          {data.sets.map((s) => (
+            <details key={s.set} className="text-sm">
+              <summary className="cursor-pointer">
+                {s.set} · {s.missing} of {s.total} missing
+              </summary>
+              <ul className="text-ui-fg-subtle mt-1 grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-x-4 text-xs">
+                {s.cards.map((c) => (
+                  <li key={c.code}>
+                    {c.code} · {c.name}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+};
+
 const CardArtPage = () => {
   const [q, setQ] = useState('');
   const [page, setPage] = useState(0);
@@ -231,6 +312,8 @@ const CardArtPage = () => {
           )}
         </div>
       )}
+
+      <MissingArt />
 
       {data && data.sets.length > 0 && (
         <div className="flex flex-wrap gap-1" aria-label="Sets">

@@ -688,13 +688,7 @@ export async function exportPnlXlsx(
 // ── Stats (sign-ups + top-ups) ───────────────────────────────────────────────
 
 export type StatsRange =
-  | 'today'
-  | 'yesterday'
-  | '7d'
-  | '30d'
-  | 'month'
-  | 'last_month'
-  | 'custom';
+  'today' | 'yesterday' | '7d' | '30d' | 'month' | 'last_month' | 'custom';
 
 export interface StatsFigures {
   signups: number;
@@ -905,8 +899,7 @@ export const gatewayPreflightRefusal = (
   err: unknown,
 ): GatewayPreflightRefusal | null => {
   const data = (err as { data?: unknown } | null)?.data as
-    | Partial<GatewayPreflightRefusal>
-    | undefined;
+    Partial<GatewayPreflightRefusal> | undefined;
   return data?.type === 'gateway_preflight_failed' &&
     Array.isArray(data.problems)
     ? (data as GatewayPreflightRefusal)
@@ -1205,11 +1198,7 @@ export interface DeliveryTrackingSnapshot {
   tracking_number: string;
   carrier: 'ninjavan' | 'poslaju' | 'dhl_ecommerce' | null;
   state:
-    | 'delivered'
-    | 'in_transit'
-    | 'problem'
-    | 'not_found'
-    | 'unknown_carrier';
+    'delivered' | 'in_transit' | 'problem' | 'not_found' | 'unknown_carrier';
   event: string | null;
   event_at: string | null;
   delivered_at: string | null;
@@ -1608,7 +1597,11 @@ export interface PixelPokemonPage {
 
 // Clean card art (owner 2026-11-26): one stamp-free image per card printing,
 // keyed by code (OP05-119, OP05-119_p3). See api/admin/card-art.
-export type CardArtEntry = { code: string; image_url: string; updated_at?: string };
+export type CardArtEntry = {
+  code: string;
+  image_url: string;
+  updated_at?: string;
+};
 export interface CardArtPage {
   card_art: CardArtEntry[];
   total: number;
@@ -1650,6 +1643,35 @@ export async function deleteCardArt(code: string): Promise<void> {
     { method: 'DELETE', credentials: 'include' },
   );
   if (!res.ok) throw await httpError(res);
+}
+
+export interface CardArtMissing {
+  /** Printings in the stored card list; 0 = never refreshed. */
+  total: number;
+  missing: number;
+  fetched_at: string | null;
+  sets: {
+    set: string;
+    total: number;
+    missing: number;
+    cards: { code: string; name: string }[];
+  }[];
+}
+
+/** The card list printings that have no clean art yet, by set. */
+export function getCardArtMissing(): Promise<CardArtMissing> {
+  return getJson<CardArtMissing>('/admin/card-art/missing');
+}
+
+/** Re-reads the One Piece card list from Limitless (~15 s). */
+export function refreshCardList(): Promise<{
+  count: number;
+  previous: number;
+}> {
+  return postJson<{ count: number; previous: number }>(
+    '/admin/card-art/card-list',
+    {},
+  );
 }
 
 export interface PixelPokemonQuery {
@@ -1700,11 +1722,7 @@ export const createPixelPokemon = (body: CreatePixelPokemonBody) =>
 // pending two sweeps later with a gateway id, i.e. possibly a payment that
 // landed at the gateway without ever being credited here.
 export type GatewayDepositView =
-  | 'pending'
-  | 'settled'
-  | 'failed'
-  | 'expired'
-  | 'all';
+  'pending' | 'settled' | 'failed' | 'expired' | 'all';
 
 export interface GatewayDeposit {
   id: string;
@@ -1780,11 +1798,7 @@ export function getGatewayDeposits(
 // always sends `status` explicitly (see getGatewayWithdrawals below), so the
 // page's default view is what actually decides what an operator sees first.
 export type GatewayWithdrawalView =
-  | 'held'
-  | 'pending'
-  | 'settled'
-  | 'failed'
-  | 'all';
+  'held' | 'pending' | 'settled' | 'failed' | 'all';
 
 export interface GatewayWithdrawal {
   id: string;
@@ -2492,15 +2506,7 @@ export const setCustomerGroup = (customerId: string, groupId: string | null) =>
 
 /** The ledger event types (POLYCARD-BACK §5.1). */
 export type LedgerType =
-  | 'TP'
-  | 'SP'
-  | 'SE'
-  | 'OD'
-  | 'AD'
-  | 'WP'
-  | 'WD'
-  | 'RF'
-  | 'CF';
+  'TP' | 'SP' | 'SE' | 'OD' | 'AD' | 'WP' | 'WD' | 'RF' | 'CF';
 
 /** One row of GET /admin/ledger. Deltas are MYR and NULLABLE — an event that
  *  touches only one side leaves the other null (not 0). `payload` is the raw
