@@ -582,11 +582,16 @@ export function createArenaRenderer(
           shownR[id] = real;
           velR[id] = 0;
         } else {
-          // Underdamped: overshoots a little, then settles.
+          // Underdamped: overshoots a little, then settles. A duel chip can
+          // hand a disc half again its radius in one step; soften the spring
+          // with the size of the jump so that swells over a beat, not a pop.
+          const jump = real / (shownR[id] as number);
+          const big = jump > 1.3;
+          const k2 = big ? 160 / (jump * jump * jump) : 160;
+          const c = big ? 15 / jump : 15;
           const v =
             (velR[id] as number) +
-            (160 * (real - (shownR[id] as number)) -
-              15 * (velR[id] as number)) *
+            (k2 * (real - (shownR[id] as number)) - c * (velR[id] as number)) *
               springDt;
           velR[id] = v;
           shownR[id] = (shownR[id] as number) + v * springDt;
