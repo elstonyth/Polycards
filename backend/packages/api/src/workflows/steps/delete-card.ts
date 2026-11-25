@@ -50,6 +50,11 @@ type CompensateData =
         pc_synced_at: Date | null;
         pc_pending_price: Record<string, unknown> | null;
         pc_sync_error: string | null;
+        label_year: string | null;
+        label_note: string | null;
+        label_set: string | null;
+        label_name: string | null;
+        label_number: string | null;
       };
       odds: OddsSnapshot[];
     }
@@ -141,6 +146,12 @@ export const deleteCardInvoke = async (
       pc_synced_at: card.pc_synced_at ?? null,
       pc_pending_price: card.pc_pending_price ?? null,
       pc_sync_error: card.pc_sync_error ?? null,
+      // The slab label's typed wording: a rolled-back delete must bring it back.
+      label_year: card.label_year ?? null,
+      label_note: card.label_note ?? null,
+      label_set: card.label_set ?? null,
+      label_name: card.label_name ?? null,
+      label_number: card.label_number ?? null,
     },
     odds: oddsSnapshot,
   };

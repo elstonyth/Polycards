@@ -33,6 +33,12 @@ describe('pokemonLabel', () => {
     ).toBe('SUPER RARE');
   });
 
+  it('a set total after the slash is dropped, not read as a promo line', () => {
+    expect(
+      pokemonLabel({ set: 'Pokemon Japanese Black Bolt', name: 'Zekrom Ex #169/086' }),
+    ).toMatchObject({ number: '#169', variety: 'SPECIAL ART RARE', name: 'ZEKROM ex' });
+  });
+
   it('Master Ball bracket is the variety', () => {
     // cert 142352792
     expect(

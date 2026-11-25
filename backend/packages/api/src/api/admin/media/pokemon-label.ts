@@ -46,8 +46,10 @@ export function pokemonSetKey(pcSet: string, suffix?: string): string {
   return norm(pcSet) + (suffix ? `|${suffix.toUpperCase()}` : '');
 }
 
-// "Espeon [Master Ball] #62", "Poncho-Wearing Eevee #140/SM-P"
-const NAME_RE = /^(.*?)\s*#\s*([A-Za-z0-9-]+?)(?:\/([A-Za-z]+(?:-[A-Za-z]+)?))?\s*$/;
+// "Espeon [Master Ball] #62", "Poncho-Wearing Eevee #140/SM-P", "Charizard
+// #4/102" (a set total after the slash is dropped; letters name a promo line)
+const NAME_RE =
+  /^(.*?)\s*#\s*([A-Za-z0-9-]+?)(?:\/(?:\d+|([A-Za-z]+(?:-[A-Za-z]+)?)))?\s*$/;
 
 function psaName(title: string, set: PokemonSet): string {
   const bare = title.replace(/\[[^\]]*\]/g, ' ').trim();
