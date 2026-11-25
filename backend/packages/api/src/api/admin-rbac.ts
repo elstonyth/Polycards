@@ -386,6 +386,14 @@ export const ADMIN_ROUTES: readonly AdminRoute[] = [
     method: 'POST',
     limits: ACTION,
   },
+  // Pick the forced winner of a published one_winner event
+  // (POST /admin/lucky-draw/events/:id/forced-winner) — re-aims who the
+  // draw pays, so it shares the money-mutation budget.
+  {
+    matcher: '/admin/lucky-draw/events/*/forced-winner',
+    method: 'POST',
+    limits: ACTION,
+  },
   // Withdraw a one_winner event and refund every entrant
   // (POST /admin/lucky-draw/events/:id/withdraw).
   {

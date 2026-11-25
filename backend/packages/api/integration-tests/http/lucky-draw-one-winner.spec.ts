@@ -8,7 +8,6 @@ import type PacksModuleService from '../../src/modules/packs/service';
 import {
   LUCKY_DRAW_PULL_PACK_ID,
   deriveDrawSeed,
-  drawSeedHash,
   drawWinner,
 } from '../../src/modules/packs/lucky-draw';
 import { clearFxDisplayCache } from '../../src/modules/packs/pricing';
@@ -210,7 +209,8 @@ medusaIntegrationTestRunner({
           id: event.id,
           name: 'November Pot',
           draw_mode: 'one_winner',
-          seed_hash: event.seed_hash,
+          // The live commitment is admin-only too (2026-11-24).
+          seed_hash: null,
           total_tickets: 50,
           entrant_count: 2,
           my_tickets: 35,
@@ -307,13 +307,13 @@ medusaIntegrationTestRunner({
           winner_tickets: pick.winner.tickets,
           total_tickets: 51,
           entrant_count: 2,
-          seed,
-          seed_hash: event.seed_hash,
+          // The seed stays server-side (2026-11-24): the arena replays the
+          // recorded run, and a blank keeps a forced pick indistinguishable.
+          seed: '',
+          seed_hash: '',
           drawn_at: expect.any(String),
         });
-        expect(drawSeedHash(detail.data.result.seed)).toBe(
-          detail.data.result.seed_hash,
-        );
+        expect(JSON.stringify(detail.data)).not.toContain(seed);
         expect(detail.data.ticket_index).toBe(pick.ticketIndex);
         // Each viewer's own row, for the arena; ids stay on the server.
         expect(detail.data.my_entry_index).toBe(
@@ -360,7 +360,7 @@ medusaIntegrationTestRunner({
         const drawn = await get('/store/lucky-draw', authed(ada.token));
         expect(drawn.data.event.result).toMatchObject({
           winner: expect.objectContaining({ who: winnerName }),
-          seed,
+          seed: '',
           total_tickets: 51,
         });
         expect(drawn.data.event.total_tickets).toBe(51);
@@ -392,8 +392,8 @@ medusaIntegrationTestRunner({
           winner_tickets: pick.winner.tickets,
           total_tickets: 51,
           entrant_count: 2,
-          seed,
-          seed_hash: event.seed_hash,
+          seed: '',
+          seed_hash: '',
           event_id: event.id,
           draw_mode: 'one_winner',
           event_name: 'November Pot',
@@ -566,8 +566,18 @@ medusaIntegrationTestRunner({
         expect(entrants.status).toBe(200);
         expect(entrants.data).toEqual({
           entries: [
-            { customer_id: bo.id, tickets: 40 },
-            { customer_id: ada.id, tickets: 35 },
+            {
+              customer_id: bo.id,
+              tickets: 40,
+              name: 'Bo',
+              email: 'ldow-bo@test.dev',
+            },
+            {
+              customer_id: ada.id,
+              tickets: 35,
+              name: 'Ada',
+              email: 'ldow-ada@test.dev',
+            },
           ],
         });
         const missing = await unwrapResponse(
@@ -609,7 +619,7 @@ medusaIntegrationTestRunner({
         ).toEqual({ drawn: 0, failed: 0 });
       });
 
-      it('no entries: the seed still shows, nothing is paid', async () => {
+      it('no entries: nothing is paid, the seed stays hidden', async () => {
         const event = await publishPot();
         await packs.drawDueLuckyDrawEvents({ now: afterEnd(event) });
         const detail = await get(
@@ -623,10 +633,7 @@ medusaIntegrationTestRunner({
             winner_tickets: 0,
             total_tickets: 0,
             entrant_count: 0,
-            seed: deriveDrawSeed(
-              process.env.LUCKY_DRAW_SEED_SECRET!,
-              event.seed_nonce!,
-            ),
+            seed: '',
           },
           entries: [],
           ticket_index: null,

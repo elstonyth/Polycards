@@ -768,7 +768,9 @@ medusaIntegrationTestRunner({
             my_tickets: 30,
             total_tickets: 30,
             entrant_count: 1,
-            seed_hash: row.seed_hash,
+            // The real hash is admin-only (2026-11-24); the store page carries
+            // the blank placeholder.
+            seed_hash: '',
             result: null,
           });
           expect(res.data.prizes[0].top).toEqual([
@@ -1026,7 +1028,7 @@ medusaIntegrationTestRunner({
           ).toEqual([]);
         });
 
-        it('after the draw, the result shows the seed and the full entry list', async () => {
+        it('after the draw, the result hides the seed but shows the full entry list', async () => {
           const { prizeId } = await publishLive();
           await fund(ada.id, 100);
           await enter(prizeId, { tickets: 30 }, adaHeaders());
@@ -1049,7 +1051,10 @@ medusaIntegrationTestRunner({
             adaHeaders(),
           );
           expect(res.status).toBe(200);
-          expect(res.data.result.seed).toMatch(/^[0-9a-f]{64}$/);
+          // The seed stays server-side (2026-11-24): the arena replays the
+          // recorded run, and a blank keeps a forced pick indistinguishable.
+          expect(res.data.result.seed).toBe('');
+          expect(res.data.result.seed_hash).toBe('');
           expect(res.data.entries).toHaveLength(1);
           expect(res.data.entries[0]).toMatchObject({
             person: expect.objectContaining({ who: 'Ada' }),
@@ -1064,25 +1069,27 @@ medusaIntegrationTestRunner({
             winner_tickets: 30,
             total_tickets: 30,
             entrant_count: 1,
-            seed_hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+            seed_hash: '',
           });
           expect(res.data.ticket_index).toBeGreaterThanOrEqual(0);
           expect(res.data.ticket_index).toBeLessThan(30);
-
-          // The published hash commits to the revealed seed.
-          expect(drawSeedHash(res.data.result.seed)).toBe(
-            res.data.result.seed_hash,
-          );
+          // The published hash commits to the seed; both stay off the wire.
+          const [row] = await packs.listLuckyDrawPrizes({ id: prizeId });
+          expect(drawSeedHash(deriveDrawSeed(
+            process.env.LUCKY_DRAW_SEED_SECRET!,
+            row.seed_nonce!,
+          ))).toBe(row.seed_hash);
+          expect(JSON.stringify(res.data)).not.toContain(row.seed_nonce!);
 
           const list = await get('/store/lucky-draw/results', adaHeaders());
           expect(list.data.results).toHaveLength(1);
-          expect(list.data.results[0].seed).toBe(res.data.result.seed);
+          expect(list.data.results[0].seed).toBe('');
           expect(list.data.next_before).toBeNull();
 
           // The live page now carries the result for the drawn prize.
           clearLuckyDrawCache();
           const page = await get('/store/lucky-draw', adaHeaders());
-          expect(page.data.prizes[0].result.seed).toBe(res.data.result.seed);
+          expect(page.data.prizes[0].result.seed).toBe('');
           expect(page.data.prizes[0]).toMatchObject({
             total_tickets: 30,
             entrant_count: 1,
