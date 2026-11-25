@@ -72,7 +72,14 @@ const CardArtPage = () => {
     const queue: { file: File; code: string }[] = [];
     for (const file of files) {
       const code = artCodeFromFilename(file.name);
-      if (code) queue.push({ file, code });
+      // two files for one code in one run: parallel uploads would let either
+      // win silently, so the first is kept and the rest are reported
+      if (code && queue.some((q) => q.code === code))
+        problems.push({
+          name: file.name,
+          message: `Another file in this upload is also ${code}`,
+        });
+      else if (code) queue.push({ file, code });
       else
         problems.push({
           name: file.name,
@@ -119,7 +126,12 @@ const CardArtPage = () => {
     await flush();
     setRun({ ...state, problems: [...problems], running: false });
     qc.invalidateQueries({ queryKey: ['card-art'] });
-    toast.success(`${state.saved} card images saved.`);
+    if (problems.length === 0)
+      toast.success(`${state.saved} card images saved.`);
+    else
+      toast.warning(
+        `${state.saved} card images saved, ${problems.length} not saved.`,
+      );
   };
 
   const remove = async (code: string) => {
@@ -227,12 +239,12 @@ const CardArtPage = () => {
               key={s.set}
               type="button"
               onClick={() => {
-                setQ(q === s.set ? '' : s.set);
+                setQ(q === `${s.set}-` ? '' : `${s.set}-`);
                 setPage(0);
               }}
-              aria-pressed={q === s.set}
+              aria-pressed={q === `${s.set}-`}
             >
-              <Badge size="2xsmall" color={q === s.set ? 'blue' : 'grey'}>
+              <Badge size="2xsmall" color={q === `${s.set}-` ? 'blue' : 'grey'}>
                 {s.set} · {s.count}
               </Badge>
             </button>

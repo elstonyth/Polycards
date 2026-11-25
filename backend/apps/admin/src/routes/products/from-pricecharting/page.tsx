@@ -207,9 +207,18 @@ const AddFromPriceChartingPage = () => {
         void getCardArtFamily(code)
           .then((family) => {
             if (seq !== pickSeq.current) return; // a newer pick/search won
-            const { auto, choices } = pickCardArt(product.name, family);
+            const { auto, choices } = pickCardArt(
+              product.name,
+              product.set,
+              family,
+            );
             setArtChoices(choices);
-            if (auto) setImage(auto.image_url);
+            // only over PriceCharting's photo (or none), never an image the
+            // admin uploaded or pasted while the lookup ran
+            if (auto)
+              setImage((cur) =>
+                cur === '' || cur === product.image ? auto.image_url : cur,
+              );
           })
           .catch(() => {});
       }

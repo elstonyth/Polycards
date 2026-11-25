@@ -18,9 +18,11 @@ export function franchiseFor(
   ...hints: (string | null | undefined)[]
 ): SpriteFranchise {
   const text = hints.filter(Boolean).join(' ');
-  // Gundam prints the same codes (ST01-001, "#EB01-002"); PriceCharting returns
-  // both games for one code search.
-  if (/\bgundam\b/i.test(text)) return 'pokemon';
+  // Gundam, Dragon Ball Fusion World and Wonders of the First print the same
+  // codes (ST01-001, "#EB01-002"); PriceCharting returns them all for one code
+  // search (11-26 sweep).
+  if (/\b(?:gundam|dragon ball|wonders of the first)\b/i.test(text))
+    return 'pokemon';
   // "One Piece" / "One-Piece", or a booster (OP), starter (ST), extra (EB) or
   // premium (PRB) card code — also when glued to a suffix ("OP05-119_p1").
   return /\bone[\s-]*piece\b|(?:^|[^a-z0-9])(?:OP|ST|EB|PRB)\d{2}-\d{3}(?!\d)/i.test(
@@ -68,7 +70,13 @@ const MATCH_ALIASES: Record<string, string[]> = {
   Kikunojo: ['Okiku'],
   'Caesar Clown': ['Gastino'],
   'Don Krieg': ['Krieg'],
-  'Capone Bege': ['Capone Gang Bege'],
+  'Capone Bege': ['Capone Gang Bege', 'CaponeGangBege'],
+  // PriceCharting spellings (11-26 sweep): glued, or another romanisation
+  'Eustass Kid': ['EustassCaptainKid', 'EustassCaptainKidd'],
+  Issho: ['Isshou'],
+  Sentomaru: ['Sentoumaru'],
+  Ipponmatsu: ['Ippon-Matsu'],
+  'Miss.MerryChristmas(Drophy)': ['Miss Merry Christmas'],
   // variant rows match by name or alias too: a disguise card never prints the base name
   'Monkey D. Luffy (Lucy)': ['Lucy'],
   'Sanji (Raid Suit)': ['Soba Mask'],
@@ -79,7 +87,7 @@ const MATCH_ALIASES: Record<string, string[]> = {
   Sham: ['Meowban Brothers'],
   Kotori: ['Hotori'],
   Pickles: ['Groggy Monsters'],
-  'Kozuki Sukiyaki': ['Tenguyama Hitetsu'],
+  'Kozuki Sukiyaki': ['Tenguyama Hitetsu', 'Kouzuki Sukiyaki'],
 };
 
 /** The library name a One Piece search means: "Big Mom" → "Charlotte Linlin",
@@ -94,8 +102,11 @@ export function onePieceSearchTerm(q: string): string {
   return q;
 }
 
+// accents and apostrophes fold away: "Bell-mère" = "Bell-mere", "Who's" = "Whos"
 const tokens = (s: string) =>
   s
+    .normalize('NFD')
+    .replace(/[̀-ͯ'’]/g, '')
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
@@ -123,6 +134,9 @@ export function matchOnePieceEntry(
   rows: PixelPokemonRow[],
 ): PixelPokemonRow | null {
   const hay = tokens(cardName);
+  // names are matched outside PriceCharting's labels: "Usopp [Nami Deck]" is
+  // Usopp, not a Usopp/Nami tie. The labels still pick a variant below.
+  const nameHay = tokens(cardName.replace(/\[[^\]]*\]/g, ' '));
   // every row whose name (or alias) is the longest match in the title
   let top: PixelPokemonRow[] = [];
   let topLen = 0;
@@ -134,8 +148,13 @@ export function matchOnePieceEntry(
       ...(MATCH_ALIASES[row.name] ?? []),
     ];
     for (const name of names) {
-      const len = tokens(name).length;
-      if (len < topLen || !containsWords(hay, tokens(name))) continue;
+      const t = tokens(name);
+      const len = t.length;
+      // Japanese listings put the family name last ("Mihawk Dracule")
+      const found =
+        containsWords(nameHay, t) ||
+        (len > 1 && containsWords(nameHay, [...t].reverse()));
+      if (len < topLen || !found) continue;
       if (len > topLen) [top, topLen] = [[], len];
       if (!top.includes(row)) top.push(row);
     }

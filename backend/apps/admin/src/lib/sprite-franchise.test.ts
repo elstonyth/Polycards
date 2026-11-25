@@ -260,3 +260,49 @@ describe('fetchOnePieceRoster at an exact page multiple', () => {
     expect(vi.mocked(getPixelPokemon)).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('PriceCharting title quirks (11-26 sweep)', () => {
+  const rows = [
+    op('Usopp', 4),
+    op('Nami', 3),
+    op('Dracule Mihawk', 38),
+    op('Bell-mère', 300),
+    op("Who's.Who", 301),
+    op('Eustass Kid', 57),
+  ];
+  it('a label naming another character is not a tie ("Usopp [Nami Deck]")', () => {
+    expect(matchOnePieceEntry('Usopp [Nami Deck] EB02-022', rows)?.number).toBe(
+      4,
+    );
+  });
+  it('family name last (Japanese listings)', () => {
+    expect(
+      matchOnePieceEntry('Mihawk Dracule [Alternate Art] OP12-030', rows)
+        ?.number,
+    ).toBe(38);
+  });
+  it('accents, apostrophes and glued spellings', () => {
+    expect(matchOnePieceEntry('Bell-mere OP08-xxx', rows)?.number).toBe(300);
+    expect(matchOnePieceEntry('Whos.Who [SP] OP05-xxx', rows)?.number).toBe(
+      301,
+    );
+    expect(
+      matchOnePieceEntry('EustassCaptainKid [Alternate Art] OP10-xxx', rows)
+        ?.number,
+    ).toBe(57);
+  });
+  it('Dragon Ball and Wonders of the First cards are not One Piece', () => {
+    expect(
+      franchiseFor(
+        'Dragon Ball Fusion World Story Booster 01',
+        'Son Goku EB01-001',
+      ),
+    ).toBe('pokemon');
+    expect(
+      franchiseFor(
+        'Wonders of the First 2 Player Starter Set',
+        'Tharn ST01-005',
+      ),
+    ).toBe('pokemon');
+  });
+});

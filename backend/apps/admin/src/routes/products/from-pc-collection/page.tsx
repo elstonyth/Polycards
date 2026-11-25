@@ -20,9 +20,12 @@ import type { Permission, RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   getPriceChartingCollection,
   getPriceChartingProduct,
+  getCardArtFamily,
   getTcgCardMeta,
   type PcOffer,
 } from '../../../lib/admin-rest';
+import { pickCardArt, titleCardCode } from '../../../lib/card-art';
+import { franchiseFor } from '../../../lib/sprite-franchise';
 import {
   useFxRate,
   useCreateProductsFromPriceChartingBatch,
@@ -397,8 +400,20 @@ const AddFromPcCollectionPage = () => {
         // The offer carries its own photo on PriceCharting's bucket, so it can
         // stand in when the product-page scrape comes back empty — the backend
         // ingests either through the same media pipeline.
-        const image = product.image ?? offer.image ?? '';
         const name = product.name || offer.name;
+        const set = product.set || offer.set;
+        // One Piece: our clean (stamp-free) art wins when the listing maps to
+        // one printing (Card art page); otherwise PriceCharting's photo.
+        const code = titleCardCode(name);
+        const art =
+          code && franchiseFor(set, name) === 'one-piece'
+            ? pickCardArt(
+                name,
+                set,
+                await getCardArtFamily(code).catch(() => []),
+              ).auto
+            : null;
+        const image = art?.image_url ?? product.image ?? offer.image ?? '';
         if (image === '') {
           skipped.push(t('pcCollection.skip.noImage', { name }));
         } else if (product.prices.length === 0) {
@@ -422,7 +437,7 @@ const AddFromPcCollectionPage = () => {
             key,
             productId: offer.product_id,
             name,
-            set: product.set || offer.set,
+            set,
             prices: product.prices,
             pcGrade: mapped,
             include: offer.include,
