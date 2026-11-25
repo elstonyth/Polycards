@@ -582,11 +582,17 @@ export function createArenaRenderer(
           shownR[id] = real;
           velR[id] = 0;
         } else {
-          // Underdamped: overshoots a little, then settles.
+          // Underdamped: overshoots a little, then settles. Any growth — a
+          // duel chip (~x1.1 radius per step), several chips back-to-back, or
+          // the final swallow (~x1.4) — softens with the size of the jump, so
+          // mass gains swell over a beat instead of popping; shrink and drift
+          // keep the fast spring.
+          const jump = real / (shownR[id] as number);
+          const k2 = jump > 1 ? 160 / (jump * jump * jump) : 160;
+          const c = jump > 1 ? 15 / jump : 15;
           const v =
             (velR[id] as number) +
-            (160 * (real - (shownR[id] as number)) -
-              15 * (velR[id] as number)) *
+            (k2 * (real - (shownR[id] as number)) - c * (velR[id] as number)) *
               springDt;
           velR[id] = v;
           shownR[id] = (shownR[id] as number) + v * springDt;

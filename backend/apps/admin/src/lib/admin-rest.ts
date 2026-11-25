@@ -3274,6 +3274,9 @@ export interface AdminLuckyDrawEvent {
   /** The event's own commitment. null until published, and on a per_prize
    *  event, whose hashes are per prize. */
   seed_hash: string | null;
+  /** The admin-picked winner the draw pays whatever the seed says
+   *  (guaranteed win, 2026-11-24). null = the seeded draw. */
+  forced_winner_id: string | null;
   total_tickets: number;
   entrant_count: number;
   prizes: AdminLuckyDrawPrize[];
@@ -3341,6 +3344,18 @@ export const withdrawLuckyDrawEvent = (id: string, reason: string) =>
     { reason },
   );
 
+/** Pick the winner of a one-winner event (guaranteed win, 2026-11-24).
+ *  `customerId` null clears the pick. Refused once the event is drawn. */
+export const forceLuckyDrawWinner = (
+  id: string,
+  customerId: string | null,
+  reason: string,
+) =>
+  postJson<{ forced_winner_id: string | null }>(
+    `/admin/lucky-draw/events/${encodeURIComponent(id)}/forced-winner`,
+    { customer_id: customerId, reason },
+  );
+
 export const saveLuckyDrawPrize = (
   input: AdminLuckyDrawPrizeInput & { reason: string },
 ) => postJson<{ id: string }>('/admin/lucky-draw/prizes', input);
@@ -3354,6 +3369,9 @@ export const cancelLuckyDrawPrize = (id: string, reason: string) =>
 export interface AdminLuckyDrawEntrant {
   customer_id: string;
   tickets: number;
+  /** Display name, when the customer profile has one. */
+  name: string | null;
+  email: string | null;
 }
 
 export async function listLuckyDrawEntries(

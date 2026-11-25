@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   Button,
   Container,
+  Drawer,
   Heading,
   StatusBadge,
   Table,
@@ -13,7 +14,9 @@ import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   useCancelLuckyDrawPrize,
   useCards,
+  useForceLuckyDrawWinner,
   useLuckyDraw,
+  useLuckyDrawEventEntrants,
   usePublishLuckyDrawEvent,
   useWithdrawLuckyDrawEvent,
   type AdminLuckyDrawEvent,
@@ -138,8 +141,8 @@ const PrizeOutcome = ({
       )}
       {state === 'overdue' && (
         <Text size="small" className="text-ui-fg-error">
-          Draw time passed with no result — is the event published? Check
-          the draw job log
+          Draw time passed with no result — is the event published? Check the
+          draw job log
         </Text>
       )}
       {state === 'ungranted' && (
@@ -239,7 +242,176 @@ const EventOutcome = ({ event }: { event: AdminLuckyDrawEvent }) => {
           seed {result.seed}
         </Text>
       )}
+      {/* Show forced winner indicator if set */}
+      {event.forced_winner_id && !result && (
+        <Text size="small" className="text-ui-fg-warning mt-2">
+          ⚠️ Forced winner:{' '}
+          <Link
+            to={`/customers/${event.forced_winner_id}`}
+            className="text-ui-fg-interactive break-all hover:underline"
+          >
+            {event.forced_winner_id}
+          </Link>{' '}
+          (guaranteed to win when the draw runs)
+        </Text>
+      )}
     </div>
+  );
+};
+
+/** Pick a forced winner from the event's entrants (guaranteed win, 2026-11-24). */
+const ForcedWinnerPicker = ({
+  event,
+  pending,
+  onClose,
+  onSave,
+}: {
+  event: AdminLuckyDrawEvent;
+  /** The mutation's isPending, so a failed save re-enables the button. */
+  pending: boolean;
+  onClose: () => void;
+  onSave: (customerId: string | null, reason: string) => void;
+}) => {
+  const { data: entrants, isLoading } = useLuckyDrawEventEntrants(event.id);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    event.forced_winner_id ?? null,
+  );
+  const [reason, setReason] = useState('');
+
+  const total = (entrants ?? []).reduce((n, e) => n + e.tickets, 0);
+  const selectedEntrant = entrants?.find((e) => e.customer_id === selectedId);
+
+  const handleSubmit = () => {
+    if (!reason.trim()) {
+      toast.error('Reason is required.');
+      return;
+    }
+    onSave(selectedId, reason.trim());
+  };
+
+  return (
+    <Drawer open onOpenChange={(open) => !open && onClose()}>
+      <Drawer.Content>
+        <Drawer.Header>
+          <Drawer.Title>Force winner — {eventLabel(event)}</Drawer.Title>
+        </Drawer.Header>
+        <Drawer.Body className="overflow-y-auto p-6">
+          <Text size="small" className="text-ui-fg-subtle mb-4">
+            Pick a customer who will win this event's pot when the draw runs,
+            whatever the seed says. Leave blank to use the seeded draw. The
+            forced winner must be a live entrant.
+          </Text>
+
+          {isLoading ? (
+            <LoadingSkeleton rows={4} />
+          ) : entrants?.length === 0 ? (
+            <Text size="small" className="text-ui-fg-muted">
+              No entrants yet.
+            </Text>
+          ) : (
+            <>
+              <div className="mb-4">
+                <Text size="small" className="font-semibold mb-2">
+                  Select entrant
+                </Text>
+                <div className="max-h-64 overflow-y-auto border rounded-md">
+                  <button
+                    type="button"
+                    className={`w-full text-left px-4 py-2 hover:bg-ui-bg-base-hover ${
+                      selectedId === null
+                        ? 'bg-ui-bg-base-hover font-semibold'
+                        : ''
+                    }`}
+                    onClick={() => setSelectedId(null)}
+                  >
+                    — Use seeded draw (default) —
+                  </button>
+                  {entrants?.map((e) => (
+                    <button
+                      key={e.customer_id}
+                      type="button"
+                      className={`w-full text-left px-4 py-2 hover:bg-ui-bg-base-hover flex items-center justify-between ${
+                        selectedId === e.customer_id
+                          ? 'bg-ui-bg-base-hover font-semibold'
+                          : ''
+                      }`}
+                      onClick={() => setSelectedId(e.customer_id)}
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium">
+                          {e.name ?? 'Unnamed customer'}
+                          {event.forced_winner_id === e.customer_id &&
+                            e.customer_id !== selectedId && (
+                              <span className="ml-2 text-ui-fg-warning">
+                                (current)
+                              </span>
+                            )}
+                        </span>
+                        <span
+                          className="block truncate text-ui-fg-subtle txt-compact-xsmall"
+                          title={e.customer_id}
+                        >
+                          {e.customer_id}
+                          {e.email ? ` · ${e.email}` : ''}
+                        </span>
+                      </span>
+                      <span className="text-ui-fg-subtle tabular-nums shrink-0">
+                        {e.tickets.toLocaleString()} tickets{' '}
+                        {total > 0 &&
+                          `(${((e.tickets / total) * 100).toFixed(1)}%)`}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {selectedEntrant && (
+                <div className="mb-4 p-3 bg-ui-bg-subtle rounded-md">
+                  <Text size="small" className="text-ui-fg-subtle">
+                    Selected:{' '}
+                    <Link
+                      to={`/customers/${selectedEntrant.customer_id}`}
+                      className="text-ui-fg-interactive hover:underline"
+                    >
+                      {selectedEntrant.name ??
+                        selectedEntrant.customer_id}
+                    </Link>
+                    {' — '}
+                    {selectedEntrant.tickets.toLocaleString()} tickets
+                  </Text>
+                </div>
+              )}
+
+              <div className="mb-4">
+                <Text size="small" className="font-semibold mb-2">
+                  Reason
+                </Text>
+                <textarea
+                  className="w-full min-h-[80px] p-2 border rounded-md bg-ui-bg-base text-ui-fg-base text-sm"
+                  placeholder="Why is this winner being forced?"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-x-2">
+                <Button
+                  size="small"
+                  variant="secondary"
+                  onClick={onClose}
+                  disabled={pending}
+                >
+                  Cancel
+                </Button>
+                <Button size="small" onClick={handleSubmit} disabled={pending}>
+                  {pending ? 'Saving...' : 'Save'}
+                </Button>
+              </div>
+            </>
+          )}
+        </Drawer.Body>
+      </Drawer.Content>
+    </Drawer>
   );
 };
 
@@ -259,7 +431,9 @@ const PrizeTable = ({
   const removable = oneWinner && canRemovePrize(event);
   // A card prize shows the card's own art unless an override was uploaded;
   // only fetch the catalogue when some row actually needs it.
-  const needsCards = event.prizes.some((p) => p.kind === 'card' && !p.image_url);
+  const needsCards = event.prizes.some(
+    (p) => p.kind === 'card' && !p.image_url,
+  );
   const { data: cards } = useCards({ enabled: needsCards });
   const artOf = (p: AdminLuckyDrawPrize): string | null => {
     if (p.image_url) return p.image_url;
@@ -404,6 +578,7 @@ const LuckyDrawPage = () => {
   const publish = usePublishLuckyDrawEvent();
   const cancel = useCancelLuckyDrawPrize();
   const withdraw = useWithdrawLuckyDrawEvent();
+  const forceWinner = useForceLuckyDrawWinner();
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [eventDraft, setEventDraft] = useState<EventDraft | null>(null);
@@ -413,6 +588,7 @@ const LuckyDrawPage = () => {
   const [entrantsId, setEntrantsId] = useState<string | null>(null);
   const [withdrawing, setWithdrawing] = useState(false);
   const [eventEntrants, setEventEntrants] = useState(false);
+  const [pickingWinner, setPickingWinner] = useState(false);
 
   const events = data ?? [];
   // The newest event until the operator picks another; a stale id (the event
@@ -431,9 +607,9 @@ const LuckyDrawPage = () => {
           <div>
             <Heading level="h2">Lucky Draw</Heading>
             <Text size="small" className="text-ui-fg-subtle mt-1">
-              Players put tickets into a running event. When it ends, one
-              winner takes every prize, drawn from a seed committed (as a hash)
-              when the event is published. Events published under the old rules
+              Players put tickets into a running event. When it ends, one winner
+              takes every prize, drawn from a seed committed (as a hash) when
+              the event is published. Events published under the old rules
               finish prize by prize.
             </Text>
           </div>
@@ -466,9 +642,15 @@ const LuckyDrawPage = () => {
                 <Table.HeaderCell>Tier</Table.HeaderCell>
                 <Table.HeaderCell>Runs</Table.HeaderCell>
                 <Table.HeaderCell>Status</Table.HeaderCell>
-                <Table.HeaderCell className="text-right">Prizes</Table.HeaderCell>
-                <Table.HeaderCell className="text-right">Tickets</Table.HeaderCell>
-                <Table.HeaderCell className="text-right">Entrants</Table.HeaderCell>
+                <Table.HeaderCell className="text-right">
+                  Prizes
+                </Table.HeaderCell>
+                <Table.HeaderCell className="text-right">
+                  Tickets
+                </Table.HeaderCell>
+                <Table.HeaderCell className="text-right">
+                  Entrants
+                </Table.HeaderCell>
                 <Table.HeaderCell>Seed hash</Table.HeaderCell>
                 <Table.HeaderCell>Winner</Table.HeaderCell>
                 <Table.HeaderCell />
@@ -523,6 +705,18 @@ const LuckyDrawPage = () => {
                         },
                       ]
                     : []),
+                  // Force winner: only for published one_winner events that haven't been drawn
+                  ...(totals && e.status === 'published' && !result && newRules
+                    ? [
+                        {
+                          label: 'Force winner…',
+                          onSelect: () => {
+                            setSelectedId(e.id);
+                            setPickingWinner(true);
+                          },
+                        },
+                      ]
+                    : []),
                 ];
                 return (
                   <Table.Row
@@ -550,7 +744,9 @@ const LuckyDrawPage = () => {
                     </Table.Cell>
                     <Table.Cell>
                       <StatusBadge
-                        color={newRules ? PHASE_COLOR[phase] : EVENT_COLOR[e.status]}
+                        color={
+                          newRules ? PHASE_COLOR[phase] : EVENT_COLOR[e.status]
+                        }
                       >
                         {newRules ? phase : e.status}
                       </StatusBadge>
@@ -700,6 +896,30 @@ const LuckyDrawPage = () => {
         <EventEntrantsDrawer
           event={selected}
           onClose={() => setEventEntrants(false)}
+        />
+      )}
+
+      {pickingWinner && selected && (
+        <ForcedWinnerPicker
+          event={selected}
+          pending={forceWinner.isPending}
+          onClose={() => setPickingWinner(false)}
+          onSave={(customerId, reason) =>
+            forceWinner.mutate(
+              { id: selected.id, customerId, reason },
+              {
+                onSuccess: () => {
+                  toast.success(
+                    customerId
+                      ? `Forced winner set to ${customerId}.`
+                      : 'Forced winner cleared — seeded draw will be used.',
+                  );
+                  setPickingWinner(false);
+                },
+                onError: (e) => toast.error(e.message),
+              },
+            )
+          }
         />
       )}
 

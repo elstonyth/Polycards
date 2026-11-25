@@ -3,6 +3,8 @@ import type {
   MedusaResponse,
 } from '@medusajs/framework/http';
 import { MedusaError } from '@medusajs/framework/utils';
+import { Modules } from '@medusajs/framework/utils';
+import type { ICustomerModuleService } from '@medusajs/types';
 import { PACKS_MODULE } from '../../../../../../modules/packs';
 import type PacksModuleService from '../../../../../../modules/packs/service';
 import { aggregateEntries } from '../../../../../../modules/packs/lucky-draw';
@@ -29,5 +31,22 @@ export async function GET(
   // aggregateEntries sorts by customer id; the sort below is stable, so
   // equal totals stay in that order.
   const entries = aggregateEntries(rows).sort((a, b) => b.tickets - a.tickets);
-  res.json({ entries });
+  // The picker shows display names, not raw ids; email disambiguates
+  // accounts that share one.
+  const customerModule = req.scope.resolve<ICustomerModuleService>(
+    Modules.CUSTOMER,
+  );
+  const customers = await customerModule.listCustomers(
+    { id: entries.map((e) => e.customer_id) },
+    { select: ['id', 'first_name', 'last_name', 'email'], take: entries.length || 1 },
+  );
+  const byId = new Map(customers.map((c) => [c.id, c]));
+  res.json({
+    entries: entries.map((e) => {
+      const c = byId.get(e.customer_id);
+      const name =
+        [c?.first_name, c?.last_name].filter(Boolean).join(' ') || null;
+      return { ...e, name, email: c?.email ?? null };
+    }),
+  });
 }

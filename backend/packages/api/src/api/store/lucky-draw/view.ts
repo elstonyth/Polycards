@@ -30,6 +30,10 @@ import {
 // Names are resolved when a view is first built, so a drawn result keeps the
 // names it had then (a later rename shows after a restart); accepted — the
 // result is a record of the draw.
+//
+// No seed or seed hash leaves this file (2026-11-24): the public payloads
+// keep the fields but carry '', so the storefront schema is unchanged and the
+// arena replay uses the recorded ArenaRun. The admin overview shows the hash.
 
 export type Person = {
   who: string;
@@ -55,6 +59,7 @@ export type ResultView = {
   entrant_count: number;
   /** The revealed draw seed: only a drawn prize has one. */
   seed: string;
+  /** Kept for the storefront schema; the real hash is admin-only (2026-11-24). */
   seed_hash: string;
   // A one_winner event's row in the results feed: the whole pot under its first
   // prize's id, which the old storefront schema needs to keep the row.
@@ -73,6 +78,7 @@ export type EventResultView = {
   entrant_count: number;
   /** The revealed draw seed: only a drawn event has one. */
   seed: string;
+  /** Kept for the storefront schema; the real hash is admin-only (2026-11-24). */
   seed_hash: string;
   drawn_at: string;
 };
@@ -225,8 +231,10 @@ function resultView(
     winner_tickets: row.winner_tickets,
     total_tickets: row.total_tickets,
     entrant_count: row.entrant_count,
-    seed: row.seed,
-    seed_hash: row.seed_hash,
+    // Seed hidden from storefront (2026-11-24): arena replay uses the
+    // recorded ArenaRun, not the seed string.
+    seed: '',
+    seed_hash: '',
   };
 }
 
@@ -241,8 +249,10 @@ function eventResultView(
     winner_tickets: facts.winner_tickets,
     total_tickets: facts.total_tickets,
     entrant_count: facts.entrant_count,
-    seed: facts.seed,
-    seed_hash: facts.seed_hash,
+    // Seed hidden from storefront (2026-11-24): arena replay uses the
+    // recorded ArenaRun, not the seed string.
+    seed: '',
+    seed_hash: '',
     drawn_at: facts.drawn_at,
   };
 }
@@ -286,10 +296,15 @@ async function buildSharedPage(
     tickets: t.tickets,
   });
   return {
-    events: page.events.map((g) => ({ ...g, top: g.top.map(toEntry) })),
+    events: page.events.map((g) => ({
+      ...g,
+      seed_hash: null,
+      top: g.top.map(toEntry),
+    })),
     next_event: page.next_event,
     event: page.event && {
       ...page.event,
+      seed_hash: null,
       top: page.event.top.map(toEntry),
       result: page.event.result
         ? eventResultView(page.event.result, personOf)
@@ -306,7 +321,7 @@ async function buildSharedPage(
         frame: p.frame,
         value_myr: p.value_myr,
         draw_at: p.draw_at,
-        seed_hash: p.seed_hash,
+        seed_hash: '',
         total_tickets: p.total_tickets,
         entrant_count: p.entrant_count,
         top: p.top.map(toEntry),

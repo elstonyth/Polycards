@@ -10,6 +10,9 @@ import { model } from '@medusajs/framework/utils';
 // seed_nonce / seed_hash are a one_winner event's fairness commitment, under the
 // same rule as lucky_draw_prize: the row never holds the seed, which is first
 // written at the draw, into lucky_draw_event_result. Null on a per_prize event.
+//
+// forced_winner_id (2026-11-24): admin-picked winner for a guaranteed win. The
+// draw job pays this customer whatever the seed says. Null = the seeded draw.
 export const LuckyDrawEvent = model.define('lucky_draw_event', {
   id: model.id({ prefix: 'ldev' }).primaryKey(),
   name: model.text(),
@@ -25,6 +28,9 @@ export const LuckyDrawEvent = model.define('lucky_draw_event', {
   // The gate's tier (boss 2026-11-01): the operator's call on each gate, cheap
   // and short up to dear and long. A label and a player filter; no rule reads it.
   tier: model.enum(['economy', 'business', 'first']).default('economy'),
+  // Admin-picked winner for a guaranteed win (2026-11-24). The draw job pays
+  // this customer whatever the seed says. Null = the seeded draw decides.
+  forced_winner_id: model.text().nullable(),
 });
 
 export default LuckyDrawEvent;
