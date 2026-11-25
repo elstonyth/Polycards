@@ -20,6 +20,9 @@ export type AdminCardLike = CardLike & {
   pc_synced_at: Date | string | null;
   label_year: string | null;
   label_note: string | null;
+  label_set: string | null;
+  label_name: string | null;
+  label_number: string | null;
   created_at: Date | string;
 };
 
@@ -55,6 +58,9 @@ export function toAdminCardDto(card: AdminCardLike, fxRate?: number) {
     pc_synced_at: card.pc_synced_at ?? null,
     label_year: card.label_year ?? null,
     label_note: card.label_note ?? null,
+    label_set: card.label_set ?? null,
+    label_name: card.label_name ?? null,
+    label_number: card.label_number ?? null,
     // Registration timestamp, verbatim (serializes to ISO over JSON) — the
     // admin cards list sorts newest-first on it.
     created_at: card.created_at,

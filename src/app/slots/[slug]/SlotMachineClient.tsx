@@ -82,7 +82,7 @@ import { Meter } from './Meter';
 import { RevealStage } from './RevealStage';
 import { TicketReveal } from './TicketReveal';
 import { SuccessToast } from '@/components/ui/SuccessToast';
-import { CARD_BACK_SRC } from './SlabCard';
+import { CARD_BACK_SRC, CASE_EDGE_SRC } from './SlabCard';
 import { hasRoll, isRevealState, usePackMachine } from './usePackMachine';
 
 // The server actions a press can reach — injected into the roll seam (see
@@ -390,7 +390,9 @@ export default function SlotMachineClient({
   // the /public path would fetch a URL the reveal never asks for. It carries
   // `priority` instead, which is next/image's own preload.
   useEffect(() => {
-    if (phase === 'spinning') preload(CARD_BACK_SRC, { as: 'image' });
+    if (phase !== 'spinning') return;
+    for (const src of [CARD_BACK_SRC, CASE_EDGE_SRC])
+      preload(src, { as: 'image' });
   }, [phase]);
   // Commit the stage scale only while idle: cellSize is a ReelStrip engine
   // dependency (pitch/travel/target), so resizing the window mid-spin would

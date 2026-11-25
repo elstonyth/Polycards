@@ -8,6 +8,10 @@
 #   blender -b --factory-startup -P scripts/render-card-back.py -- \
 #     [--mask docs/research/card-back/mask.png] \
 #     [--out docs/research/card-back/render.png] [--scale 1] [--samples 128]
+#     [--size 1200x1680]
+#
+# The slab's back label is the same stock and ink, rendered here at its own
+# size (--size 1363x392; steps in scripts/compose-slab-case.mjs).
 #
 # 1 px = 0.01 Blender units. CPU on purpose: a GPU render crashed this PC's
 # session once (2026-11-21).
@@ -17,7 +21,6 @@ import sys
 import bpy
 
 U = 0.01
-W, H = 1200, 1680  # the card face, 5:7
 
 LOOK = dict(
     relief=14,  # height of the raised mark, px
@@ -35,6 +38,9 @@ LOOK = dict(
 def arg(name, default):
     argv = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
     return argv[argv.index(name) + 1] if name in argv else default
+
+
+W, H = (int(v) for v in arg("--size", "1200x1680").split("x"))  # the card face, 5:7
 
 
 def clear_scene():
@@ -131,7 +137,7 @@ def build(mask_path, scale):
 
     cam_data = bpy.data.cameras.new("cam")
     cam_data.type = "ORTHO"
-    cam_data.ortho_scale = H * U
+    cam_data.ortho_scale = max(W, H) * U  # the camera's scale is its longer side
     cam = bpy.data.objects.new("cam", cam_data)
     scene.collection.objects.link(cam)
     cam.location = (0, 0, 50)

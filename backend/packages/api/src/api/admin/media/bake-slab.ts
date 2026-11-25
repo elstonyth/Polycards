@@ -254,8 +254,8 @@ export async function composeSlab(
   // a grey "shadowed recess" here (rgb(148,148,153)) plus brighter case-tone
   // corner patches; the operator rejected both — the recess read as a grey edge
   // around the crop and the square patches read as sharp corners on the dark
-  // storefront. Only the frame webp's own thin frosted case border frames the
-  // card now.
+  // storefront. Only the frame webp's own case edge frames the card now (a
+  // clear plastic case since 2026-11-24, scripts/compose-slab-case.mjs).
   const layers: sharp.OverlayOptions[] = [
     { input: photo, left: cardLeft, top: cardTop },
     { input: frame, left: 0, top: 0 },
@@ -286,6 +286,9 @@ export type SlabCardInput = {
   set: string; // PriceCharting console-name, e.g. "Pokemon Surging Sparks"
   label_year?: string | null;
   label_note?: string | null;
+  label_set?: string | null;
+  label_name?: string | null;
+  label_number?: string | null;
 };
 
 // Bake one card. Best-effort by contract: ANY failure logs a warning and
@@ -318,6 +321,9 @@ export async function bakeSlabImage(
       grade: card.grade,
       year: card.label_year ?? null,
       note: card.label_note ?? null,
+      setLine: card.label_set ?? null,
+      nameLine: card.label_name ?? null,
+      number: card.label_number ?? null,
     });
     if (out.length > IMAGE_RULES.maxBytes) {
       logger.warn(
@@ -472,6 +478,9 @@ export async function rebakeAllGradedCards(
         set: card.set,
         label_year: card.label_year ?? null,
         label_note: card.label_note ?? null,
+        label_set: card.label_set ?? null,
+        label_name: card.label_name ?? null,
+        label_number: card.label_number ?? null,
       },
       frameBytes,
     );

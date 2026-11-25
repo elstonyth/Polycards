@@ -1,3 +1,6 @@
+// SUPERSEDED 2026-11-24: public/images/slab-frame.webp is now a Blender render
+// of a clear case (scripts/render-slab-case.py + scripts/compose-slab-case.mjs).
+// Running this would put the old generated frosted frame back.
 // One-off asset pipeline: turn a chroma-keyed slab-frame render (flat #FF00FF
 // card window + background) into the transparent overlay the storefront ships
 // as the DEFAULT frame (public/images/slab-frame.webp).

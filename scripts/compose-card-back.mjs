@@ -8,12 +8,13 @@
 //     -> docs/research/card-back/render.png
 //   node scripts/compose-card-back.mjs ship
 //     -> public/images/app/polycards-card-back.webp
-//     -> public/images/app/polycards-slab-back.webp   the same card inside the
-//        acrylic case, for graded pulls (see slabBack below)
+//
+// The graded slab's back holds this same card inside its case; that picture is
+// made by scripts/compose-slab-case.mjs, so re-run it after a new card back.
 //
 // The shipped picture is the card face only: 5:7, opaque, full-bleed, no baked
 // corners or border. SlabImage rounds the corners and puts the tier band on.
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import sharp from 'sharp';
 
 const DIR = 'docs/research/card-back';
@@ -26,91 +27,6 @@ const MARK_W = 0.18;
 const WORD_W = 0.28;
 const GAP = 0.04; // mark bottom to the top of the tall letters
 const CENTRE_Y = 0.49; // of the card height: the block sits a touch above middle
-
-/**
- * The slab back (a graded pull, face-down): the SAME card, seen inside the
- * acrylic case (owner 2026-11-24: "graded should be changed as well, they both
- * the same thing"). The case is the old slab-back picture, which had a flat
- * monogram card baked in; the new card is laid over that card's exact place,
- * and the soft light the acrylic threw across the old card is put back on top
- * so it still sits behind the plastic.
- *
- * Needs the old picture as docs/research/card-back/slab-case.webp:
- *   git show 517200c6f:public/images/app/polycards-slab-back.webp
- */
-async function slabBack() {
-  const CASE = `${DIR}/slab-case.webp`; // 900x1519
-  if (!existsSync(CASE)) {
-    console.log(`skipped the slab back: ${CASE} is missing (see slabBack)`);
-    return;
-  }
-  // Measured on the old picture: the card's box, and its monogram (+ margin).
-  const R = { x: 99, y: 393, w: 703, h: 1007, r: 23 };
-  const LOGO = { x0: 201, x1: 506, y0: 282, y1: 722 }; // inside R
-
-  // 1. The acrylic's light on the old card: the old card with its monogram
-  // bridged over (each column fades from the row above it to the row below),
-  // then blurred until only the broad light is left.
-  const old = await sharp(CASE)
-    .extract({ left: R.x, top: R.y, width: R.w, height: R.h })
-    .greyscale()
-    .raw()
-    .toBuffer();
-  for (let x = LOGO.x0; x <= LOGO.x1; x++) {
-    const a = old[(LOGO.y0 - 1) * R.w + x];
-    const b = old[(LOGO.y1 + 1) * R.w + x];
-    for (let y = LOGO.y0; y <= LOGO.y1; y++) {
-      const t = (y - LOGO.y0) / (LOGO.y1 - LOGO.y0);
-      old[y * R.w + x] = a + (b - a) * t;
-    }
-  }
-  const light = await sharp(old, {
-    raw: { width: R.w, height: R.h, channels: 1 },
-  })
-    .blur(22)
-    .toColourspace('b-w') // or sharp hands back three channels
-    .raw()
-    .toBuffer();
-  if (old.length !== R.w * R.h || light.length !== R.w * R.h)
-    throw new Error('slab back: expected one channel per pixel');
-
-  // 2. The new card in that box, with the light screened back on. Tuned so the
-  // new card comes out as bright as the old one was at its top, middle and
-  // bottom (about 78, 40 and 22 of 255); the render alone is darker low down
-  // and its bottom edge sank into the case.
-  const HAZE_FLOOR = 22;
-  const HAZE_GAIN = 0.7;
-  const card = await sharp(`${DIR}/render.png`)
-    .resize(R.w, R.h, { fit: 'cover' })
-    .removeAlpha()
-    .raw()
-    .toBuffer();
-  for (let i = 0; i < R.w * R.h; i++) {
-    const haze = Math.max(0, light[i] - HAZE_FLOOR) * HAZE_GAIN;
-    for (let c = 0; c < 3; c++) {
-      const v = card[i * 3 + c];
-      card[i * 3 + c] = 255 - ((255 - v) * (255 - haze)) / 255;
-    }
-  }
-  const corners = Buffer.from(
-    `<svg xmlns='http://www.w3.org/2000/svg' width='${R.w}' height='${R.h}'><rect width='${R.w}' height='${R.h}' rx='${R.r}' fill='white'/></svg>`,
-  );
-  const cut = await sharp(card, {
-    raw: { width: R.w, height: R.h, channels: 3 },
-  })
-    .ensureAlpha()
-    .composite([{ input: corners, blend: 'dest-in' }])
-    .png()
-    .toBuffer();
-
-  // 3. Back into the case.
-  const out = 'public/images/app/polycards-slab-back.webp';
-  await sharp(CASE)
-    .composite([{ input: cut, left: R.x, top: R.y }])
-    .webp({ quality: 90 })
-    .toFile(out);
-  console.log(`done: ${out}`);
-}
 
 const step = process.argv[2];
 if (step === 'mask') {
@@ -161,7 +77,6 @@ if (step === 'mask') {
     .webp({ quality: 90 })
     .toFile(out);
   console.log(`done: ${out}`);
-  await slabBack();
 } else {
   throw new Error('usage: compose-card-back.mjs mask|ship');
 }

@@ -73,6 +73,13 @@ export const Card = model.define('card', {
   // Changing either re-bakes the composite (update-card re-bakes every save).
   label_year: model.text().nullable(),
   label_note: model.text().nullable(),
+  // PSA's own wording for the printed lines (2026-11-25), read off PSA's
+  // record or the slab itself: label_set is line 1 after the year ("POKEMON
+  // JAPANESE"), label_name is line 2 ("FA/MEW"), label_number the card number
+  // as PSA prints it ("030"). Blank = derived from the name and set as before.
+  label_set: model.text().nullable(),
+  label_name: model.text().nullable(),
+  label_number: model.text().nullable(),
 });
 
 export default Card;

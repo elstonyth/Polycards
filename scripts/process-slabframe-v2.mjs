@@ -1,3 +1,6 @@
+// SUPERSEDED 2026-11-24: public/images/slab-frame.webp is now a Blender render
+// of a clear case (scripts/render-slab-case.py + scripts/compose-slab-case.mjs).
+// Running this would put the old generated frosted frame back.
 // Ship the graded-slab default frame + print its measured geometry
 // (window insets, label box, holo probe).
 //

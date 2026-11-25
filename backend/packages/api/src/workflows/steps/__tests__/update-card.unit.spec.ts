@@ -214,6 +214,9 @@ describe('updateCardInvoke slab bake', () => {
       set: 'Base',
       label_year: null,
       label_note: null,
+      label_set: null,
+      label_name: null,
+      label_number: null,
     });
     expect(packs.updateCards).toHaveBeenCalledWith([
       expect.objectContaining({
@@ -229,6 +232,26 @@ describe('updateCardInvoke slab bake', () => {
     const { metadata } = run.mock.calls[0][0].input.products[0];
     expect(metadata).toMatchObject({ slab_image: '/static/slab-new.webp' });
     expect(metadata).not.toHaveProperty('slab_image_key');
+  });
+
+  it("a save that omits PSA's wording keeps it; an explicit null clears it", async () => {
+    jest.mocked(bakeSlabImage).mockResolvedValue(null);
+    const packs = packsStub();
+    packs.listCards.mockResolvedValue([
+      { ...CARD, label_set: 'POKEMON JAPANESE', label_name: 'FA/MEW' },
+    ]);
+    await updateCardInvoke(
+      { ...INPUT, label_name: null },
+      { container: buildContainer(packs) },
+    );
+    const kept = { label_set: 'POKEMON JAPANESE', label_name: null };
+    expect(bakeSlabImage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining(kept),
+    );
+    expect(packs.updateCards).toHaveBeenCalledWith([
+      expect.objectContaining(kept),
+    ]);
   });
 
   it('unchanged content hash (same key) skips the delete', async () => {

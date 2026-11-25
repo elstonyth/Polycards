@@ -9,7 +9,7 @@
 // reel tile's rect (same aspect ratio) to its on-stage box, reading as one
 // object growing; the tile's pixel sprite rides along and fades mid-growth.
 import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
-import { motion } from 'motion/react';
+import { motion, useMotionValue } from 'motion/react';
 import type { WonCard } from '@/lib/actions/packs';
 import { rm } from '@/lib/format';
 import { isTopRarity } from '@/lib/rarity';
@@ -40,6 +40,42 @@ export const CARD_BACK_SRC = '/images/app/polycards-slab-back.webp';
  *  logo raised from it in white, a Blender render (scripts/render-card-back.py,
  *  steps in scripts/compose-card-back.mjs). Face only: no corners, no border. */
 const RAW_CARD_BACK_SRC = '/images/app/polycards-card-back.webp';
+
+/** The graded slab is a solid object (operator, 2026-11-25: "can we make it
+ *  3D"), so its two faces sit a case's depth apart and its edges fill the gap:
+ *  mid-turn it shows a thickness instead of vanishing to a line. The depth is
+ *  a real PSA holder's, about 6.25mm thick on 80.25mm wide (caliper figures,
+ *  no official spec), as a share of the card box: the case is 1584px of the
+ *  1600px art, and the art fills the box less FRAME_BAND each side. */
+const CASE_DEPTH =
+  (6.25 / 80.25) * (1584 / 1600) * (1 - (2 * FRAME_BAND) / 100);
+/** The case seen edge-on: a Blender render of the same model under the same
+ *  lights as the faces (scripts/render-slab-case.py --edge, steps in
+ *  scripts/compose-slab-case.mjs). Exported with the back so the machine warms
+ *  it during the spin too. */
+export const CASE_EDGE_SRC = '/images/app/slab-edge-v.webp';
+const HALF_DEPTH = 'calc(var(--slab-d) / 2)';
+const BAND = `${FRAME_BAND}%`;
+// The two long edges: each strip is centred on its side of the case, stood on
+// end, and stops short of the rounded corners. Both turn the same way, so the
+// picture's front side always meets the front face. No strips on the short
+// edges: the slab turns about its upright axis, and seen almost edge-on they
+// drew stray lines past the corners.
+const CASE_EDGE: CSSProperties = {
+  top: `calc(${FRAME_BAND}% + 10px)`,
+  bottom: `calc(${FRAME_BAND}% + 10px)`,
+  width: 'var(--slab-d)',
+  transform: 'rotateY(90deg)',
+  backgroundImage: `url(${CASE_EDGE_SRC})`,
+};
+const EDGE_PULL = 'calc(var(--slab-d) / -2)';
+const CASE_EDGES: CSSProperties[] = [
+  { ...CASE_EDGE, left: BAND, marginLeft: EDGE_PULL },
+  { ...CASE_EDGE, right: BAND, marginRight: EDGE_PULL },
+];
+/** One soft band of light, three faces wide, slid across a face as it turns. */
+const TURN_LIGHT =
+  'linear-gradient(100deg, rgba(255,255,255,0) 40%, rgba(255,255,255,0.4) 50%, rgba(255,255,255,0) 60%)';
 
 export function SlabCard({
   card,
@@ -73,6 +109,28 @@ export function SlabCard({
   // The slab turns under the pointer and catches a highlight as it turns, so
   // the hold before the flip is something to handle rather than sit through.
   const tilt = useCardTilt(!reduced && !flipped);
+
+  // A graded slab turns as a solid; a raw card is thin stock and stays flat.
+  const deep = !raw && !reduced;
+  // The light a turning face catches: it crosses each face once per quarter
+  // turn and is gone at rest, so neither resting face changes. Fed from the
+  // flip's own angle through motion values, so nothing re-renders.
+  const lightX = useMotionValue('20%');
+  const lightO = useMotionValue(0);
+  const turnLight = deep ? (
+    <motion.span
+      aria-hidden
+      className="pointer-events-none absolute rounded-xl mix-blend-screen"
+      style={{
+        inset: BAND,
+        opacity: lightO,
+        backgroundImage: TURN_LIGHT,
+        backgroundSize: '300% 100%',
+        backgroundRepeat: 'no-repeat',
+        backgroundPositionX: lightX,
+      }}
+    />
+  ) : null;
 
   // Shape-synced morph (spec #16): delta from the landed tile's rect to this
   // card's natural box. Computed in a layout effect (before paint) so the
@@ -127,9 +185,11 @@ export function SlabCard({
       <motion.button
         ref={tilt}
         // Tilt rides OUTSIDE motion's generated transform, so the flip, the
-        // idle float and the morph all keep animating untouched.
+        // idle float and the morph all keep animating untouched. A solid slab
+        // also sits back half its depth, so the face toward the viewer rests
+        // on the page's own plane: the same size as the flat card it replaced.
         transformTemplate={(_, generated) =>
-          `rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg)) ${generated}`
+          `${deep ? `translateZ(calc(${HALF_DEPTH} * -1)) ` : ''}rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg)) ${generated}`
         }
         type="button"
         onClick={flipped ? undefined : onFlip} // flip is one-way; guard mid-flight re-taps
@@ -160,8 +220,22 @@ export function SlabCard({
             // uniform-scale grow with a slight height drift — invisible at
             // 0.6s; the flip reveal (the stare moment) stays exact.
             aspectRatio: String(SLAB_ASPECT),
-            perspective: '1200px',
+            // A solid slab is projected once, by the box above: a second
+            // perspective here would stretch its depth. Flat faces never
+            // noticed this one.
+            perspective: deep ? undefined : '1200px',
+            '--slab-d': `calc(var(--slab-w, min(64vw, 300px)) * ${CASE_DEPTH})`,
           } as CSSProperties
+        }
+        onUpdate={
+          deep
+            ? (latest) => {
+                // 0-90 the back is in view, 90-180 the front: one pass each.
+                const t = ((Number(latest.rotateY) || 0) % 90) / 90;
+                lightX.set(`${20 + 60 * t}%`);
+                lightO.set(Math.sin(Math.PI * t));
+              }
+            : undefined
         }
         animate={
           reduced
@@ -204,7 +278,9 @@ export function SlabCard({
                 ({
                   filter: `drop-shadow(0 18px 30px rgba(0,0,0,0.6))`,
                 } as CSSProperties)
-              : undefined
+              : deep
+                ? { transform: `translateZ(${HALF_DEPTH})` }
+                : undefined
           }
         >
           {raw ? (
@@ -282,7 +358,20 @@ export function SlabCard({
               className="absolute inset-0 m-auto h-1/2 w-1/2 object-contain [image-rendering:pixelated]"
             />
           )}
+          {turnLight}
         </span>
+        {/* The case's long edges, between the faces. Direct children of the
+            button on purpose: a wrapper with a filter, overflow or blend would
+            flatten them back onto its own plane. */}
+        {deep &&
+          CASE_EDGES.map((style, i) => (
+            <span
+              key={i}
+              aria-hidden
+              className="pointer-events-none absolute bg-[length:100%_100%] bg-no-repeat"
+              style={style}
+            />
+          ))}
         {/* FRONT — the pull as a graded slab: raw card photo inside the
             admin-configurable case overlay. The ambient bloom is SlabImage's
             `reveal` tuning: a drop-shadow (not box-shadow) that follows the
@@ -293,12 +382,20 @@ export function SlabCard({
         <span
           className={cn(
             'absolute inset-0 [backface-visibility:hidden]',
-            // Reduced motion never rotates the button, so a rotated front face
-            // would stay turned away, and backface-hidden, for good.
-            !reduced && '[transform:rotateY(180deg)]',
             reduced && !flipped && 'hidden',
           )}
-          style={{ filter: slabAmbient('reveal', rarityRgb) } as CSSProperties}
+          style={
+            {
+              filter: slabAmbient('reveal', rarityRgb),
+              // Reduced motion never rotates the button, so a rotated front
+              // face would stay turned away, and backface-hidden, for good.
+              transform: reduced
+                ? undefined
+                : deep
+                  ? `rotateY(180deg) translateZ(${HALF_DEPTH})`
+                  : 'rotateY(180deg)',
+            } as CSSProperties
+          }
         >
           <SlabImage
             card={card}
@@ -307,7 +404,10 @@ export function SlabCard({
             animated
           />
           {/* Glare sweep removed (decision #24): it parked at x:110% off the
-              card's right edge and read as a weird persistent "glass" streak. */}
+              card's right edge and read as a weird persistent "glass" streak.
+              The turn light below is tied to the flip's angle instead, so it
+              is gone the moment the slab is at rest. */}
+          {turnLight}
         </span>
       </motion.button>
       {/* info stamp — appears after the flip. Its space is ALWAYS reserved

@@ -194,6 +194,56 @@ describe('layoutLabel', () => {
     expect(nameRun.fontSize).toBeGreaterThanOrEqual(base.fontSize * 0.7);
   });
 
+  // Live label 2026-11-25: at 0.97 size this set line printed 75px into "#73".
+  // Capitals are wider than the old flat 0.6em guess; it needs about 0.88.
+  it('sizes a line of capitals by their real widths', () => {
+    const runs = layoutLabel(
+      // Same line as typed text on an unlisted set: Dark Phantasma itself now
+      // prints PSA's short "2022 POKEMON JPN.SWSH".
+      {
+        set: 'Unlisted Set',
+        name: 'Pikachu #73',
+        grade: '10',
+        setLine: 'POKEMON JAPANESE DARK PHANTASMA',
+      },
+      box,
+    );
+    const setRun = runs.find((r) => r.text.startsWith('POKEMON JAPANESE'))!;
+    const base = runs.find((r) => r.text === '#73')!;
+    expect(setRun.text).toBe('POKEMON JAPANESE DARK PHANTASMA'); // not cut
+    expect(setRun.fontSize).toBeLessThan(base.fontSize * 0.91);
+    expect(setRun.fontSize).toBeGreaterThan(base.fontSize * 0.85);
+  });
+
+  // PSA cert 102593524: "2021 POKEMON JAPANESE / FA/MEW / 25TH ANNIVERSARY
+  // COLL-UR", "#030". The PriceCharting name and set say "Mew #30" and
+  // "25th Anniversary Collection"; PSA's own wording, when stored, wins.
+  it("prints PSA's own wording over the derived lines", () => {
+    const texts = layoutLabel(
+      {
+        set: 'Pokemon Japanese 25th Anniversary Collection',
+        name: 'Mew #30',
+        grade: '10',
+        year: '2021',
+        note: '25TH ANNIVERSARY COLL-UR',
+        setLine: 'POKEMON JAPANESE',
+        nameLine: 'FA/MEW',
+        number: '030',
+      },
+      box,
+    ).map((r) => r.text);
+    expect(texts).toEqual(
+      expect.arrayContaining([
+        '2021 POKEMON JAPANESE',
+        'FA/MEW',
+        '25TH ANNIVERSARY COLL-UR',
+        '#030',
+      ]),
+    );
+    expect(texts).not.toContain('MEW');
+    expect(texts).not.toContain('#30');
+  });
+
   it('off-scale grade: number still prints, descriptor row is absent', () => {
     const runs = layoutLabel({ ...fields, grade: '9.5' }, box);
     expect(runs.map((r) => r.text)).toContain('9.5');

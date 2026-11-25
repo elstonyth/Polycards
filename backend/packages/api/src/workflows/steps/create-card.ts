@@ -40,6 +40,10 @@ export type RegisterCardInput = {
   // product's metadata by /from-pricecharting (like pc_product_id above).
   label_year?: string | null;
   label_note?: string | null;
+  // PSA's own wording (see models/card.ts). Not staged on the product.
+  label_set?: string | null;
+  label_name?: string | null;
+  label_number?: string | null;
 };
 
 type CompensateData =
@@ -144,6 +148,9 @@ export const registerCardInvoke = async (
     set: input.set,
     label_year: labelYear,
     label_note: labelNote,
+    label_set: input.label_set ?? null,
+    label_name: input.label_name ?? null,
+    label_number: input.label_number ?? null,
   });
 
   // Pixel-Pokémon assignment staged at product creation (from-pricecharting)
@@ -214,6 +221,9 @@ export const registerCardInvoke = async (
           market_multiplier: mult,
           label_year: labelYear,
           label_note: labelNote,
+          label_set: input.label_set ?? null,
+          label_name: input.label_name ?? null,
+          label_number: input.label_number ?? null,
         },
       ]),
     probeDuplicate: async () => {

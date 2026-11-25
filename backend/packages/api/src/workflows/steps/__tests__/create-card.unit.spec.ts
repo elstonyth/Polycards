@@ -274,6 +274,9 @@ describe('registerCardInvoke slab bake', () => {
       set: 'Base',
       label_year: null,
       label_note: null,
+      label_set: null,
+      label_name: null,
+      label_number: null,
     });
     expect(packs.createCards).toHaveBeenCalledWith([
       expect.objectContaining({
