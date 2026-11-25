@@ -286,6 +286,9 @@ export type SlabCardInput = {
   set: string; // PriceCharting console-name, e.g. "Pokemon Surging Sparks"
   label_year?: string | null;
   label_note?: string | null;
+  label_set?: string | null;
+  label_name?: string | null;
+  label_number?: string | null;
 };
 
 // Bake one card. Best-effort by contract: ANY failure logs a warning and
@@ -318,6 +321,9 @@ export async function bakeSlabImage(
       grade: card.grade,
       year: card.label_year ?? null,
       note: card.label_note ?? null,
+      setLine: card.label_set ?? null,
+      nameLine: card.label_name ?? null,
+      number: card.label_number ?? null,
     });
     if (out.length > IMAGE_RULES.maxBytes) {
       logger.warn(
@@ -472,6 +478,9 @@ export async function rebakeAllGradedCards(
         set: card.set,
         label_year: card.label_year ?? null,
         label_note: card.label_note ?? null,
+        label_set: card.label_set ?? null,
+        label_name: card.label_name ?? null,
+        label_number: card.label_number ?? null,
       },
       frameBytes,
     );

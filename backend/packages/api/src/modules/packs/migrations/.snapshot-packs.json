@@ -596,6 +596,33 @@
           "nullable": true,
           "mappedType": "text"
         },
+        "label_set": {
+          "name": "label_set",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "text"
+        },
+        "label_name": {
+          "name": "label_name",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "text"
+        },
+        "label_number": {
+          "name": "label_number",
+          "type": "text",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "mappedType": "text"
+        },
         "raw_market_value": {
           "name": "raw_market_value",
           "type": "jsonb",

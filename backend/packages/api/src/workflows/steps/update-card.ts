@@ -54,6 +54,12 @@ export type UpdateCardInput = {
   // the edit form loads current values from GET, so omitted → null is safe.
   label_year?: string | null;
   label_note?: string | null;
+  // PSA's own wording (see models/card.ts). Tri-state, unlike the two above:
+  // undefined = keep what is stored, so a save that never loaded them (a
+  // script, an older admin tab) cannot clear them.
+  label_set?: string | null;
+  label_name?: string | null;
+  label_number?: string | null;
 };
 
 type CardSnapshot = {
@@ -80,6 +86,9 @@ type CardSnapshot = {
   slab_image_key: string | null;
   label_year: string | null;
   label_note: string | null;
+  label_set: string | null;
+  label_name: string | null;
+  label_number: string | null;
 };
 
 type ProductSnapshot = {
@@ -153,6 +162,9 @@ export const updateCardInvoke = async (
     slab_image_key: card.slab_image_key ?? null,
     label_year: card.label_year ?? null,
     label_note: card.label_note ?? null,
+    label_set: card.label_set ?? null,
+    label_name: card.label_name ?? null,
+    label_number: card.label_number ?? null,
   };
 
   // Tri-state resolution (see UpdateCardInput): undefined keeps the snapshot
@@ -187,6 +199,17 @@ export const updateCardInvoke = async (
       nextMultiplier,
     );
 
+  const psaWording = {
+    label_set:
+      input.label_set === undefined ? snapshot.label_set : input.label_set,
+    label_name:
+      input.label_name === undefined ? snapshot.label_name : input.label_name,
+    label_number:
+      input.label_number === undefined
+        ? snapshot.label_number
+        : input.label_number,
+  };
+
   // Slab bake (spec §C): re-bake on EVERY save (no dirty-check — one
   // composite per admin save is cheap and can never go stale when the photo
   // or label fields change); non-PSA grader or grader emptied → null →
@@ -200,6 +223,7 @@ export const updateCardInvoke = async (
     set: input.set,
     label_year: input.label_year ?? null,
     label_note: input.label_note ?? null,
+    ...psaWording,
   });
   const nextSlabImage = baked?.url ?? null;
   const nextSlabKey = baked?.key ?? null;
@@ -247,6 +271,7 @@ export const updateCardInvoke = async (
         market_multiplier: nextMultiplier,
         label_year: input.label_year ?? null,
         label_note: input.label_note ?? null,
+        ...psaWording,
       },
     ]);
 
@@ -400,6 +425,9 @@ export const updateCardInvoke = async (
         market_multiplier: snapshot.market_multiplier,
         label_year: snapshot.label_year,
         label_note: snapshot.label_note,
+        label_set: snapshot.label_set,
+        label_name: snapshot.label_name,
+        label_number: snapshot.label_number,
       },
     ]);
     // Reclaim the file this run baked — the Card now points back at the OLD
@@ -444,6 +472,9 @@ export const updateCardStep = createStep(
         market_multiplier: data.card.market_multiplier,
         label_year: data.card.label_year,
         label_note: data.card.label_note,
+        label_set: data.card.label_set,
+        label_name: data.card.label_name,
+        label_number: data.card.label_number,
       },
     ]);
     if (data.product) {

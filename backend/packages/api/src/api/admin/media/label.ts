@@ -3,6 +3,7 @@
 
 import { LABEL_FONT_FAMILY } from './label-font';
 import { onePieceLabel } from './one-piece-label';
+import { pokemonLabel } from './pokemon-label';
 
 // PSA's canonical 11-point grade scale. Qualifier half-grades (2.5–9.5) are
 // deliberately excluded (operator decision 2026-07-16): the catalog doesn't
@@ -121,6 +122,11 @@ export type SlabLabelFields = {
   grade: string;
   year?: string | null;
   note?: string | null;
+  // PSA's own wording, when the card carries it (Card.label_set / label_name /
+  // label_number). Printed as typed: each replaces the line derived below.
+  setLine?: string | null; // line 1 after the year, "POKEMON JAPANESE"
+  nameLine?: string | null; // line 2, "FA/MEW"
+  number?: string | null; // "030", with or without the "#"
 };
 
 // White-sticker box as fractions of the FRAME — printed by
@@ -142,9 +148,31 @@ const RIGHT_EDGE = 0.968; // of sticker width — real labels end 0.963–0.974,
 const ARIMO_CAP_PER_EM = 0.716; // Arimo/Arial capHeight ÷ unitsPerEm
 const COL_GAP_FRAC = 0.02; // min gap between columns, of label-box width
 const MIN_SHRINK = 0.7; // shrink-to-fit floor before ellipsizing (§10)
-// ponytail: flat per-char advance estimate for uppercase Arimo — good enough
-// to keep columns apart; swap for real pango measurement if it ever misfits.
-const AVG_CHAR_PER_EM = 0.6;
+const LETTER_SPACING = 0.01; // of the em, as renderLabelSvg prints it
+// Each character's advance in Arimo at weight 500, per em, measured through
+// the bake's own renderer (a run of the character between two H's). A flat
+// 0.6 stood here before and undersized capitals (most are 0.67-0.78): on
+// 168 of 567 live labels the set line ran into the card number (2026-11-25).
+// Kerning is left out, so a line never measures narrower than it prints.
+// prettier-ignore
+const ARIMO_ADVANCE: Record<string, number> = {
+  '0': 0.556, '1': 0.494, '2': 0.556, '3': 0.556, '4': 0.556, '5': 0.556,
+  '6': 0.556, '7': 0.556, '8': 0.556, '9': 0.556, ' ': 0.278, '!': 0.296,
+  '"': 0.395, '#': 0.556, $: 0.556, '%': 0.889, '&': 0.685, "'": 0.207,
+  '(': 0.333, ')': 0.333, '*': 0.389, '+': 0.584, ',': 0.278, '-': 0.333,
+  '.': 0.278, '/': 0.278, ':': 0.296, ';': 0.296, '<': 0.584, '=': 0.584,
+  '>': 0.584, '?': 0.574, '@': 1.002, A: 0.685, B: 0.685, C: 0.722, D: 0.722,
+  E: 0.667, F: 0.611, G: 0.778, H: 0.722, I: 0.278, J: 0.518, K: 0.685,
+  L: 0.574, M: 0.833, N: 0.722, O: 0.778, P: 0.667, Q: 0.778, R: 0.722,
+  S: 0.667, T: 0.611, U: 0.722, V: 0.667, W: 0.944, X: 0.667, Y: 0.667,
+  Z: 0.611, '[': 0.296, '\\': 0.278, ']': 0.296, '^': 0.507, _: 0.556,
+  '`': 0.333, a: 0.556, b: 0.574, c: 0.518, d: 0.574, e: 0.556, f: 0.285,
+  g: 0.574, h: 0.574, i: 0.241, j: 0.241, k: 0.518, l: 0.241, m: 0.852,
+  n: 0.574, o: 0.574, p: 0.574, q: 0.574, r: 0.352, s: 0.518, t: 0.296,
+  u: 0.574, v: 0.518, w: 0.741, x: 0.518, y: 0.518, z: 0.5, '{': 0.352,
+  '|': 0.267, '}': 0.352, '~': 0.584, 'é': 0.556, 'δ': 0.573, '…': 1,
+};
+const WIDEST_ADVANCE = 1.002; // any character not in the table
 const ELLIPSIS = '…';
 
 export type LabelRun = {
@@ -155,12 +183,18 @@ export type LabelRun = {
   text: string;
 };
 
-const estWidth = (text: string, fontSize: number): number =>
-  text.length * fontSize * AVG_CHAR_PER_EM;
+const estWidth = (text: string, fontSize: number): number => {
+  let em = 0;
+  for (const ch of text) {
+    em += (ARIMO_ADVANCE[ch] ?? WIDEST_ADVANCE) + LETTER_SPACING;
+  }
+  return em * fontSize;
+};
 
-// The three left and three right lines the label prints. A One Piece card
-// takes PSA's wording from its PriceCharting name + set (one-piece-label.ts);
-// the card's own label year / note, when set, still win.
+// The three left and three right lines the label prints. One Piece and
+// Pokémon cards take PSA's wording from their PriceCharting name + set
+// (one-piece-label.ts, pokemon-label.ts); the card's own label fields, when
+// set, still win.
 export function labelLines(f: SlabLabelFields): {
   left: string[];
   right: string[];
@@ -168,23 +202,32 @@ export function labelLines(f: SlabLabelFields): {
   const year = (f.year ?? '').trim();
   const note = (f.note ?? '').trim();
   const grade = f.grade.trim();
-  const right = (number: string) => [number, psaDescriptor(grade) ?? '', grade];
-  const op = onePieceLabel(f);
-  if (op) {
+  const setLine = (f.setLine ?? '').trim();
+  const nameLine = (f.nameLine ?? '').trim();
+  const psaNumber = (f.number ?? '').trim().replace(/^#\s*/, '');
+  const right = (number: string) => [
+    psaNumber ? `#${psaNumber}` : number,
+    psaDescriptor(grade) ?? '',
+    grade,
+  ];
+  const derived = onePieceLabel(f) ?? pokemonLabel(f);
+  if (derived) {
     return {
       left: [
-        [year || op.year, op.setLine].filter(Boolean).join(' '),
-        op.name,
-        note || op.variety,
+        [year || derived.year, setLine || derived.setLine]
+          .filter(Boolean)
+          .join(' '),
+        nameLine || derived.name,
+        note || derived.variety,
       ],
-      right: right(op.number),
+      right: right(derived.number),
     };
   }
   const { name, number } = parseCardName(f.name);
   return {
     left: [
-      [year, setAbbrev(f.set)].filter(Boolean).join(' '),
-      formatCardName(name),
+      [year, setLine || setAbbrev(f.set)].filter(Boolean).join(' '),
+      nameLine || formatCardName(name),
       note,
     ],
     right: right(number),
@@ -262,7 +305,7 @@ export function renderLabelSvg(
     .map(
       (r) =>
         `<text x="${r.x}" y="${r.y}" font-size="${r.fontSize.toFixed(1)}" ` +
-        `letter-spacing="${(r.fontSize * 0.01).toFixed(2)}"` +
+        `letter-spacing="${(r.fontSize * LETTER_SPACING).toFixed(2)}"` +
         `${r.anchor === 'end' ? ' text-anchor="end"' : ''}>${escXml(r.text)}</text>`,
     )
     .join('');

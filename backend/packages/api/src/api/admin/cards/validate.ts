@@ -186,6 +186,9 @@ export function coerceRegisterCardBody(raw: unknown): RegisterCardInput {
     market_multiplier: optMultiplier(b),
     label_year: optLabelField(b, 'label_year'),
     label_note: optLabelField(b, 'label_note'),
+    label_set: optLabelField(b, 'label_set'),
+    label_name: optLabelField(b, 'label_name'),
+    label_number: optLabelField(b, 'label_number'),
   };
 }
 
@@ -234,5 +237,8 @@ export function coerceUpdateCardBody(
     market_multiplier: optMultiplier(b),
     label_year: optLabelField(b, 'label_year'),
     label_note: optLabelField(b, 'label_note'),
+    label_set: optLabelField(b, 'label_set'),
+    label_name: optLabelField(b, 'label_name'),
+    label_number: optLabelField(b, 'label_number'),
   };
 }

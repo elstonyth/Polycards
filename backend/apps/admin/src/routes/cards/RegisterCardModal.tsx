@@ -53,6 +53,9 @@ type Fields = {
   // null, never undefined, so leaving these blank is safe).
   label_year: string;
   label_note: string;
+  label_set: string;
+  label_name: string;
+  label_number: string;
 };
 
 // Margin defaults to 20% here (the gacha card is where margin lives — product
@@ -66,6 +69,9 @@ const EMPTY_FIELDS: Fields = {
   pixel_pokemon_id: null,
   label_year: '',
   label_note: '',
+  label_set: '',
+  label_name: '',
+  label_number: '',
 };
 
 const RegisterCardModal = ({ open, onClose }: Props) => {
@@ -244,6 +250,9 @@ const RegisterCardModal = ({ open, onClose }: Props) => {
         pixel_pokemon_id: pokemonTouched ? fields.pixel_pokemon_id : undefined,
         label_year: fields.label_year.trim() || null,
         label_note: fields.label_note.trim() || null,
+        label_set: fields.label_set.trim() || null,
+        label_name: fields.label_name.trim() || null,
+        label_number: fields.label_number.trim() || null,
       });
       toast.success(t('cards.toast.created'));
       onClose();
@@ -503,6 +512,36 @@ const RegisterCardModal = ({ open, onClose }: Props) => {
                   id="register-label-note"
                   value={fields.label_note}
                   onChange={(e) => patch({ label_note: e.target.value })}
+                />
+              </div>
+              <div className="flex flex-col gap-y-2">
+                <Label size="small" weight="plus" htmlFor="register-label-set">
+                  {t('cards.form.labelSet')}
+                </Label>
+                <Input
+                  id="register-label-set"
+                  value={fields.label_set}
+                  onChange={(e) => patch({ label_set: e.target.value })}
+                />
+              </div>
+              <div className="flex flex-col gap-y-2">
+                <Label size="small" weight="plus" htmlFor="register-label-name">
+                  {t('cards.form.labelName')}
+                </Label>
+                <Input
+                  id="register-label-name"
+                  value={fields.label_name}
+                  onChange={(e) => patch({ label_name: e.target.value })}
+                />
+              </div>
+              <div className="flex flex-col gap-y-2">
+                <Label size="small" weight="plus" htmlFor="register-label-number">
+                  {t('cards.form.labelNumber')}
+                </Label>
+                <Input
+                  id="register-label-number"
+                  value={fields.label_number}
+                  onChange={(e) => patch({ label_number: e.target.value })}
                 />
               </div>
               <Text className="text-ui-fg-subtle col-span-2 text-xs">

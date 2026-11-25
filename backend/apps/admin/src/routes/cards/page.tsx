@@ -68,6 +68,9 @@ type FormState = {
   // Slab-label text (§8) — printed on the baked PSA composite; blank clears it.
   label_year: string;
   label_note: string;
+  label_set: string;
+  label_name: string;
+  label_number: string;
   market_value: string;
   image: string;
   // Baked graded-slab composite (read-only here) — the thumbnail prefers it so
@@ -103,6 +106,9 @@ const formFromCard = (c: AdminCard): FormState => ({
   grade: c.grade,
   label_year: c.label_year ?? '',
   label_note: c.label_note ?? '',
+  label_set: c.label_set ?? '',
+  label_name: c.label_name ?? '',
+  label_number: c.label_number ?? '',
   // FMV shown/edited in MYR (priceBreakdown.marketMyr = market_value × live FX,
   // no markup); converted back to USD on save.
   market_value: String(c.priceBreakdown.marketMyr),
@@ -230,6 +236,9 @@ const GachaCardsPage = () => {
       grade: form.grade.trim(),
       label_year: form.label_year.trim() || null,
       label_note: form.label_note.trim() || null,
+      label_set: form.label_set.trim() || null,
+      label_name: form.label_name.trim() || null,
+      label_number: form.label_number.trim() || null,
       // Edited in MYR; the backend tracks FMV in USD — convert back at the
       // card's live rate so the stored value stays PriceCharting-native.
       market_value: myrToUsd(Number(form.market_value), form.fx_rate),
@@ -933,6 +942,36 @@ const GachaCardsPage = () => {
                       id="card-label-note"
                       value={form.label_note}
                       onChange={(e) => patch({ label_note: e.target.value })}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-y-2">
+                    <Label size="small" weight="plus" htmlFor="card-label-set">
+                      {t('cards.form.labelSet')}
+                    </Label>
+                    <Input
+                      id="card-label-set"
+                      value={form.label_set}
+                      onChange={(e) => patch({ label_set: e.target.value })}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-y-2">
+                    <Label size="small" weight="plus" htmlFor="card-label-name">
+                      {t('cards.form.labelName')}
+                    </Label>
+                    <Input
+                      id="card-label-name"
+                      value={form.label_name}
+                      onChange={(e) => patch({ label_name: e.target.value })}
+                    />
+                  </div>
+                  <div className="flex flex-col gap-y-2">
+                    <Label size="small" weight="plus" htmlFor="card-label-number">
+                      {t('cards.form.labelNumber')}
+                    </Label>
+                    <Input
+                      id="card-label-number"
+                      value={form.label_number}
+                      onChange={(e) => patch({ label_number: e.target.value })}
                     />
                   </div>
                   <Text className="text-ui-fg-subtle col-span-2 text-xs">
