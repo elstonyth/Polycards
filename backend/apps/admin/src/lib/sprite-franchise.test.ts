@@ -50,6 +50,14 @@ const ROWS = [
 ];
 
 describe('franchiseFor', () => {
+  it('a Gundam card with a One Piece-shaped code is not One Piece', () => {
+    expect(
+      franchiseFor('Gundam Eternal Nexus', 'Hi-Nu Gundam EX [Holo] #EB01-002'),
+    ).toBe('pokemon');
+    expect(franchiseFor('One Piece Extra Booster', 'Izo EB01-002')).toBe(
+      'one-piece',
+    );
+  });
   it('sends One Piece sets / card codes to the One Piece deck', () => {
     expect(franchiseFor('One Piece Romance Dawn')).toBe('one-piece');
     expect(franchiseFor('', 'Monkey.D.Luffy OP05-119')).toBe('one-piece');
@@ -163,9 +171,7 @@ describe('matchOnePieceEntry', () => {
       op('Nami', 900, { id: 'custom_nami', variant: 'custom' }),
     ];
     expect(matchOnePieceEntry('Nami OP01-016', rows)?.number).toBe(3);
-    expect(
-      matchOnePieceEntry('Nami OP01-016', [rows[1]]),
-    ).toBeNull();
+    expect(matchOnePieceEntry('Nami OP01-016', [rows[1]])).toBeNull();
   });
   it('two sprites of one character resolve by the label (Vinsmoke Sanji (Egghead))', () => {
     const rows = [
@@ -218,13 +224,15 @@ describe('entryNumber', () => {
 describe('fetchOnePieceRoster', () => {
   it('pages through the whole roster (the route caps a page at 200)', async () => {
     const rows = Array.from({ length: 450 }, (_, i) => op(`Char ${i}`, i + 1));
-    vi.mocked(getPixelPokemon).mockImplementation(async ({ page = 0, limit = 60 }) => ({
-      pixel_pokemon: rows.slice(page * limit, (page + 1) * limit),
-      total: rows.length,
-      limit,
-      offset: page * limit,
-      all_types: [],
-    }));
+    vi.mocked(getPixelPokemon).mockImplementation(
+      async ({ page = 0, limit = 60 }) => ({
+        pixel_pokemon: rows.slice(page * limit, (page + 1) * limit),
+        total: rows.length,
+        limit,
+        offset: page * limit,
+        all_types: [],
+      }),
+    );
     const got = await fetchOnePieceRoster();
     expect(got).toHaveLength(450);
     expect(vi.mocked(getPixelPokemon)).toHaveBeenCalledTimes(3);
@@ -235,13 +243,15 @@ describe('fetchOnePieceRoster at an exact page multiple', () => {
   it('stops after the last full page (400 rows = 2 pages, no empty 3rd call)', async () => {
     const rows = Array.from({ length: 400 }, (_, i) => op(`Char ${i}`, i + 1));
     vi.mocked(getPixelPokemon).mockReset();
-    vi.mocked(getPixelPokemon).mockImplementation(async ({ page = 0, limit = 60 }) => ({
-      pixel_pokemon: rows.slice(page * limit, (page + 1) * limit),
-      total: rows.length,
-      limit,
-      offset: page * limit,
-      all_types: [],
-    }));
+    vi.mocked(getPixelPokemon).mockImplementation(
+      async ({ page = 0, limit = 60 }) => ({
+        pixel_pokemon: rows.slice(page * limit, (page + 1) * limit),
+        total: rows.length,
+        limit,
+        offset: page * limit,
+        all_types: [],
+      }),
+    );
     // past the memo window, so this call fetches afresh
     const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 10 * 60_000);
     const got = await fetchOnePieceRoster();

@@ -106,6 +106,7 @@ const GROUPS: Group[] = [
       { path: '/cards', label: 'pcNav.cards' },
       { path: '/tier-defaults', label: 'pcNav.pricing' },
       { path: '/pixel-pokemon', label: 'pcNav.sprites' },
+      { path: '/card-art', label: 'pcNav.cardArt' },
     ],
   },
   {
