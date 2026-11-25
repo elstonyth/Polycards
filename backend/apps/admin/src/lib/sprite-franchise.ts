@@ -57,6 +57,11 @@ const ALIASES: Record<string, string[]> = {
   'Charlotte Linlin': ['Big Mom'],
   Enel: ['Eneru'],
   'Nefertari Vivi': ['Nefeltari Vivi'],
+};
+
+// Auto-link only, never search: these would hijack typed prefixes ("luc" for
+// Rob Lucci, "gas" for Gasparde) in the sprite picker and library search.
+const MATCH_ALIASES: Record<string, string[]> = {
   Kikunojo: ['Okiku'],
   'Caesar Clown': ['Gastino'],
   'Don Krieg': ['Krieg'],
@@ -107,34 +112,47 @@ function containsWords(hay: string[], needle: string[]): boolean {
  *  for it ("Luffy & Ace") is no match. A variant row matches by its own name
  *  too ("Sogeking" → Usopp's sogeking), and a variant of the matched character
  *  whose label is in the title ("[Gear 5]" → gear-5, "(Wano)" → wano) beats
- *  the base. Null = no confident match; the operator links by hand. */
+ *  the base. Hand-uploaded (`custom`) sprites never auto-link: one named like
+ *  a character would tie with the real sprite. Null = no confident match; the
+ *  operator links by hand. */
 export function matchOnePieceEntry(
   cardName: string,
   rows: PixelPokemonRow[],
 ): PixelPokemonRow | null {
   const hay = tokens(cardName);
-  let best: { row: PixelPokemonRow; len: number; tie: boolean } | null = null;
+  // every row whose name (or alias) is the longest match in the title
+  let top: PixelPokemonRow[] = [];
+  let topLen = 0;
   for (const row of rows) {
-    if (row.franchise !== 'one-piece') continue;
-    for (const name of [row.name, ...(ALIASES[row.name] ?? [])]) {
-      const needle = tokens(name);
-      if (!containsWords(hay, needle)) continue;
-      if (!best || needle.length > best.len) {
-        best = { row, len: needle.length, tie: false };
-      } else if (needle.length === best.len && row.id !== best.row.id) {
-        best.tie = true;
-      }
+    if (row.franchise !== 'one-piece' || row.variant === 'custom') continue;
+    const names = [
+      row.name,
+      ...(ALIASES[row.name] ?? []),
+      ...(MATCH_ALIASES[row.name] ?? []),
+    ];
+    for (const name of names) {
+      const len = tokens(name).length;
+      if (len < topLen || !containsWords(hay, tokens(name))) continue;
+      if (len > topLen) [top, topLen] = [[], len];
+      if (!top.includes(row)) top.push(row);
     }
   }
-  if (!best || best.tie) return null;
-  const base = best.row;
-  if (base.variant !== 'normal') return base;
+  if (top.length === 0) return null;
+  const number = top[0].number;
+  // two characters tied ("Luffy & Ace") is no match
+  if (top.some((r) => r.number !== number)) return null;
+  // two sprites of ONE character ("Vinsmoke Sanji (Egghead)"): the outfit row
+  // ("Sanji (Egghead)") says more than a renamed one ("Vinsmoke Sanji")
+  const hit = top.find((r) => r.name.includes('(')) ?? top[0];
+  if (hit.variant !== 'normal') return hit;
+  const base = hit;
   let variant: { row: PixelPokemonRow; len: number } | null = null;
   for (const row of rows) {
     if (
       row.franchise !== 'one-piece' ||
-      row.number !== base.number ||
-      row.variant === 'normal'
+      row.number !== number ||
+      row.variant === 'normal' ||
+      row.variant === 'custom'
     )
       continue;
     const label = tokens(row.variant);

@@ -105,6 +105,11 @@ describe('autoLinkKey', () => {
 });
 
 describe('onePieceSearchTerm', () => {
+  it('auto-link-only aliases never hijack a typed search', () => {
+    // "luc" is Rob Lucci, "gas" Gasparde, "kri" Kricketot: not Lucy / Gastino / Krieg
+    for (const q of ['luc', 'gas', 'kri', 'cap', 'buc', 'meow', 'sob'])
+      expect(onePieceSearchTerm(q)).toBe(q);
+  });
   it('turns TCG spellings into the library name', () => {
     expect(onePieceSearchTerm('Big Mom')).toBe('Charlotte Linlin');
     expect(onePieceSearchTerm('trafalgar law')).toBe('Trafalgar D. Water Law');
@@ -151,6 +156,29 @@ describe('matchOnePieceEntry', () => {
     );
     expect(matchOnePieceEntry('Usopp OP01-004', ROWS)?.id).toBe('op_4_normal');
     expect(matchOnePieceEntry('Lucy OP09-061', ROWS)?.id).toBe('op_1_lucy');
+  });
+  it('a hand-uploaded sprite named like a character never blocks the real one', () => {
+    const rows = [
+      op('Nami', 3),
+      op('Nami', 900, { id: 'custom_nami', variant: 'custom' }),
+    ];
+    expect(matchOnePieceEntry('Nami OP01-016', rows)?.number).toBe(3);
+    expect(
+      matchOnePieceEntry('Nami OP01-016', [rows[1]]),
+    ).toBeNull();
+  });
+  it('two sprites of one character resolve by the label (Vinsmoke Sanji (Egghead))', () => {
+    const rows = [
+      op('Sanji', 5),
+      op('Sanji (Egghead)', 5, { variant: 'egghead' }),
+      op('Vinsmoke Sanji', 5, { variant: 'vinsmoke-sanji' }),
+    ];
+    expect(
+      matchOnePieceEntry('Vinsmoke Sanji (Egghead) OP09-xxx', rows)?.id,
+    ).toBe('op_5_egghead');
+    expect(matchOnePieceEntry('Vinsmoke Sanji OP06-119', rows)?.id).toBe(
+      'op_5_vinsmoke-sanji',
+    );
   });
   it('a longer name beats a shorter one inside it (Speed Jil is not Speed)', () => {
     expect(matchOnePieceEntry('Speed Jil OP03-006', ROWS)?.number).toBe(301);
@@ -200,5 +228,25 @@ describe('fetchOnePieceRoster', () => {
     const got = await fetchOnePieceRoster();
     expect(got).toHaveLength(450);
     expect(vi.mocked(getPixelPokemon)).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('fetchOnePieceRoster at an exact page multiple', () => {
+  it('stops after the last full page (400 rows = 2 pages, no empty 3rd call)', async () => {
+    const rows = Array.from({ length: 400 }, (_, i) => op(`Char ${i}`, i + 1));
+    vi.mocked(getPixelPokemon).mockReset();
+    vi.mocked(getPixelPokemon).mockImplementation(async ({ page = 0, limit = 60 }) => ({
+      pixel_pokemon: rows.slice(page * limit, (page + 1) * limit),
+      total: rows.length,
+      limit,
+      offset: page * limit,
+      all_types: [],
+    }));
+    // past the memo window, so this call fetches afresh
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 10 * 60_000);
+    const got = await fetchOnePieceRoster();
+    now.mockRestore();
+    expect(got).toHaveLength(400);
+    expect(vi.mocked(getPixelPokemon)).toHaveBeenCalledTimes(2);
   });
 });
