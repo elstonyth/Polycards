@@ -9,6 +9,7 @@ import {
   toast,
   usePrompt,
 } from '@medusajs/ui';
+import { TriangleDownMini, TriangleRightMini } from '@medusajs/icons';
 import type { RouteConfig } from '@mercurjs/dashboard-sdk';
 import {
   keepPreviousData,
@@ -58,6 +59,8 @@ type Run = {
 const MissingArt = () => {
   const qc = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
+  // collapsed by default: the summary line is all most visits need
+  const [expanded, setExpanded] = useState(false);
   // one set's missing codes at a time, in a short scroll box
   const [open, setOpen] = useState<string | null>(null);
   const { data, isError } = useQuery({
@@ -86,23 +89,36 @@ const MissingArt = () => {
       className="border-ui-border-base flex flex-col gap-y-2 rounded-lg border p-3"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex flex-col">
-          <Text size="small" weight="plus" id="card-art-missing">
-            Missing
-          </Text>
-          <Text size="small" className="text-ui-fg-subtle">
-            {isError
-              ? 'Could not load the missing list.'
-              : !data
-                ? 'Loading…'
-                : data.total === 0
-                  ? 'No card list yet. Refresh it to see which cards have no clean art.'
-                  : `${data.missing} of ${data.total} printings have no clean art` +
-                    (data.fetched_at
-                      ? ` · card list from ${new Date(data.fetched_at).toLocaleDateString()}`
-                      : '')}
-          </Text>
-        </div>
+        <button
+          type="button"
+          className="flex items-start gap-1 text-left"
+          aria-expanded={expanded}
+          aria-controls="card-art-missing-body"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? (
+            <TriangleDownMini className="text-ui-fg-muted mt-0.5 shrink-0" />
+          ) : (
+            <TriangleRightMini className="text-ui-fg-muted mt-0.5 shrink-0" />
+          )}
+          <span className="flex flex-col">
+            <Text size="small" weight="plus" id="card-art-missing">
+              Missing
+            </Text>
+            <Text size="small" className="text-ui-fg-subtle">
+              {isError
+                ? 'Could not load the missing list.'
+                : !data
+                  ? 'Loading…'
+                  : data.total === 0
+                    ? 'No card list yet. Refresh it to see which cards have no clean art.'
+                    : `${data.missing} of ${data.total} printings have no clean art` +
+                      (data.fetched_at
+                        ? ` · card list from ${new Date(data.fetched_at).toLocaleDateString()}`
+                        : '')}
+            </Text>
+          </span>
+        </button>
         <Button
           size="small"
           variant="secondary"
@@ -112,39 +128,46 @@ const MissingArt = () => {
           Refresh card list
         </Button>
       </div>
-      {data && data.sets.length > 0 && (
-        <div
-          className="flex flex-wrap gap-1"
-          aria-label="Sets with missing art"
-        >
-          {data.sets.map((s) => (
-            <button
-              key={s.set}
-              type="button"
-              aria-pressed={open === s.set}
-              title={`${s.missing} of ${s.total} missing`}
-              onClick={() => setOpen(open === s.set ? null : s.set)}
+      {expanded && (
+        <div id="card-art-missing-body" className="flex flex-col gap-y-2">
+          {data && data.sets.length > 0 && (
+            <div
+              className="flex flex-wrap gap-1"
+              aria-label="Sets with missing art"
             >
-              <Badge size="2xsmall" color={open === s.set ? 'blue' : 'orange'}>
-                {s.set} · {s.missing}
-              </Badge>
-            </button>
-          ))}
-        </div>
-      )}
-      {openSet && (
-        // the scroll lives on this wrapper: a height-capped grid squeezes its rows
-        <div className="max-h-40 overflow-auto">
-          <ul
-            aria-label={`${openSet.set} missing cards`}
-            className="text-ui-fg-subtle grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-x-4 text-xs"
-          >
-            {openSet.cards.map((c) => (
-              <li key={c.code} className="truncate">
-                {c.code} · {c.name}
-              </li>
-            ))}
-          </ul>
+              {data.sets.map((s) => (
+                <button
+                  key={s.set}
+                  type="button"
+                  aria-pressed={open === s.set}
+                  title={`${s.missing} of ${s.total} missing`}
+                  onClick={() => setOpen(open === s.set ? null : s.set)}
+                >
+                  <Badge
+                    size="2xsmall"
+                    color={open === s.set ? 'blue' : 'orange'}
+                  >
+                    {s.set} · {s.missing}
+                  </Badge>
+                </button>
+              ))}
+            </div>
+          )}
+          {openSet && (
+            // the scroll lives on this wrapper: a height-capped grid squeezes its rows
+            <div className="max-h-40 overflow-auto">
+              <ul
+                aria-label={`${openSet.set} missing cards`}
+                className="text-ui-fg-subtle grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-x-4 text-xs"
+              >
+                {openSet.cards.map((c) => (
+                  <li key={c.code} className="truncate">
+                    {c.code} · {c.name}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       )}
     </section>
