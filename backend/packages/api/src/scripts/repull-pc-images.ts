@@ -146,6 +146,9 @@ export default async function repullPcImages({ container, args }: ExecArgs) {
       set: string;
       label_year?: string | null;
       label_note?: string | null;
+      label_set?: string | null;
+      label_name?: string | null;
+      label_number?: string | null;
       slab_image?: string | null;
       slab_image_key?: string | null;
     },
@@ -174,6 +177,9 @@ export default async function repullPcImages({ container, args }: ExecArgs) {
         set: card.set,
         label_year: card.label_year ?? null,
         label_note: card.label_note ?? null,
+        label_set: card.label_set ?? null,
+        label_name: card.label_name ?? null,
+        label_number: card.label_number ?? null,
       },
       frameBytes ?? undefined,
     );

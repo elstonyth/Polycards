@@ -150,6 +150,9 @@ export interface AdminCard {
    *  composite; null = blank (renders nothing). */
   label_year: string | null;
   label_note: string | null;
+  label_set: string | null;
+  label_name: string | null;
+  label_number: string | null;
   /** When the card was registered (ISO) — the list's "Added" sort key. */
   created_at: string;
   /** USD -> MYR breakdown for the current market_value; always present (GET
@@ -180,6 +183,9 @@ export interface AdminCardRegister {
    *  value (max 64 chars, backend-trimmed). */
   label_year?: string | null;
   label_note?: string | null;
+  label_set?: string | null;
+  label_name?: string | null;
+  label_number?: string | null;
 }
 
 // Edit payload. `handle` travels as the `$handle` path param, not the body.
@@ -205,6 +211,9 @@ export interface AdminCardUpdate {
    *  value (max 64 chars, backend-trimmed). */
   label_year?: string | null;
   label_note?: string | null;
+  label_set?: string | null;
+  label_name?: string | null;
+  label_number?: string | null;
 }
 
 export interface OddsRow {

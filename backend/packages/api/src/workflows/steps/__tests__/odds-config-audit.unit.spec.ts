@@ -218,6 +218,11 @@ describe('delete-card audit', () => {
       first_seen_at: '2026-10-16T03:00:00Z',
     },
     pc_sync_error: 'upstream unavailable',
+    label_year: '2021',
+    label_note: null,
+    label_set: 'POKEMON JAPANESE',
+    label_name: 'FA/MEW',
+    label_number: '030',
   };
   const odds = [
     row('rare-a', 'Rare', 220_000, { weight_2: 400_000, weight_3: 500_000 }),
@@ -283,6 +288,22 @@ describe('delete-card audit', () => {
     ).toMatchObject({
       pc_pending_price: card.pc_pending_price,
       pc_sync_error: card.pc_sync_error,
+    });
+  });
+
+  it('keeps the typed slab label wording in the rollback snapshot', async () => {
+    const res = await deleteCardInvoke(
+      { handle: 'rare-a', admin_id: 'user_admin' },
+      { container: containerWith(packsWith()) },
+    );
+    expect(
+      (res.compensateInput as { card: Record<string, unknown> }).card,
+    ).toMatchObject({
+      label_year: '2021',
+      label_note: null,
+      label_set: 'POKEMON JAPANESE',
+      label_name: 'FA/MEW',
+      label_number: '030',
     });
   });
 });

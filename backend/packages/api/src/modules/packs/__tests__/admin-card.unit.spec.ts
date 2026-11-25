@@ -20,6 +20,9 @@ const card = {
   pc_synced_at: null as string | Date | null,
   label_year: null as string | null,
   label_note: null as string | null,
+  label_set: null as string | null,
+  label_name: null as string | null,
+  label_number: null as string | null,
   created_at: new Date('2026-01-02T03:04:05.000Z') as Date | string,
 };
 
@@ -45,6 +48,9 @@ describe('toAdminCardDto', () => {
       pc_synced_at: null,
       label_year: null,
       label_note: null,
+      label_set: null,
+      label_name: null,
+      label_number: null,
       // Passed straight through (no money/date coercion) — the admin cards
       // list sorts its "Added" column on it.
       created_at: new Date('2026-01-02T03:04:05.000Z'),
