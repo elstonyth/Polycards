@@ -58,7 +58,7 @@ const HEADERS = [
   'STATUS',
 ];
 
-const rawOrPsa = (r: ToBuyListRow): string =>
+export const rawOrPsa = (r: ToBuyListRow): string =>
   r.graded ? (r.grade ?? 'SLAB') : 'RAW';
 
 const money = (value: number | null): Cell =>
