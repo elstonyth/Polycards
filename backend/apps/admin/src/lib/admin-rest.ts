@@ -1606,6 +1606,52 @@ export interface PixelPokemonPage {
   all_types: string[];
 }
 
+// Clean card art (owner 2026-11-26): one stamp-free image per card printing,
+// keyed by code (OP05-119, OP05-119_p3). See api/admin/card-art.
+export type CardArtEntry = { code: string; image_url: string; updated_at?: string };
+export interface CardArtPage {
+  card_art: CardArtEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+  sets: { set: string; count: number }[];
+}
+
+/** Every uploaded printing of one card (base + alternate arts). */
+export async function getCardArtFamily(code: string): Promise<CardArtEntry[]> {
+  const data = await getJson<{ card_art: CardArtEntry[] }>(
+    `/admin/card-art?code=${encodeURIComponent(code)}`,
+  );
+  return data.card_art;
+}
+
+export function listCardArt(params: {
+  q: string;
+  page: number;
+  limit: number;
+}): Promise<CardArtPage> {
+  const qs = new URLSearchParams({
+    q: params.q,
+    limit: String(params.limit),
+    offset: String(params.page * params.limit),
+  });
+  return getJson<CardArtPage>(`/admin/card-art?${qs}`);
+}
+
+export function saveCardArt(
+  items: { code: string; image_url: string }[],
+): Promise<{ saved: number }> {
+  return postJson<{ saved: number }>('/admin/card-art', { items });
+}
+
+export async function deleteCardArt(code: string): Promise<void> {
+  const res = await fetch(
+    `${__BACKEND_URL__}/admin/card-art/${encodeURIComponent(code)}`,
+    { method: 'DELETE', credentials: 'include' },
+  );
+  if (!res.ok) throw await httpError(res);
+}
+
 export interface PixelPokemonQuery {
   q?: string;
   franchise?: string;

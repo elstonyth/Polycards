@@ -41,6 +41,7 @@ export const CUSTOM_ADMIN_RESOURCES = {
   'assistant-settings': 'assistant_setting',
   automation: 'automation',
   'avatar-frames': 'avatar_frame',
+  'card-art': 'card_art',
   cards: 'card',
   challenge: 'challenge',
   'coin-flips': 'coin_flip',

@@ -111,6 +111,18 @@ const EXEMPT: { path: string; method: string; reason: string }[] = [
       'the recorded "only money-mutation routes carry this limiter" convention.',
   },
   {
+    path: '/admin/card-art',
+    method: 'POST',
+    reason:
+      'Clean card art catalog write, looped per batch by the bulk upload page ' +
+      '(thousands of printings per set); catalog CRUD, not a money mutation.',
+  },
+  {
+    path: '/admin/card-art/*',
+    method: 'DELETE',
+    reason: 'Clean card art catalog delete (one wrong upload); not a money mutation.',
+  },
+  {
     path: '/admin/pixel-pokemon',
     method: 'POST',
     reason:
@@ -170,8 +182,10 @@ describe('admin mutation routes are rate-limited (plan 061 coverage guard)', () 
   it('the EXEMPT list is exactly the routes plan 061 intended — no silent growth', () => {
     const keys = EXEMPT.map((e) => `${e.method} ${e.path}`).sort();
     expect(keys).toEqual([
+      'DELETE /admin/card-art/*',
       'DELETE /admin/cards/*',
       'DELETE /admin/packs/*',
+      'POST /admin/card-art',
       'POST /admin/cards',
       'POST /admin/cards/*',
       'POST /admin/delivery-orders/*',
