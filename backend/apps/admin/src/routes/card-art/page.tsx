@@ -58,10 +58,13 @@ type Run = {
 const MissingArt = () => {
   const qc = useQueryClient();
   const [refreshing, setRefreshing] = useState(false);
+  // one set's missing codes at a time, in a short scroll box
+  const [open, setOpen] = useState<string | null>(null);
   const { data, isError } = useQuery({
     queryKey: ['card-art', 'missing'],
     queryFn: getCardArtMissing,
   });
+  const openSet = data?.sets.find((s) => s.set === open);
   const refresh = async () => {
     setRefreshing(true);
     try {
@@ -80,7 +83,7 @@ const MissingArt = () => {
   return (
     <section
       aria-labelledby="card-art-missing"
-      className="border-ui-border-base flex flex-col gap-y-2 rounded-lg border p-4"
+      className="border-ui-border-base flex flex-col gap-y-2 rounded-lg border p-3"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-col">
@@ -110,21 +113,38 @@ const MissingArt = () => {
         </Button>
       </div>
       {data && data.sets.length > 0 && (
-        <div className="flex flex-col gap-1">
+        <div
+          className="flex flex-wrap gap-1"
+          aria-label="Sets with missing art"
+        >
           {data.sets.map((s) => (
-            <details key={s.set} className="text-sm">
-              <summary className="cursor-pointer">
-                {s.set} · {s.missing} of {s.total} missing
-              </summary>
-              <ul className="text-ui-fg-subtle mt-1 grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-x-4 text-xs">
-                {s.cards.map((c) => (
-                  <li key={c.code}>
-                    {c.code} · {c.name}
-                  </li>
-                ))}
-              </ul>
-            </details>
+            <button
+              key={s.set}
+              type="button"
+              aria-pressed={open === s.set}
+              title={`${s.missing} of ${s.total} missing`}
+              onClick={() => setOpen(open === s.set ? null : s.set)}
+            >
+              <Badge size="2xsmall" color={open === s.set ? 'blue' : 'orange'}>
+                {s.set} · {s.missing}
+              </Badge>
+            </button>
           ))}
+        </div>
+      )}
+      {openSet && (
+        // the scroll lives on this wrapper: a height-capped grid squeezes its rows
+        <div className="max-h-40 overflow-auto">
+          <ul
+            aria-label={`${openSet.set} missing cards`}
+            className="text-ui-fg-subtle grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-x-4 text-xs"
+          >
+            {openSet.cards.map((c) => (
+              <li key={c.code} className="truncate">
+                {c.code} · {c.name}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </section>
