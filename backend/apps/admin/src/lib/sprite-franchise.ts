@@ -57,6 +57,21 @@ const ALIASES: Record<string, string[]> = {
   'Charlotte Linlin': ['Big Mom'],
   Enel: ['Eneru'],
   'Nefertari Vivi': ['Nefeltari Vivi'],
+  Kikunojo: ['Okiku'],
+  'Caesar Clown': ['Gastino'],
+  'Don Krieg': ['Krieg'],
+  'Capone Bege': ['Capone Gang Bege'],
+  // variant rows match by name or alias too: a disguise card never prints the base name
+  'Monkey D. Luffy (Lucy)': ['Lucy'],
+  'Sanji (Raid Suit)': ['Soba Mask'],
+  // full-TCG roster (Nov 2026) is named by the cards' own spelling; these print a second name
+  'Miss Buckingham Stussy': ['Buckin'],
+  Viola: ['Violet'],
+  'Kouzuki Toki': ['Amatsuki Toki'],
+  Sham: ['Meowban Brothers'],
+  Kotori: ['Hotori'],
+  Pickles: ['Groggy Monsters'],
+  'Kozuki Sukiyaki': ['Tenguyama Hitetsu'],
 };
 
 /** The library name a One Piece search means: "Big Mom" → "Charlotte Linlin",
@@ -88,10 +103,11 @@ function containsWords(hay: string[], needle: string[]): boolean {
 }
 
 /** Auto-link a One Piece card to its character's sprite. The longest matching
- *  base name wins ("Monkey D. Luffy" over a bare "Luffy"); two characters tied
- *  for it ("Luffy & Ace") is no match. A variant of that character whose label
- *  is in the title ("[Gear 5]" → gear-5, "(Wano)" → wano) beats the base.
- *  Null = no confident match; the operator links by hand. */
+ *  name wins ("Monkey D. Luffy" over a bare "Luffy"); two characters tied
+ *  for it ("Luffy & Ace") is no match. A variant row matches by its own name
+ *  too ("Sogeking" → Usopp's sogeking), and a variant of the matched character
+ *  whose label is in the title ("[Gear 5]" → gear-5, "(Wano)" → wano) beats
+ *  the base. Null = no confident match; the operator links by hand. */
 export function matchOnePieceEntry(
   cardName: string,
   rows: PixelPokemonRow[],
@@ -99,7 +115,7 @@ export function matchOnePieceEntry(
   const hay = tokens(cardName);
   let best: { row: PixelPokemonRow; len: number; tie: boolean } | null = null;
   for (const row of rows) {
-    if (row.franchise !== 'one-piece' || row.variant !== 'normal') continue;
+    if (row.franchise !== 'one-piece') continue;
     for (const name of [row.name, ...(ALIASES[row.name] ?? [])]) {
       const needle = tokens(name);
       if (!containsWords(hay, needle)) continue;
@@ -112,6 +128,7 @@ export function matchOnePieceEntry(
   }
   if (!best || best.tie) return null;
   const base = best.row;
+  if (base.variant !== 'normal') return base;
   let variant: { row: PixelPokemonRow; len: number } | null = null;
   for (const row of rows) {
     if (
@@ -158,20 +175,32 @@ export function autoLinkKey(o: {
   return `${o.deck}:${o.name}`;
 }
 
-// The whole One Piece roster is small (126 rows incl. variants): one memoised
-// fetch serves every picker on the bulk import page. Kept for a minute, and an
+// The whole One Piece roster (~750 rows incl. variants since the full-TCG
+// set) is fetched once, page by page (the route caps a page at 200), and
+// serves every picker on the bulk import page. Kept for a minute, and an
 // empty or failed answer not at all, so a roster uploaded while a tab is open
 // shows up.
-// shortcut: one page of 200 (the route's cap); page through it if the roster
-// ever outgrows that.
 const ROSTER_TTL_MS = 60_000;
+const ROSTER_PAGE = 200;
 let roster: { at: number; rows: Promise<PixelPokemonRow[]> } | null = null;
+
+async function loadRoster(): Promise<PixelPokemonRow[]> {
+  const all: PixelPokemonRow[] = [];
+  for (let page = 0; ; page++) {
+    const res = await getPixelPokemon({
+      franchise: 'one-piece',
+      limit: ROSTER_PAGE,
+      page,
+    });
+    all.push(...res.pixel_pokemon);
+    if (res.pixel_pokemon.length < ROSTER_PAGE || all.length >= res.total)
+      return all;
+  }
+}
 
 export const fetchOnePieceRoster = (): Promise<PixelPokemonRow[]> => {
   if (!roster || Date.now() - roster.at > ROSTER_TTL_MS) {
-    const rows = getPixelPokemon({ franchise: 'one-piece', limit: 200 }).then(
-      (page) => page.pixel_pokemon,
-    );
+    const rows = loadRoster();
     const entry = { at: Date.now(), rows };
     roster = entry;
     rows.then(

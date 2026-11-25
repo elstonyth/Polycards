@@ -2,12 +2,13 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   autoLinkKey,
   entryNumber,
+  fetchOnePieceRoster,
   franchiseFor,
   matchOnePieceEntry,
   onePieceSearchTerm,
   pickerDeck,
 } from './sprite-franchise';
-import type { PixelPokemonRow } from './admin-rest';
+import { getPixelPokemon, type PixelPokemonRow } from './admin-rest';
 
 vi.mock('./admin-rest', () => ({ getPixelPokemon: vi.fn() }));
 
@@ -41,6 +42,11 @@ const ROWS = [
   op('Trafalgar D. Water Law', 44),
   op('King', 22),
   op('Bartholomew Kuma', 42),
+  op('Usopp', 4),
+  op('Sogeking', 4, { variant: 'sogeking' }),
+  op('Monkey D. Luffy (Lucy)', 1, { variant: 'lucy' }),
+  op('Speed', 300),
+  op('Speed Jil', 301),
 ];
 
 describe('franchiseFor', () => {
@@ -134,8 +140,20 @@ describe('matchOnePieceEntry', () => {
     expect(
       matchOnePieceEntry('Monkey.D.Luffy (Wano Country) OP06-001', ROWS)?.id,
     ).toBe('op_1_wano');
-    // another character's variant never wins
-    expect(matchOnePieceEntry('Roronoa Zoro (Wano) OP06-118', ROWS)).toBeNull();
+    // the character's own variant row, never another character's (Luffy's wano)
+    expect(matchOnePieceEntry('Roronoa Zoro (Wano) OP06-118', ROWS)?.id).toBe(
+      'op_2_wano',
+    );
+  });
+  it('a disguise card links the variant row by its own name or alias', () => {
+    expect(matchOnePieceEntry('Sogeking EB02-024', ROWS)?.id).toBe(
+      'op_4_sogeking',
+    );
+    expect(matchOnePieceEntry('Usopp OP01-004', ROWS)?.id).toBe('op_4_normal');
+    expect(matchOnePieceEntry('Lucy OP09-061', ROWS)?.id).toBe('op_1_lucy');
+  });
+  it('a longer name beats a shorter one inside it (Speed Jil is not Speed)', () => {
+    expect(matchOnePieceEntry('Speed Jil OP03-006', ROWS)?.number).toBe(301);
   });
   it('two characters in one title is no match', () => {
     expect(
@@ -166,5 +184,21 @@ describe('entryNumber', () => {
     expect(
       entryNumber({ franchise: 'one-piece', dex: null, number: null }),
     ).toBe('');
+  });
+});
+
+describe('fetchOnePieceRoster', () => {
+  it('pages through the whole roster (the route caps a page at 200)', async () => {
+    const rows = Array.from({ length: 450 }, (_, i) => op(`Char ${i}`, i + 1));
+    vi.mocked(getPixelPokemon).mockImplementation(async ({ page = 0, limit = 60 }) => ({
+      pixel_pokemon: rows.slice(page * limit, (page + 1) * limit),
+      total: rows.length,
+      limit,
+      offset: page * limit,
+      all_types: [],
+    }));
+    const got = await fetchOnePieceRoster();
+    expect(got).toHaveLength(450);
+    expect(vi.mocked(getPixelPokemon)).toHaveBeenCalledTimes(3);
   });
 });
