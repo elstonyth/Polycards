@@ -91,8 +91,7 @@ describe('TabBar dots', () => {
     drawDot.show = true;
     await render();
 
-    // The phone bar's Play tab carries Draw's href, and so its dot.
-    expect(labelFor('/lucky-draw')).toBe('Play, new gate');
+    expect(labelFor('/lucky-draw')).toBe('Draw, new gate');
     expect(labelFor('/vault')).toBeNull();
     expect(labelFor('/me')).toBeNull();
   });

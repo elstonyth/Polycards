@@ -49,16 +49,18 @@ export const metadata: Metadata = {
 // suspension (routes 404 while the reward economy is paused). Bank arrived
 // 2026-08-05 with real gateway payouts: saved accounts the withdraw form
 // prefills, managed at /bank.
+// Owner 2026-11-26: ten round buttons were too many, so they are one quiet
+// two-column menu, money and goods first.
 const QUICK_ACCESS: { label: string; href: string; icon: LucideIcon }[] = [
-  { label: 'Referral', href: '/referral', icon: Users },
   { label: 'History', href: '/transactions', icon: Receipt },
   { label: 'Orders', href: '/orders', icon: Package },
   { label: 'Bank', href: '/bank', icon: Landmark },
-  { label: 'Inbox', href: '/notifications', icon: Bell },
-  { label: 'Download', href: '/download', icon: Download },
   { label: 'Address', href: '/addresses', icon: MapPin },
-  { label: 'Support', href: '/contact', icon: LifeBuoy },
+  { label: 'Inbox', href: '/notifications', icon: Bell },
+  { label: 'Referral', href: '/referral', icon: Users },
   { label: 'Settings', href: '/settings', icon: Settings },
+  { label: 'Support', href: '/contact', icon: LifeBuoy },
+  { label: 'Download', href: '/download', icon: Download },
 ];
 
 // The "About & help" card (How it works / Fairness / About / Contact) was
@@ -71,11 +73,10 @@ const QUICK_ACCESS: { label: string; href: string; icon: LucideIcon }[] = [
 const LABEL =
   'text-[11px] font-semibold tracking-[0.08em] text-neutral-400 uppercase';
 const PANEL = 'rounded-3xl border border-white/10 bg-neutral-900 p-4 sm:p-5';
-// A shortcut: a 48px round grey chip over its label, four to a row.
-const TILE =
-  'flex min-w-0 flex-col items-center gap-1.5 text-center text-[11px] font-semibold';
-const TILE_ICON =
-  'relative flex h-12 w-12 items-center justify-center rounded-full border border-white/10 bg-neutral-800 transition-colors';
+// A shortcut: a small icon and its label on one 48px row, two to a line.
+const ITEM =
+  'flex h-12 min-w-0 items-center gap-2.5 rounded-xl px-3 text-[13px] font-medium transition-colors hover:bg-white/5';
+const ITEM_ICON = 'relative inline-flex shrink-0 text-neutral-400';
 
 export default async function MePage() {
   // NOT guaranteed by the account layout's auth gate, despite how it reads:
@@ -262,7 +263,7 @@ export default async function MePage() {
                   Balance
                   <ChevronRight className="h-3.5 w-3.5" aria-hidden />
                 </span>
-                <span className="mt-1.5 block whitespace-nowrap font-heading text-[2.25rem] leading-none text-white tabular-nums lg:text-[2.75rem]">
+                <span className="mt-1.5 block text-[2.25rem] leading-none font-semibold tracking-tight whitespace-nowrap text-white tabular-nums lg:text-[2.75rem]">
                   {rm(balance.balance)}
                 </span>
               </Link>
@@ -337,99 +338,8 @@ export default async function MePage() {
           )}
         </section>
 
-        {numbers.length > 0 && (
-          <dl
-            className={cn(
-              PANEL,
-              'grid auto-cols-fr grid-flow-col divide-x divide-white/10 px-0 py-3.5 sm:px-0 lg:col-start-1 lg:row-start-2',
-            )}
-          >
-            {numbers.map((n) => (
-              <div
-                key={n.label}
-                // justify-center: on desktop the row is as tall as its
-                // neighbour, and the numbers sat on the panel's floor.
-                className="flex min-w-0 flex-col-reverse items-center justify-center gap-1 px-1 text-center"
-              >
-                <dt className="truncate text-[12px] text-neutral-400">
-                  {n.label}
-                </dt>
-                <dd className="font-heading text-lg leading-none text-white tabular-nums lg:text-xl">
-                  {n.value}
-                </dd>
-              </div>
-            ))}
-          </dl>
-        )}
-
-        {/* Quick access, Log out its last tile. Frames live in the Edit
-            Profile modal (tap the avatar, the name or Edit). */}
-        <nav
-          aria-label="Quick access"
-          className="grid grid-cols-4 gap-x-2 gap-y-4 py-1 flat:row-span-2 flat:self-start lg:col-start-3 lg:row-start-1 lg:rounded-3xl lg:border lg:border-white/10 lg:bg-neutral-900 lg:p-5"
-        >
-          {QUICK_ACCESS.map((item) => {
-            const Icon = item.icon;
-            // A phoneless account is refused by every money/goods path
-            // (backend requirePhoneVerified: top-up, deposit, withdraw,
-            // delivery), and nothing on this screen says so until they hit
-            // the wall. Light the tile that fixes it.
-            const highlight = needsPhone && item.href === '/settings';
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={cn(
-                  TILE,
-                  'group',
-                  highlight
-                    ? 'text-white'
-                    : 'text-neutral-300 hover:text-white',
-                )}
-              >
-                {/* Paper White, not Chase Gold: gold is reserved for prize
-                    and value moments, and a collector trained on gold =
-                    prize reads a gold Settings tile as "reward waiting". */}
-                <span
-                  className={cn(
-                    TILE_ICON,
-                    highlight
-                      ? 'bg-white/15 ring-1 ring-white/40'
-                      : 'group-hover:bg-neutral-700',
-                  )}
-                >
-                  <Icon className="h-5 w-5" aria-hidden />
-                  {highlight && (
-                    <span
-                      aria-hidden
-                      className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-neutral-50"
-                    />
-                  )}
-                </span>
-                {item.label}
-                {/* Colour alone is invisible to a screen reader, and it is
-                    the only thing separating this tile from the others. */}
-                {highlight && (
-                  <span className="sr-only">— add your phone number</span>
-                )}
-              </Link>
-            );
-          })}
-          <LogoutButton
-            className={cn(
-              TILE,
-              'h-auto w-auto justify-start rounded-none border-0 text-[11px] text-neutral-300',
-            )}
-            icon={
-              <span className={TILE_ICON}>
-                <LogOut className="h-5 w-5" aria-hidden />
-              </span>
-            }
-          />
-        </nav>
-
-        {/* 橱窗 — showcased cards, fanned. Hidden when the profile read
-            fails. */}
+        {/* 橱窗 — showcased cards, fanned, right under the balance (owner
+            2026-11-26). Hidden when the profile read fails. */}
         {profile && (
           <section
             className={cn(PANEL, 'pb-3 sm:pb-4 lg:col-start-1 lg:row-start-3')}
@@ -506,6 +416,91 @@ export default async function MePage() {
           </section>
         )}
 
+        {numbers.length > 0 && (
+          <dl
+            className={cn(
+              PANEL,
+              'grid auto-cols-fr grid-flow-col divide-x divide-white/10 px-0 py-3.5 sm:px-0 lg:col-start-1 lg:row-start-2',
+            )}
+          >
+            {numbers.map((n) => (
+              <div
+                key={n.label}
+                // justify-center: on desktop the row is as tall as its
+                // neighbour, and the numbers sat on the panel's floor.
+                className="flex min-w-0 flex-col-reverse items-center justify-center gap-1 px-1 text-center"
+              >
+                <dt className="truncate text-[12px] text-neutral-400">
+                  {n.label}
+                </dt>
+                <dd className="font-heading text-lg leading-none text-white tabular-nums lg:text-xl">
+                  {n.value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        )}
+
+        {/* Quick access, Log out its last item. Frames live in the Edit
+            Profile modal (tap the avatar, the name or Edit). */}
+        <nav
+          aria-label="Quick access"
+          className={cn(
+            PANEL,
+            'grid grid-cols-2 gap-1 p-2 sm:p-2 flat:row-span-2 flat:self-start lg:col-start-3 lg:row-start-1 lg:self-start',
+          )}
+        >
+          {QUICK_ACCESS.map((item) => {
+            const Icon = item.icon;
+            // A phoneless account is refused by every money/goods path
+            // (backend requirePhoneVerified: top-up, deposit, withdraw,
+            // delivery), and nothing on this screen says so until they hit
+            // the wall. Light the item that fixes it.
+            const highlight = needsPhone && item.href === '/settings';
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  ITEM,
+                  highlight
+                    ? 'bg-white/10 text-white'
+                    : 'text-neutral-200 hover:text-white',
+                )}
+              >
+                {/* Paper White, not Chase Gold: gold is reserved for prize
+                    and value moments, and a collector trained on gold =
+                    prize reads a gold Settings item as "reward waiting". */}
+                <span className={cn(ITEM_ICON, highlight && 'text-white')}>
+                  <Icon className="h-[18px] w-[18px]" aria-hidden />
+                  {highlight && (
+                    <span
+                      aria-hidden
+                      className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-neutral-50"
+                    />
+                  )}
+                </span>
+                <span className="truncate">{item.label}</span>
+                {/* Colour alone is invisible to a screen reader, and it is
+                    the only thing separating this item from the others. */}
+                {highlight && (
+                  <span className="sr-only">— add your phone number</span>
+                )}
+              </Link>
+            );
+          })}
+          <LogoutButton
+            className={cn(
+              ITEM,
+              'w-auto justify-start border-0 font-medium text-neutral-400 hover:text-white',
+            )}
+            icon={
+              <span className={ITEM_ICON}>
+                <LogOut className="h-[18px] w-[18px]" aria-hidden />
+              </span>
+            }
+          />
+        </nav>
         {/* Desktop only: the wallet's unlock steps (a phone has the one-line
             note in the balance card), then the invite card. */}
         {gate && cantYet && (

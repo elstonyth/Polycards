@@ -5,7 +5,7 @@ import { PHONE_TABS } from './tabs';
 
 /**
  * Bottom tab bar — the primary nav on phones (hidden lg+, where AppHeader
- * links all seven destinations). A slim floating dock of five icon tabs
+ * links all seven destinations). A slim floating dock of six icon tabs
  * (PHONE_TABS): the tab you are on is a grey pill that opens to show its
  * label, the same move as the pack category bar. Each item is a TabLink,
  * shared with AppHeader's links.

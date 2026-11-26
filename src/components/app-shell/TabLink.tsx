@@ -94,8 +94,9 @@ export function TabMarker({
 // tab-flow target is 100ms).
 const ITEM_VARIANT: Record<Variant, string> = {
   // Idle tabs share the dock equally; the one you are on takes its label's
-  // width. The ::before stretches the tap to the dock's full height.
-  bar: "flex h-11 min-w-11 flex-1 items-center justify-center rounded-full before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-[''] focus-visible:ring-2 focus-visible:ring-glacier aria-[current=page]:flex-none",
+  // width. The ::before stretches the tap to the dock's full height. Six tabs
+  // and an open "Rewards" need 40px idle tabs below 380px.
+  bar: "flex h-11 min-w-11 flex-1 items-center justify-center rounded-full before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-[''] focus-visible:ring-2 focus-visible:ring-glacier aria-[current=page]:flex-none max-[379px]:min-w-10",
   // The press scale of Pill (DESIGN.md "Buttons").
   pill: 'rounded-full transition-transform data-[pressed]:scale-[0.98] focus-visible:ring-2 focus-visible:ring-glacier motion-reduce:transition-none motion-reduce:data-[pressed]:scale-100',
 };
@@ -265,7 +266,7 @@ function TabFace({
     return (
       <span
         className={cn(
-          'flex h-11 items-center justify-center rounded-full px-3.5 transition-[background-color,color,box-shadow,transform] duration-200 group-data-[pressed]:duration-100 motion-safe:group-data-[pressed]:scale-95 max-[359px]:px-3',
+          'flex h-11 items-center justify-center rounded-full px-3.5 transition-[background-color,color,box-shadow,transform] duration-200 group-data-[pressed]:duration-100 motion-safe:group-data-[pressed]:scale-95 max-[379px]:px-3',
           lit
             ? 'bg-neutral-700 text-glacier shadow-[inset_0_1px_0_rgb(255_255_255/0.12)]'
             : 'text-neutral-400 group-hover:text-neutral-200',
@@ -286,11 +287,12 @@ function TabFace({
           )}
         </span>
         {/* The label opens only on the page you are on, never while pending:
-            two open labels would not fit a 320px phone. Width eases through
+            two open labels would not fit. Below 360px six tabs leave no room
+            for one, so the lit pill is the icon alone. Width eases through
             the grid column, 0fr to 1fr. */}
         <span
           className={cn(
-            'grid transition-[grid-template-columns,opacity] duration-300 ease-(--ease-out-quart) motion-reduce:transition-none',
+            'grid transition-[grid-template-columns,opacity] duration-300 ease-(--ease-out-quart) motion-reduce:transition-none max-[359px]:hidden',
             active
               ? 'grid-cols-[1fr] opacity-100'
               : 'grid-cols-[0fr] opacity-0',

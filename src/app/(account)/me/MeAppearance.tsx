@@ -90,7 +90,7 @@ export function MeHeader({
               type="button"
               onClick={() => setEditing(true)}
               // 44px to tap, pulled back in so the line keeps its height
-              className="-my-2 flex min-h-11 max-w-full items-center font-heading text-[1.375rem] leading-tight text-white transition-colors hover:text-white/80 lg:text-[1.625rem]"
+              className="-my-2 flex min-h-11 max-w-full items-center text-xl leading-tight font-semibold tracking-tight text-white transition-colors hover:text-white/80 lg:text-2xl"
             >
               <span className="truncate">{displayName}</span>
             </button>

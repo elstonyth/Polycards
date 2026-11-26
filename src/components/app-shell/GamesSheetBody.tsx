@@ -4,7 +4,8 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
-import { X } from 'lucide-react';
+import { ChevronRight, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { openAuth } from '@/components/AuthButton';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { AmbientVideo } from '@/components/AmbientVideo';
@@ -13,10 +14,10 @@ import { GLASS_SUBTLE, useLiquidGlass } from '@/lib/use-liquid-glass';
 import { COIN_FLIP_OPEN, GAMES_EVENT } from './games';
 
 /**
- * The game picker the Games tab opens (operator 2026-10-25): a bottom sheet
- * on phones, a centred dialog on desktop. Coin Flip is coming soon until
- * COIN_FLIP_OPEN, then opens its guarded Vault flow; Lucky Draw has its own tab
- * since 2026-10-30. Swipe down, tap outside, X or Escape closes it.
+ * The game list the Games tab (Play on phones) opens (operator 2026-10-25): a
+ * bottom sheet on phones, a centred dialog on desktop. Coin Flip is coming
+ * soon until COIN_FLIP_OPEN, then opens its guarded Vault flow; Lucky Draw has
+ * its own tab. Swipe down, tap outside, X or Escape closes it.
  */
 export function GamesSheetBody({ openedOn }: { openedOn: string }) {
   // Open on the page it was opened from: any navigation (browser back
@@ -66,7 +67,7 @@ function Panel({ onClose }: { onClose: (then?: () => void) => void }) {
   useModalA11y(panelRef, true, onClose);
   useLiquidGlass(panelRef, true, GLASS_SUBTLE);
   // Rendered from the game's own CoinScene coin, so it matches at every angle:
-  // Head, flip, Tail, flip back (a full turn loops). Its backdrop is the tile's
+  // Head, flip, Tail, flip back (a full turn loops). Its backdrop is the row's
   // neutral-900, so no blend mode.
   const coin = (
     <AmbientVideo
@@ -74,9 +75,20 @@ function Panel({ onClose }: { onClose: (then?: () => void) => void }) {
       webm="/images/coin-flip/coin-loop.webm"
       poster="/images/coin-flip/coin-loop-poster.webp"
       fit="contain"
-      className="aspect-[4/3] w-[94%] max-w-[155px] transition-transform duration-300 group-hover:scale-105"
+      className="aspect-[4/3] w-24 transition-transform duration-300 group-hover:scale-105"
     />
   );
+  // The game list (owner 2026-11-26: Play opens a list of games). A new game
+  // is one more entry.
+  const games = [
+    {
+      title: 'COIN FLIP',
+      blurb: 'Your cards. One toss.',
+      href: '/vault/coin-flip',
+      open: COIN_FLIP_OPEN,
+      art: coin,
+    },
+  ];
 
   return (
     <div className="fixed inset-0 z-[60] flex items-end justify-center sm:items-center sm:p-4">
@@ -125,58 +137,74 @@ function Panel({ onClose }: { onClose: (then?: () => void) => void }) {
           </button>
         </div>
 
-        <ul className="mt-4 grid grid-cols-2 gap-3">
-          <li>
-            {COIN_FLIP_OPEN ? (
-              <Link
-                href="/vault/coin-flip"
-                transitionTypes={['game-in']}
-                draggable={false}
-                onClick={(event) => {
-                  if (!customer && !isLoading) {
-                    event.preventDefault();
-                    onClose(() => openAuth('signup'));
-                  } else onClose();
-                }}
-                className="group relative flex min-h-[14rem] flex-col justify-end overflow-hidden rounded-2xl border border-white/10 bg-neutral-900 p-3 outline-none transition-colors hover:border-white/25 focus-visible:ring-2 focus-visible:ring-white/40 sm:aspect-[4/5]"
-              >
-                <span className="absolute inset-x-0 top-6 flex justify-center">
-                  {coin}
-                </span>
-                <span className="font-heading text-lg leading-tight text-white">
-                  COIN FLIP
-                </span>
-                <span className="mt-0.5 text-xs text-neutral-400">
-                  Your cards. One toss.
-                </span>
-              </Link>
-            ) : (
-              <SoonTile title="COIN FLIP" art={coin} />
-            )}
-          </li>
+        <ul className="mt-4 space-y-2">
+          {games.map((game) => (
+            <li key={game.href}>
+              {game.open ? (
+                <Link
+                  href={game.href}
+                  transitionTypes={['game-in']}
+                  draggable={false}
+                  onClick={(event) => {
+                    if (!customer && !isLoading) {
+                      event.preventDefault();
+                      onClose(() => openAuth('signup'));
+                    } else onClose();
+                  }}
+                  className={cn(
+                    ROW,
+                    'group outline-none transition-colors hover:border-white/25 focus-visible:ring-2 focus-visible:ring-white/40',
+                  )}
+                >
+                  <span className="flex shrink-0 justify-center">
+                    {game.art}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="font-heading block text-lg leading-tight text-white">
+                      {game.title}
+                    </span>
+                    <span className="mt-0.5 block text-xs text-neutral-400">
+                      {game.blurb}
+                    </span>
+                  </span>
+                  <ChevronRight
+                    className="h-5 w-5 shrink-0 text-neutral-500 transition-transform group-hover:translate-x-0.5"
+                    aria-hidden
+                  />
+                </Link>
+              ) : (
+                <SoonRow title={game.title} art={game.art} />
+              )}
+            </li>
+          ))}
         </ul>
       </motion.div>
     </div>
   );
 }
 
+/** One game in the list: its art, then its name and line. */
+const ROW =
+  'flex items-center gap-4 rounded-2xl border border-white/10 bg-neutral-900 py-2 pr-4 pl-2';
+
 /** A game that isn't on yet: greyed out and not tappable. */
-function SoonTile({ title, art }: { title: string; art: ReactNode }) {
+function SoonRow({ title, art }: { title: string; art: ReactNode }) {
   return (
-    <div
-      aria-disabled="true"
-      className="relative flex min-h-[14rem] flex-col sm:aspect-[4/5] justify-end overflow-hidden rounded-2xl border border-white/10 bg-neutral-900 p-3"
-    >
-      <span className="absolute top-3 left-3 z-10 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-neutral-300 uppercase">
-        Soon
-      </span>
-      <span className="absolute inset-x-0 top-7 flex justify-center opacity-50 grayscale-[0.4]">
+    <div aria-disabled="true" className={ROW}>
+      <span className="flex shrink-0 justify-center opacity-50 grayscale-[0.4]">
         {art}
       </span>
-      <span className="font-heading text-lg leading-tight text-neutral-300">
-        {title}
+      <span className="min-w-0 flex-1">
+        <span className="font-heading block text-lg leading-tight text-neutral-300">
+          {title}
+        </span>
+        <span className="mt-0.5 block text-xs text-neutral-500">
+          Coming soon
+        </span>
       </span>
-      <span className="mt-0.5 text-xs text-neutral-500">Coming soon</span>
+      <span className="shrink-0 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-neutral-300 uppercase">
+        Soon
+      </span>
     </div>
   );
 }

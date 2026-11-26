@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
-import { COIN_FLIP_OPEN } from './games';
 
 type Section = { label: string; href: string };
 
@@ -13,15 +12,9 @@ export const REWARDS_SECTIONS: readonly Section[] = [
   { label: 'Ranks', href: '/leaderboard' },
 ];
 
-/** The pages behind the phone bar's Play tab. Coin Flip joins when it is open. */
-export const PLAY_SECTIONS: readonly Section[] = [
-  { label: 'Lucky Draw', href: '/lucky-draw' },
-  ...(COIN_FLIP_OPEN ? [{ label: 'Coin Flip', href: '/vault/coin-flip' }] : []),
-];
-
 /**
  * The switch at the top of a page that shares a phone tab with another page
- * (the phone bar has five tabs for seven destinations). Phones only: the
+ * (the phone bar has six tabs for seven destinations). Phones only: the
  * desktop header links every destination directly.
  */
 export function SectionSwitch({

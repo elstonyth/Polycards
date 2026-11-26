@@ -94,11 +94,12 @@ describe('Games tab', () => {
     }
   });
 
-  test('the phone bar has five tabs, Home in the middle', () => {
+  test('the phone bar has six tabs in the header order, Draw its own', () => {
     expect(PHONE_TABS.map((t) => t.label)).toEqual([
       'Rewards',
       'Play',
       'Home',
+      'Draw',
       'Vault',
       'Me',
     ]);
@@ -109,7 +110,7 @@ describe('Games tab', () => {
       PHONE_TABS.filter((t) => isTabActive(t, path)).map((t) => t.label);
     expect(lit('/task')).toEqual(['Rewards']);
     expect(lit('/leaderboard')).toEqual(['Rewards']);
-    expect(lit('/lucky-draw')).toEqual(['Play']);
+    expect(lit('/lucky-draw')).toEqual(['Draw']);
     expect(lit('/vault/coin-flip')).toEqual(['Play']);
     expect(lit('/vault')).toEqual(['Vault']);
     expect(lit('/wallet')).toEqual(['Me']);
@@ -131,15 +132,27 @@ describe('Games tab', () => {
     expect(open.map((a) => a.textContent)).toEqual(['Vault']);
   });
 
-  test('Play goes to the Lucky Draw page, and only for a signed-in customer', async () => {
+  test('Draw goes to the Lucky Draw page, and only for a signed-in customer', async () => {
     expect(draw.gated).toBe(true);
-    expect(PHONE_TABS.find((t) => t.label === 'Play')?.gated).toBe(true);
     await act(async () => root.render(createElement(TabBar)));
     const link = container.querySelector('a[href="/lucky-draw"]');
-    expect(link?.textContent).toBe('Play');
+    expect(link?.textContent).toBe('Draw');
   });
 
-  // The desktop header's link; the phone bar has no Games tab.
+  test('Play on the phone bar opens the game list instead of navigating', async () => {
+    await act(async () => root.render(createElement(TabBar)));
+    const button = [...container.querySelectorAll('button')].find(
+      (b) => b.textContent === 'Play',
+    )!;
+    expect(button.getAttribute('aria-haspopup')).toBe('dialog');
+    const opened = vi.fn();
+    window.addEventListener(GAMES_EVENT, opened);
+    await act(async () => button.click());
+    window.removeEventListener(GAMES_EVENT, opened);
+    expect(opened).toHaveBeenCalledTimes(1);
+  });
+
+  // The desktop header's link (the phone bar's Play is the same tab).
   test('tapping Games opens the picker instead of navigating', async () => {
     await act(async () =>
       root.render(createElement(TabLink, { tab: games, variant: 'pill' })),

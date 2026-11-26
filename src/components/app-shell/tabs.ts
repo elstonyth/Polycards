@@ -99,22 +99,16 @@ const tabAt = (href: string): Tab => {
 };
 
 /**
- * The phone bar: five tabs for the same seven destinations (2026-11-26; a
- * phone fits five, and seven left 55px a tab). Tasks and Ranks share Rewards,
- * Lucky Draw and Coin Flip share Play; each of those pages carries a
- * SectionSwitch to its partner. The desktop header keeps all seven (TABS).
- * Play keeps Draw's href, so the "new gate" dot and the visitor gate follow.
+ * The phone bar: six tabs for the same seven destinations, in the header's
+ * order. Tasks and Ranks share Rewards (each page carries a SectionSwitch to
+ * the other). Play is the Games tab: it opens the game list (owner 2026-11-26),
+ * and Lucky Draw has its own tab. The desktop header keeps all seven (TABS).
  */
 export const PHONE_TABS: Tab[] = [
   { label: 'Rewards', href: '/task', icon: Gift, match: ['/leaderboard'] },
-  {
-    label: 'Play',
-    href: '/lucky-draw',
-    icon: Gamepad2,
-    gated: true,
-    match: ['/coin-flip', '/vault/coin-flip'],
-  },
+  { ...tabAt('/coin-flip'), label: 'Play' },
   tabAt('/'),
+  tabAt('/lucky-draw'),
   tabAt('/vault'),
   tabAt('/me'),
 ];

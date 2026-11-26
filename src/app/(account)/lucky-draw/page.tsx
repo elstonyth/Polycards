@@ -3,10 +3,6 @@ import { getLuckyDraw } from '@/lib/actions/lucky-draw';
 import { getPackCategories } from '@/lib/data/packs';
 import { ticketPackHref, type PackCategory } from '@/lib/packs-data';
 import { LuckyDrawClient } from './LuckyDrawClient';
-import {
-  PLAY_SECTIONS,
-  SectionSwitch,
-} from '@/components/app-shell/SectionSwitch';
 
 export const metadata: Metadata = {
   title: 'Lucky Draw',
@@ -39,13 +35,10 @@ export default async function LuckyDrawPage({
     categoriesInTime(),
   ]);
   return (
-    <>
-      <SectionSwitch label="Play" items={PLAY_SECTIONS} className="mb-4" />
-      <LuckyDrawClient
-        initial={page}
-        intro={open === '1'}
-        spinHref={ticketPackHref(categories)}
-      />
-    </>
+    <LuckyDrawClient
+      initial={page}
+      intro={open === '1'}
+      spinHref={ticketPackHref(categories)}
+    />
   );
 }
