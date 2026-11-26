@@ -237,7 +237,10 @@ const CardArtPage = () => {
         try {
           const bad = await validateImageFile(file, 'card');
           if (bad) throw new Error(bad);
-          pending.push({ code, image_url: await uploadImage(file, 'card') });
+          // Await first: `pending.push(await …)` binds the array before the
+          // upload, so a flush meanwhile dropped the row (21 of 400 on prod).
+          const image_url = await uploadImage(file, 'card');
+          pending.push({ code, image_url });
           if (pending.length >= SAVE_BATCH) await flush();
         } catch (e) {
           problems.push({ name: file.name, message: (e as Error).message });
