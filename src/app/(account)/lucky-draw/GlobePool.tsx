@@ -1,6 +1,13 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { ChevronRight, X } from 'lucide-react';
 import {
   createGlobeScene,
@@ -81,8 +88,9 @@ function Pin({
             : `Gate closes in ${drawCountdown(gate.ends_at, nowMs)}`
       }. See details`}
       className={cn(
-        'absolute bottom-full left-1/2 mb-7 flex origin-bottom translate-x-[calc(-50%+var(--pin-shift,0px))] items-center gap-2 rounded-2xl border border-white/15 bg-neutral-900/95 py-1.5 pr-3 pl-1.5 text-left shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition-[scale,opacity,border-color] duration-200 outline-none hover:border-white/40 focus-visible:ring-2 focus-visible:ring-white/70',
-        open && 'pointer-events-none scale-50 opacity-0',
+        'absolute bottom-full left-1/2 mb-7 flex origin-bottom translate-x-[calc(-50%+var(--pin-shift,0px))] items-center gap-2 rounded-2xl border border-white/15 bg-neutral-900/95 py-1.5 pr-3 pl-1.5 text-left shadow-[0_8px_24px_rgba(0,0,0,0.45)] transition-[scale,opacity,border-color] duration-200 outline-none hover:border-white/40 focus-visible:ring-2 focus-visible:ring-white/70 active:scale-[0.97]',
+        open &&
+          'pointer-events-none scale-50 opacity-0 motion-reduce:scale-100',
       )}
     >
       {hero && (
@@ -136,7 +144,7 @@ function Detail({
   leaving: boolean;
   balance: number;
   spinHref: string | null;
-  cardRef: React.RefObject<HTMLDivElement | null>;
+  cardRef: React.RefObject<HTMLDialogElement | null>;
   maxHeight: number | null;
   onClose: () => void;
   onEnter: () => void;
@@ -147,6 +155,12 @@ function Detail({
   const closed = nowMs != null && !countdownClock(gate.ends_at, nowMs);
   const tier = tierName(gate);
   const titleId = `pin-${gate.id}`;
+  // Non-modal: the globe stays live around it. Opened before first paint so
+  // its grow-in starts from @starting-style.
+  useLayoutEffect(() => {
+    const d = cardRef.current;
+    if (d && !d.open) d.show();
+  }, [cardRef]);
   const header = (
     <div className="min-w-0 flex-1">
       <div className="flex items-start gap-2">
@@ -209,16 +223,17 @@ function Detail({
     </div>
   );
   return (
-    <div
+    <dialog
       ref={cardRef}
-      role="dialog"
       aria-labelledby={titleId}
       tabIndex={-1}
       style={maxHeight ? { maxHeight } : undefined}
       className={cn(
-        // It grows out of the pin's own point, the end of its stem.
-        'absolute bottom-full left-1/2 mb-[3.75rem] w-[min(22rem,calc(100vw-1.5rem))] origin-[calc(50%-var(--card-shift,0px))_calc(100%+3.75rem)] translate-x-[calc(-50%+var(--card-shift,0px))] overflow-y-auto rounded-3xl border border-white/15 bg-neutral-900 p-3.5 shadow-[0_18px_60px_rgba(0,0,0,0.6)] transition-[scale,opacity] duration-300 ease-[cubic-bezier(0.2,0.9,0.3,1.08)] outline-none starting:scale-[0.3] starting:opacity-0',
-        leaving && 'scale-[0.3] opacity-0 duration-150 ease-in',
+        // It grows out of the pin's own point, the end of its stem. Under
+        // reduced motion it only fades.
+        'absolute right-auto bottom-full left-1/2 m-0 mb-[3.75rem] w-[min(22rem,calc(100vw-1.5rem))] origin-[calc(50%-var(--card-shift,0px))_calc(100%+3.75rem)] translate-x-[calc(-50%+var(--card-shift,0px))] overflow-y-auto rounded-3xl border border-white/15 bg-neutral-900 p-3.5 text-inherit shadow-[0_18px_60px_rgba(0,0,0,0.6)] transition-[scale,opacity] duration-300 ease-[cubic-bezier(0.2,0.9,0.3,1.08)] outline-none starting:scale-[0.3] starting:opacity-0 motion-reduce:starting:scale-100',
+        leaving &&
+          'scale-[0.3] opacity-0 duration-150 ease-in motion-reduce:scale-100',
       )}
     >
       {hero && prizes.length === 1 ? (
@@ -273,7 +288,7 @@ function Detail({
           onGetTickets={sheets.getTickets}
         />
       </div>
-    </div>
+    </dialog>
   );
 }
 
@@ -301,7 +316,7 @@ export function GlobePool({
   const host = useRef<HTMLDivElement>(null);
   const scene = useRef<GlobeScene | null>(null);
   const spots = useRef(new Map<string, HTMLDivElement>());
-  const card = useRef<HTMLDivElement>(null);
+  const card = useRef<HTMLDialogElement>(null);
   const [failed, setFailed] = useState(false);
   const [ready, setReady] = useState(false);
   const [shown, setShown] = useState<{ id: string; leaving: boolean } | null>(
@@ -330,7 +345,7 @@ export function GlobePool({
       if (el.dataset.hidden !== hidden) el.dataset.hidden = hidden;
       for (const [selector, name] of [
         ['[data-pin]', '--pin-shift'],
-        ['[role="dialog"]', '--card-shift'],
+        ['dialog', '--card-shift'],
       ] as const) {
         const box = el.querySelector<HTMLElement>(selector);
         if (!box) continue;
