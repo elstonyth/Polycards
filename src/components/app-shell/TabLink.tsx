@@ -13,7 +13,6 @@ import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { openAuth } from '@/components/AuthButton';
 import { useAuth } from '@/components/auth/AuthProvider';
-import PolycardsMark from '@/components/brand/PolycardsMark';
 import { useDrawDot } from './DrawDotProvider';
 import { useVaultDot } from './VaultDotProvider';
 import { openGames } from './games';
@@ -94,8 +93,9 @@ export function TabMarker({
 // (measured: first change 121-133ms after touchstart with :active, the
 // tab-flow target is 100ms).
 const ITEM_VARIANT: Record<Variant, string> = {
-  // Inset: the bar's items touch each other and the bar's edges.
-  bar: 'flex min-w-0 flex-1 items-center justify-center focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-glacier',
+  // Idle tabs share the dock equally; the one you are on takes its label's
+  // width. The ::before stretches the tap to the dock's full height.
+  bar: "flex h-11 min-w-11 flex-1 items-center justify-center rounded-full before:absolute before:inset-x-0 before:-inset-y-1.5 before:content-[''] focus-visible:ring-2 focus-visible:ring-glacier aria-[current=page]:flex-none",
   // The press scale of Pill (DESIGN.md "Buttons").
   pill: 'rounded-full transition-transform data-[pressed]:scale-[0.98] focus-visible:ring-2 focus-visible:ring-glacier motion-reduce:transition-none motion-reduce:data-[pressed]:scale-100',
 };
@@ -259,60 +259,48 @@ function TabFace({
   const Icon = tab.icon;
   const pendingDelay = pending && !active && 'delay-100';
 
-  if (variant === 'bar' && tab.raised) {
-    // The centre tab: a round button that rises 10px out of the bar, wearing
-    // the brand mark. Lit, its ring and mark take the glacier tone.
-    return (
-      <span
-        className={cn(
-          '-mt-3 flex h-16 w-16 flex-col items-center justify-center gap-0.5 rounded-full border bg-linear-to-b from-neutral-700 to-neutral-900 transition-[color,border-color,box-shadow,transform] duration-200 group-data-[pressed]:duration-100 motion-safe:group-data-[pressed]:scale-95',
-          lit
-            ? 'border-glacier/60 text-glacier shadow-[0_0_0_4px_rgb(255_255_255/0.07),0_10px_22px_-8px_rgb(0_0_0/0.9),inset_0_1px_0_rgb(255_255_255/0.16)]'
-            : 'border-white/15 text-neutral-50 shadow-[0_10px_22px_-8px_rgb(0_0_0/0.9),inset_0_1px_0_rgb(255_255_255/0.14)]',
-          pendingDelay,
-        )}
-      >
-        <PolycardsMark className="h-5 w-auto" />
-        <span className="text-[10px] leading-none font-semibold">
-          {tab.label}
-        </span>
-      </span>
-    );
-  }
-
   if (variant === 'bar') {
+    // A pill around the icon: grey once lit. A press dips it to 95% in 100ms
+    // (motion-safe only).
     return (
       <span
         className={cn(
-          'flex flex-col items-center justify-center gap-1 transition-colors',
+          'flex h-11 items-center justify-center rounded-full px-3.5 transition-[background-color,color,box-shadow,transform] duration-200 group-data-[pressed]:duration-100 motion-safe:group-data-[pressed]:scale-95 max-[359px]:px-3',
           lit
-            ? 'text-glacier'
-            : 'text-neutral-400 group-hover:text-neutral-300',
+            ? 'bg-neutral-700 text-glacier shadow-[inset_0_1px_0_rgb(255_255_255/0.12)]'
+            : 'text-neutral-400 group-hover:text-neutral-200',
           pendingDelay,
         )}
       >
         <span className="relative inline-flex">
-          {/* The active icon's step up in size eases in rather than
-              snapping — 180ms, the tab-switch feedback itself. A press dips
-              it to 95% in 100ms. The global reduced-motion backstop zeroes
-              both; the press is motion-safe only. */}
           <Icon
-            className={cn(
-              'h-6 w-6 transition-transform duration-200 ease-out group-data-[pressed]:duration-100 motion-safe:group-data-[pressed]:scale-95',
-              active ? 'scale-105' : 'scale-100',
-            )}
+            className="h-6 w-6"
             strokeWidth={active ? 2.25 : 2}
             aria-hidden
           />
           {dotLabel && (
             <span
               aria-hidden
-              className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-coral"
+              className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-coral"
             />
           )}
         </span>
-        <span className="text-[10px] font-semibold leading-none">
-          {tab.label}
+        {/* The label opens only on the page you are on, never while pending:
+            two open labels would not fit a 320px phone. Width eases through
+            the grid column, 0fr to 1fr. */}
+        <span
+          className={cn(
+            'grid transition-[grid-template-columns,opacity] duration-300 ease-(--ease-out-quart) motion-reduce:transition-none',
+            active
+              ? 'grid-cols-[1fr] opacity-100'
+              : 'grid-cols-[0fr] opacity-0',
+          )}
+        >
+          <span className="min-w-0 overflow-hidden">
+            <span className="block pl-2 text-[13px] leading-none font-semibold whitespace-nowrap">
+              {tab.label}
+            </span>
+          </span>
         </span>
       </span>
     );

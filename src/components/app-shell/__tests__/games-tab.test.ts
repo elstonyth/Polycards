@@ -116,13 +116,19 @@ describe('Games tab', () => {
     expect(lit('/')).toEqual(['Home']);
   });
 
-  test('the lit-tab marker sits on the lit tab, and hides for the raised Home and for no tab', () => {
+  test('the lit-tab marker sits on the lit tab, and hides for no tab', () => {
     expect(markerIndex(TABS, '/vault')).toBe(5);
     expect(markerIndex(TABS, '/')).toBe(3);
-    expect(markerIndex(PHONE_TABS, '/wallet')).toBe(4);
-    // Home lights itself on the phone bar.
-    expect(markerIndex(PHONE_TABS, '/')).toBe(-1);
-    expect(markerIndex(PHONE_TABS, '/terms')).toBe(-1);
+    expect(markerIndex(TABS, '/terms')).toBe(-1);
+  });
+
+  test('the phone bar opens the label of the tab you are on, and no other', async () => {
+    nav.pathname = '/vault';
+    await act(async () => root.render(createElement(TabBar)));
+    const open = [...container.querySelectorAll('a')].filter((a) =>
+      a.querySelector('.grid-cols-\\[1fr\\]'),
+    );
+    expect(open.map((a) => a.textContent)).toEqual(['Vault']);
   });
 
   test('Play goes to the Lucky Draw page, and only for a signed-in customer', async () => {

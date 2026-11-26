@@ -50,8 +50,6 @@ export type Tab = {
   gated?: boolean;
   /** Opens a picker sheet instead of navigating (`href` is only its home). */
   opens?: 'games';
-  /** The phone bar's centre tab: a round button that rises out of the bar. */
-  raised?: boolean;
 };
 
 /** The seven app destinations (operator 2026-10-25 added Games; 2026-10-30
@@ -116,22 +114,21 @@ export const PHONE_TABS: Tab[] = [
     gated: true,
     match: ['/coin-flip', '/vault/coin-flip'],
   },
-  { ...tabAt('/'), raised: true },
+  tabAt('/'),
   tabAt('/vault'),
   tabAt('/me'),
 ];
 
 /**
  * Where a nav's lit-tab marker sits: the lit tab's place in `tabs`, or -1 when
- * none is lit or the lit one is the raised centre tab, which lights itself.
+ * none is lit.
  */
 export function markerIndex(
   tabs: Tab[],
   pathname: string,
   homeFlow = false,
 ): number {
-  const i = tabs.findIndex((t) => isTabActive(t, pathname, homeFlow));
-  return tabs[i]?.raised ? -1 : i;
+  return tabs.findIndex((t) => isTabActive(t, pathname, homeFlow));
 }
 
 export function isTabActive(
