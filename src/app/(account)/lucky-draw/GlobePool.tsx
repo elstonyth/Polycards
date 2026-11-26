@@ -16,7 +16,7 @@ import {
 } from '@/components/draw-globe/globe-scene';
 import { cn } from '@/lib/utils';
 import { num, rmAuto } from '@/lib/format';
-import { usePrefersReducedMotion } from '@/lib/use-reveal';
+import { useMediaQuery, usePrefersReducedMotion } from '@/lib/use-reveal';
 import {
   assignRoutes,
   flightProgress,
@@ -50,6 +50,24 @@ import { FramedArt } from './PoolParts';
 const STEM = 60;
 const LEAVE_MS = 180;
 const EDGE = 6;
+/** Tailwind's `short`: too low for the pin to grow upwards, so it grows to
+ *  the plane's side. */
+const SIDEWAYS = '(max-height: 31.25rem)';
+/** How far right of the plane the sideways pin starts, in px (left-15). */
+const SIDE_GAP = 60;
+/** The floating dock's height and gap over the foot of the screen. */
+const DOCK = 70;
+/** How much of the stage, from its top, the dock leaves in view. */
+const sideRoom = (stage: HTMLElement | null, height: number) =>
+  stage
+    ? Math.max(
+        120,
+        Math.min(
+          height,
+          window.innerHeight - DOCK - stage.getBoundingClientRect().top,
+        ),
+      )
+    : height;
 
 const tierName = (gate: LuckyDrawGate) =>
   gate.tier ? TIER_LABEL[gate.tier as LuckyDrawTier] : null;
@@ -166,7 +184,7 @@ function Detail({
       <div className="flex items-start gap-2">
         <h2
           id={titleId}
-          className="min-w-0 flex-1 pt-1 text-[11px] leading-tight font-semibold tracking-[0.08em] text-neutral-400 uppercase"
+          className="min-w-0 flex-1 pt-1 text-[11px] leading-tight font-semibold tracking-[0.08em] text-neutral-400 uppercase short:truncate"
         >
           {POOL_TITLE}
           {tier && ` · ${tier}`}
@@ -182,7 +200,7 @@ function Detail({
           </span>
         </button>
       </div>
-      <p className="font-heading -mt-1.5 truncate text-[clamp(1.4rem,7vw,1.75rem)] leading-none text-chase tabular-nums">
+      <p className="font-heading -mt-1.5 truncate text-[clamp(1.4rem,7vw,1.75rem)] leading-none short:text-[1.35rem] text-chase tabular-nums">
         {rmAuto(potTotal(prizes))}
       </p>
       {hero && prizes.length === 1 && (
@@ -192,7 +210,7 @@ function Detail({
       )}
       <p
         className={cn(
-          'truncate text-xs text-neutral-400',
+          'truncate text-xs text-neutral-400 short:hidden',
           prizes.length !== 1 && 'mt-2',
         )}
       >
@@ -229,9 +247,11 @@ function Detail({
       tabIndex={-1}
       style={maxHeight ? { maxHeight } : undefined}
       className={cn(
-        // It grows out of the pin's own point, the end of its stem. Under
-        // reduced motion it only fades.
+        // It grows out of the pin's own point, the end of its stem; on a low
+        // screen, out of the plane's side, in two columns. Under reduced
+        // motion it only fades.
         'absolute right-auto bottom-full left-1/2 m-0 mb-[3.75rem] w-[min(22rem,calc(100vw-1.5rem))] origin-[calc(50%-var(--card-shift,0px))_calc(100%+3.75rem)] translate-x-[calc(-50%+var(--card-shift,0px))] overflow-y-auto rounded-3xl border border-white/15 bg-neutral-900 p-3.5 text-inherit shadow-[0_18px_60px_rgba(0,0,0,0.6)] transition-[scale,opacity] duration-300 ease-[cubic-bezier(0.2,0.9,0.3,1.08)] outline-none starting:scale-[0.3] starting:opacity-0 motion-reduce:starting:scale-100',
+        'short:top-0 short:bottom-auto short:left-15 short:mb-0 short:grid short:w-[min(30rem,calc(100vw-2rem))] short:origin-[calc(-3.75rem-var(--card-shift,0px))_calc(0px-var(--card-y,0px))] short:translate-x-[var(--card-shift,0px)] short:translate-y-[var(--card-y,0px)] short:grid-cols-[1.2fr_1fr] short:items-center short:gap-x-4 short:p-3',
         leaving &&
           'scale-[0.3] opacity-0 duration-150 ease-in motion-reduce:scale-100',
       )}
@@ -242,51 +262,53 @@ function Detail({
             type="button"
             onClick={() => sheets.zoom(hero)}
             aria-label={`See ${hero.title}, ${rmAuto(hero.value_myr)}`}
-            className="relative block aspect-[5/7] w-[6.5rem] shrink-0 cursor-zoom-in rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-white/60 max-[359px]:w-20"
+            className="relative block aspect-[5/7] w-[6.5rem] shrink-0 cursor-zoom-in rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-white/60 max-[359px]:w-20 short:w-[4.5rem]"
           >
             <FramedArt prize={hero} holo eager />
           </button>
           {header}
         </div>
       ) : (
-        <>
+        <div className="min-w-0">
           <div className="flex">{header}</div>
           <GatePrizes prizes={prizes} onZoom={sheets.zoom} />
-        </>
+        </div>
       )}
 
-      <div className="mt-3 grid grid-cols-3 divide-x divide-white/10 border-t border-white/10 pt-3">
-        <Stat label="Your tickets" short="Yours">
-          {num(gate.my_tickets)}
-        </Stat>
-        <Stat label="Your chance" short="Chance">
-          {chancePercent(gate.my_tickets, gate.total_tickets)}
-        </Stat>
-        <button
-          type="button"
-          onClick={() => sheets.players(gate)}
-          aria-label={`Players: ${num(gate.entrant_count)}. See the top 10`}
-          className="min-h-11 min-w-0 rounded-lg transition-colors outline-none hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-white/60"
-        >
-          <Stat label="Players">
-            {num(gate.entrant_count)}
-            <ChevronRight
-              className="ml-0.5 h-4 w-4 shrink-0 text-neutral-400"
-              aria-hidden
-            />
+      <div className="min-w-0">
+        <div className="mt-3 grid grid-cols-3 divide-x divide-white/10 border-t border-white/10 pt-3 short:mt-0 short:border-t-0 short:pt-0">
+          <Stat label="Your tickets" short="Yours">
+            {num(gate.my_tickets)}
           </Stat>
-        </button>
-      </div>
-      <div className="mt-3">
-        <GateAction
-          gate={gate}
-          closed={closed}
-          nowMs={nowMs}
-          balance={balance}
-          spinHref={spinHref}
-          onEnter={onEnter}
-          onGetTickets={sheets.getTickets}
-        />
+          <Stat label="Your chance" short="Chance">
+            {chancePercent(gate.my_tickets, gate.total_tickets)}
+          </Stat>
+          <button
+            type="button"
+            onClick={() => sheets.players(gate)}
+            aria-label={`Players: ${num(gate.entrant_count)}. See the top 10`}
+            className="min-h-11 min-w-0 rounded-lg transition-colors outline-none hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-white/60"
+          >
+            <Stat label="Players">
+              {num(gate.entrant_count)}
+              <ChevronRight
+                className="ml-0.5 h-4 w-4 shrink-0 text-neutral-400"
+                aria-hidden
+              />
+            </Stat>
+          </button>
+        </div>
+        <div className="mt-3 short:mt-2">
+          <GateAction
+            gate={gate}
+            closed={closed}
+            nowMs={nowMs}
+            balance={balance}
+            spinHref={spinHref}
+            onEnter={onEnter}
+            onGetTickets={sheets.getTickets}
+          />
+        </div>
       </div>
     </dialog>
   );
@@ -323,6 +345,11 @@ export function GlobePool({
     null,
   );
   const [maxHeight, setMaxHeight] = useState<number | null>(null);
+  const sideways = useMediaQuery(SIDEWAYS);
+  const sidewaysNow = useRef(sideways);
+  useEffect(() => {
+    sidewaysNow.current = sideways;
+  }, [sideways]);
   const sheets = useGateSheets(spinHref);
 
   const open = useCallback((id: string | null) => {
@@ -337,16 +364,35 @@ export function GlobePool({
   // Every frame: each pin to its plane, kept inside the stage.
   const onFrame = useCallback((anchors: readonly GlobeAnchor[]) => {
     const width = stage.current?.clientWidth ?? 0;
+    const height = stage.current?.clientHeight ?? 0;
     for (const a of anchors) {
       const el = spots.current.get(a.id);
       if (!el) continue;
       el.style.transform = `translate3d(${a.x.toFixed(1)}px,${a.y.toFixed(1)}px,0)`;
       const hidden = a.hidden ? 'true' : 'false';
       if (el.dataset.hidden !== hidden) el.dataset.hidden = hidden;
+      const dialog = el.querySelector<HTMLElement>('dialog');
+      if (dialog && sidewaysNow.current) {
+        // Beside the plane: as high as it fits round the plane's height, and
+        // pulled left only if the right edge would leave the stage.
+        const w = dialog.offsetWidth;
+        const h = dialog.offsetHeight;
+        const top = Math.min(
+          Math.max(a.y - h / 2, EDGE),
+          Math.max(EDGE, sideRoom(stage.current, height) - h - EDGE),
+        );
+        const right = a.x + SIDE_GAP + w;
+        el.style.setProperty('--card-y', `${(top - a.y).toFixed(1)}px`);
+        el.style.setProperty(
+          '--card-shift',
+          `${Math.min(0, width - EDGE - right).toFixed(1)}px`,
+        );
+      }
       for (const [selector, name] of [
         ['[data-pin]', '--pin-shift'],
         ['dialog', '--card-shift'],
       ] as const) {
+        if (selector === 'dialog' && sidewaysNow.current) continue;
         const box = el.querySelector<HTMLElement>(selector);
         if (!box) continue;
         const half = box.offsetWidth / 2;
@@ -404,6 +450,14 @@ export function GlobePool({
         scene.current?.focus(null);
         return;
       }
+      if (sideways) {
+        // The plane on the left, the grown pin beside it, both above the dock.
+        const room = sideRoom(stage.current, height);
+        setMaxHeight(room - 2 * EDGE);
+        const width = stage.current?.clientWidth ?? 0;
+        scene.current?.focus(openId, room * 0.62, width * 0.14);
+        return;
+      }
       // On a short stage the pin may rise over the tabs above it.
       const room = height - 44;
       setMaxHeight(room);
@@ -416,7 +470,7 @@ export function GlobePool({
     fit();
     window.addEventListener('resize', fit);
     return () => window.removeEventListener('resize', fit);
-  }, [openId, reduced]);
+  }, [openId, reduced, sideways]);
 
   // The pin shrinks back, then goes; focus returns to where it came from.
   useEffect(() => {
@@ -515,7 +569,7 @@ export function GlobePool({
                   aria-hidden
                   className={cn(
                     'absolute bottom-1.5 left-0 w-px -translate-x-1/2 bg-white/60 transition-[height] duration-300',
-                    isOpen && !shown?.leaving ? 'h-[3.4rem]' : 'h-6',
+                    isOpen && !shown?.leaving ? 'h-[3.4rem] short:h-0' : 'h-6',
                   )}
                 />
                 <span

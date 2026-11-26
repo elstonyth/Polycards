@@ -11,7 +11,7 @@ import type { LuckyDrawTier } from '@/lib/lucky-draw';
  *  page's controls and the tab bar, within what a globe and an open pin need.
  *  Here, not beside the stage: its loading placeholder must not pull three in. */
 export const GLOBE_STAGE =
-  'h-[clamp(27rem,calc(100dvh-16.5rem),46rem)] squat:h-[max(22rem,calc(100dvh-14.5rem))] short:h-[max(17rem,calc(100dvh-8rem))] lg:h-[clamp(30rem,calc(100dvh-13rem),52rem)]';
+  'h-[clamp(27rem,calc(100dvh-16.5rem),46rem)] squat:h-[max(22rem,calc(100dvh-14.5rem))] short:h-[max(15rem,calc(100dvh-9.5rem))] lg:h-[clamp(30rem,calc(100dvh-13rem),52rem)]';
 
 export type LonLat = readonly [lon: number, lat: number];
 export type Vec3 = readonly [x: number, y: number, z: number];

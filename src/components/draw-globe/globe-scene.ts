@@ -32,8 +32,8 @@ export type GlobeSceneOptions = {
 export type GlobeScene = {
   setFlights: (flights: readonly GlobeFlight[]) => void;
   /** Turn a plane to the camera and move in, its pin point `anchorY` px down
-   *  the stage; null goes back out. */
-  focus: (id: string | null, anchorY?: number) => void;
+   *  the stage (and `anchorX` px across, else centred); null goes back out. */
+  focus: (id: string | null, anchorY?: number, anchorX?: number) => void;
   dispose: () => void;
 };
 
@@ -44,13 +44,23 @@ const TAN = Math.tan((FOV * Math.PI) / 360);
 // A focused plane sits this far below the middle of the view, so it is seen
 // from above and behind with the horizon over it.
 const FOCUS_TILT = 0.6;
-const SWAY = 0.5;
+const SWAY = 0.6;
 const IDLE_MS = 4000;
+// A stage this much wider than tall (a phone on its side) sees the top of a
+// bigger globe as a horizon, the flights spread along it.
+const WIDE = 2.4;
 
 type Flight = GlobeFlight & {
   plane: THREE.Group;
   marks: THREE.Group;
+  /** The route's dots, which drift towards the destination while it flies. */
+  dots: THREE.InstancedMesh;
   anchor: GlobeAnchor;
+  /** Where the clock puts it; each frame adds a little lift and roll. */
+  basePos: THREE.Vector3;
+  baseQuat: THREE.Quaternion;
+  /** So the planes don't bob in step. */
+  phase: number;
 };
 
 const wrapNear = (angle: number, near: number) =>
@@ -201,8 +211,27 @@ export function createGlobeScene(
     Y.set(...pose.up);
     Zv.crossVectors(X, Y).normalize();
     Y.crossVectors(Zv, X);
-    f.plane.position.set(...pose.position);
-    f.plane.quaternion.setFromRotationMatrix(tmpM.makeBasis(X, Y, Zv));
+    f.basePos.set(...pose.position);
+    f.baseQuat.setFromRotationMatrix(tmpM.makeBasis(X, Y, Zv));
+    f.plane.position.copy(f.basePos);
+    f.plane.quaternion.copy(f.baseQuat);
+  };
+
+  /** Lay the route's dots `shift` (0 to 1) of a gap along, towards landing. */
+  const layDots = (f: Flight, shift: number) => {
+    const [from, to] = ROUTES[f.route]!;
+    const n = f.dots.count + 1;
+    for (let i = 1; i < n; i++) {
+      const p = flightPose(
+        from,
+        to,
+        (i - 1 + shift) / (n - 1),
+        PLANES[f.kind].cruise,
+        groundHeight(f.kind),
+      ).position;
+      f.dots.setMatrixAt(i - 1, tmpM.makeTranslation(...p));
+    }
+    f.dots.instanceMatrix.needsUpdate = true;
   };
 
   const routeMarks = (f: GlobeFlight): THREE.Group => {
@@ -213,16 +242,6 @@ export function createGlobeScene(
     const b = new THREE.Vector3(...toVec(to));
     const n = Math.max(8, Math.round((a.angleTo(b) * 180) / Math.PI / 1.7));
     const dots = new THREE.InstancedMesh(dotGeo, ink, n - 1);
-    for (let i = 1; i < n; i++) {
-      const p = flightPose(
-        from,
-        to,
-        i / n,
-        PLANES[f.kind].cruise,
-        groundHeight(f.kind),
-      ).position;
-      dots.setMatrixAt(i - 1, tmpM.makeTranslation(...p));
-    }
     g.add(dots);
     for (const [dir, geos] of [
       [a, [spotGeo]],
@@ -245,29 +264,58 @@ export function createGlobeScene(
   let pitch = 0.2;
   let dist = 8;
   let lift = 0;
+  let side = 0;
   let homeYaw = 0;
-  let homePitch = 0.2;
+  let homeLat = 0.1;
   let placed = false;
   let focusId: string | null = null;
   let focusY = 0;
+  let focusX: number | null = null;
   let dragging = false;
   let spin = 0;
   let touchedAt = -Infinity;
-  const overview = () =>
-    Math.max(1.16 / (TAN * camera.aspect * 0.98), 1.16 / (TAN * 0.8));
+  /** The resting view: how far, how high, and how far the flights' middle
+   *  sits above (−) or below (+) the middle of the view. */
+  const overview = () => {
+    if (camera.aspect > WIDE) {
+      const d = 1.16 / (TAN * camera.aspect * 0.5);
+      const h = d * TAN;
+      const up = 1.1 - 0.82 * h;
+      // The flights' middle a little above the middle of the view, clear of
+      // the dock that floats over the stage's foot.
+      const mid = Math.min(0.95, up + 0.16 * h);
+      return { dist: d, lift: up, tilt: -Math.asin(mid) };
+    }
+    const d = Math.max(1.16 / (TAN * camera.aspect * 0.98), 1.16 / (TAN * 0.8));
+    return { dist: d, lift: 0, tilt: 0.1 };
+  };
 
   const setHome = () => {
     const mean = new THREE.Vector3();
-    flights.forEach((f) => mean.add(f.plane.position.clone().normalize()));
+    let north = -1;
+    let south = 1;
+    flights.forEach((f) => {
+      const up = f.basePos.clone().normalize();
+      mean.add(up);
+      north = Math.max(north, up.y);
+      south = Math.min(south, up.y);
+    });
     if (mean.lengthSq() < 1e-6) mean.set(...toVec([105, 5]));
     mean.normalize();
     homeYaw = -Math.PI / 2 - Math.atan2(-mean.z, mean.x);
-    homePitch = Math.min(0.6, Math.max(-0.5, Math.asin(mean.y) + 0.1));
+    // Halfway between the most northern and most southern flight, so one far
+    // flight doesn't pull the others off the view.
+    const lat = flights.size
+      ? (Math.asin(north) + Math.asin(south)) / 2
+      : Math.asin(mean.y);
+    homeLat = Math.min(0.5, Math.max(-0.6, lat));
     if (!placed) {
       placed = true;
+      const o = overview();
       yaw = homeYaw;
-      pitch = homePitch;
-      dist = overview();
+      pitch = homeLat + o.tilt;
+      dist = o.dist;
+      lift = o.lift;
     }
   };
 
@@ -288,12 +336,18 @@ export function createGlobeScene(
           const plane = buildPlane(f.kind, logo);
           const marks = routeMarks(f);
           world.add(plane, marks);
-          flights.set(f.id, {
+          const made: Flight = {
             ...f,
             plane,
             marks,
+            dots: marks.children[0] as THREE.InstancedMesh,
             anchor: { id: f.id, x: 0, y: 0, hidden: true },
-          });
+            basePos: new THREE.Vector3(),
+            baseQuat: new THREE.Quaternion(),
+            phase: flights.size * 2.1,
+          };
+          layDots(made, 1);
+          flights.set(f.id, made);
         }
       }
       for (const f of next) {
@@ -304,10 +358,14 @@ export function createGlobeScene(
       }
       setHome();
     },
-    focus(id, anchorY) {
-      focusId = id && flights.has(id) ? id : null;
+    focus(id, anchorY, anchorX) {
+      const next = id && flights.has(id) ? id : null;
+      // Only a real change counts as a touch: the page also says "none" as it
+      // loads, which must not hold back the idle turn.
+      if (next !== focusId) touchedAt = performance.now();
+      focusId = next;
       focusY = anchorY ?? height * 0.72;
-      touchedAt = performance.now();
+      focusX = anchorX ?? null;
     },
     dispose() {
       live = false;
@@ -391,6 +449,8 @@ export function createGlobeScene(
   const P = new THREE.Vector3();
   const C = new THREE.Vector3();
   const ray = new THREE.Vector3();
+  const roll = new THREE.Quaternion();
+  const AXIS_X = new THREE.Vector3(1, 0, 0);
   const list: GlobeAnchor[] = [];
   let frame = 0;
   let then = performance.now();
@@ -403,25 +463,29 @@ export function createGlobeScene(
     then = now;
     const snap = opts.reducedMotion;
     const ease = (k: number) => (snap ? 1 : 1 - Math.exp(-k * dt));
-    let wantDist = overview();
-    let wantLift = 0;
+    const home = overview();
+    let wantDist = home.dist;
+    let wantLift = home.lift;
+    let wantSide = 0;
 
     const focused = focusId ? flights.get(focusId) : undefined;
     if (focused && !dragging) {
-      const p = focused.plane.position;
+      const p = focused.basePos;
       const r = p.length();
-      const size = Math.min(230, Math.max(120, width * 0.34));
+      const size = Math.min(230, Math.max(120, width * 0.34), height * 0.45);
       const depth = (PLANES[focused.kind].L * height) / (2 * TAN * size);
       wantDist = depth + r * Math.cos(FOCUS_TILT);
       wantLift =
         -r * Math.sin(FOCUS_TILT) - (1 - (2 * focusY) / height) * depth * TAN;
+      if (focusX !== null)
+        wantSide = ((2 * focusX) / width - 1) * -depth * TAN * camera.aspect;
       const wantYaw = wrapNear(-Math.PI / 2 - Math.atan2(-p.z, p.x), yaw);
       yaw += (wantYaw - yaw) * ease(4.5);
       pitch += (Math.asin(p.y / r) + FOCUS_TILT - pitch) * ease(4.5);
       spin = 0;
     } else if (!dragging) {
       // North stays up: a tilt from a drag or a focus settles back.
-      pitch += (homePitch - pitch) * ease(1.6);
+      pitch += (homeLat + home.tilt - pitch) * ease(1.6);
       if (Math.abs(spin) > 0.02) {
         yaw += spin * dt;
         spin *= Math.exp(-2.4 * dt);
@@ -429,20 +493,40 @@ export function createGlobeScene(
       } else if (now - touchedAt > IDLE_MS || !Number.isFinite(touchedAt)) {
         // Left alone: back to the flights, swaying slowly either side.
         if (!snap) drift += dt;
-        const want = wrapNear(homeYaw, yaw) + SWAY * Math.sin(drift * 0.12);
-        yaw += (want - yaw) * ease(0.9);
+        const want = wrapNear(homeYaw, yaw) + SWAY * Math.sin(drift * 0.2);
+        yaw += (want - yaw) * ease(1.5);
       }
     }
     dist += (wantDist - dist) * ease(4.5);
     lift += (wantLift - lift) * ease(4.5);
+    side += (wantSide - side) * ease(4.5);
     if (!snap) {
-      clouds.rotation.y += dt * 0.012;
+      clouds.rotation.y += dt * 0.03;
       cloudShade.rotation.y = clouds.rotation.y - 0.03;
+      // In the air: a slow bob and roll, and the dotted route drifting on
+      // towards landing. The clock alone moves too slowly to see.
+      const t = now / 1000;
+      flights.forEach((f) => {
+        if (f.progress >= 1) return;
+        const k = PLANES[f.kind].L;
+        f.plane.position
+          .copy(f.basePos)
+          .addScaledVector(
+            P.copy(f.basePos).normalize(),
+            0.05 * k * Math.sin(t * 1.4 + f.phase),
+          );
+        f.plane.quaternion
+          .copy(f.baseQuat)
+          .multiply(
+            roll.setFromAxisAngle(AXIS_X, 0.09 * Math.sin(t * 0.9 + f.phase)),
+          );
+        layDots(f, (t * 0.5 + f.phase) % 1);
+      });
     }
 
     world.rotation.set(pitch, yaw, 0);
-    camera.position.set(0, lift, dist);
-    camera.lookAt(0, lift, 0);
+    camera.position.set(side, lift, dist);
+    camera.lookAt(side, lift, 0);
     world.updateMatrixWorld();
     camera.updateMatrixWorld();
     renderer.render(scene, camera);
@@ -483,7 +567,7 @@ export function createGlobeScene(
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
-    if (!placed) dist = overview();
+    if (!placed) dist = overview().dist;
     wake();
   });
   resize.observe(host);

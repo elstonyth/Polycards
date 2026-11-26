@@ -70,7 +70,7 @@ export function GateClock({ to, nowMs }: { to: string; nowMs: number | null }) {
       aria-label={
         nowMs == null ? undefined : `Gate closes in ${drawCountdown(to, nowMs)}`
       }
-      className="mt-2 text-center text-sm text-neutral-400"
+      className="mt-2 text-center text-sm text-neutral-400 short:mt-1.5"
     >
       Gate closes in{' '}
       <span className="font-semibold text-neutral-200 tabular-nums">
@@ -157,10 +157,10 @@ export function Stat({
       <span className="font-heading flex items-center justify-center text-xl leading-tight text-white tabular-nums">
         {children}
       </span>
-      <span className="mt-0.5 block truncate text-[11px] text-neutral-400 max-[359px]:hidden">
+      <span className="mt-0.5 block truncate text-[11px] text-neutral-400 max-[359px]:hidden short:hidden">
         {label}
       </span>
-      <span className="mt-0.5 hidden truncate text-[11px] text-neutral-400 max-[359px]:block">
+      <span className="mt-0.5 hidden truncate text-[11px] text-neutral-400 max-[359px]:block short:block">
         {short}
       </span>
     </span>
