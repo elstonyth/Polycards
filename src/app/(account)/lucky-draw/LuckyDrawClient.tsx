@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { pillVariants } from '@/components/ui/pill';
 import { PageBody, PageTitle } from '@/components/ui/page-frame';
@@ -10,6 +11,7 @@ import { ArenaShow } from '@/components/draw-arena/lazy';
 import { Panel, UnavailablePanel } from '@/components/task-ui';
 import { TicketArt } from '@/components/TicketArt';
 import { cn } from '@/lib/utils';
+import { GLOBE_STAGE } from '@/lib/draw-globe';
 import { mytDate, num } from '@/lib/format';
 import { usePrefersReducedMotion } from '@/lib/use-reveal';
 import {
@@ -33,12 +35,18 @@ import type {
 } from '@/lib/data/schemas';
 import { EnterSheet, type Entered, type EnterTarget } from './EnterSheet';
 import { MyEntry } from './MyEntry';
-import { gateTarget, GateList, NoPool, useNewGates } from './GateList';
+import { gateTarget, NoPool, useNewGates } from './GateList';
 import { PrizeCard } from './PrizeCard';
 import { PrizeWheel } from './PrizeWheel';
 import { ResultDetail } from './ResultDetail';
 import { ResultsList } from './ResultsList';
 import { TicketOpenIntro } from './TicketOpenIntro';
+
+// three.js stays out of the page's first load: the globe arrives after it.
+const GlobePool = dynamic(
+  () => import('./GlobePool').then((m) => m.GlobePool),
+  { ssr: false, loading: () => <div className={GLOBE_STAGE} /> },
+);
 
 type TabKey = 'prizes' | 'results' | 'mine';
 
@@ -321,8 +329,8 @@ export function LuckyDrawClient({
 
   return (
     <div className="pool-wide">
-      {/* Below lg the Section switch above names the page: the title is for
-          screen readers only, and the tabs share a row with the ticket count. */}
+      {/* Below lg the globe's stage and the tab bar name the page: the title is
+          for screen readers only, and the tabs share a row with the ticket count. */}
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-4 squat:gap-y-2 lg:gap-x-6 lg:squat:-mt-3 lg:short:-mt-3">
         {/* contents below lg: an empty box would still take a gap in the row. */}
         <div className="contents lg:block lg:min-w-0">
@@ -398,7 +406,7 @@ export function LuckyDrawClient({
           ) : !page ? (
             <UnavailablePanel />
           ) : gates.length > 0 ? (
-            <GateList
+            <GlobePool
               gates={gates}
               newIds={newIds}
               nowMs={nowMs}

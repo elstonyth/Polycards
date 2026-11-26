@@ -61,7 +61,7 @@ const HERO_HEIGHT =
 
 /** "Gate closes in 02:14:09" under the action, days first when there are any.
  *  Null `nowMs` is the server render. */
-function GateClock({ to, nowMs }: { to: string; nowMs: number | null }) {
+export function GateClock({ to, nowMs }: { to: string; nowMs: number | null }) {
   const clock = nowMs == null ? null : countdownClock(to, nowMs);
   const days = clock && clock.d !== '00' ? `${Number(clock.d)}d ` : '';
   return (
@@ -82,7 +82,7 @@ function GateClock({ to, nowMs }: { to: string; nowMs: number | null }) {
 
 /** Every prize of the gate: one stands alone, more swipe sideways, the pack
  *  page's Top Hits rail. A tap zooms; tickets go on the gate, never on a prize. */
-function GatePrizes({
+export function GatePrizes({
   prizes,
   onZoom,
 }: {
@@ -142,7 +142,7 @@ function GatePrizes({
   );
 }
 
-function Stat({
+export function Stat({
   label,
   short = label,
   children,
@@ -164,6 +164,60 @@ function Stat({
         {short}
       </span>
     </span>
+  );
+}
+
+/** A gate's one action and its clock: put tickets in, get some, or wait for
+ *  the draw. */
+export function GateAction({
+  gate,
+  closed,
+  nowMs,
+  balance,
+  spinHref,
+  onEnter,
+  onGetTickets,
+}: {
+  gate: LuckyDrawGate;
+  closed: boolean;
+  nowMs: number | null;
+  balance: number;
+  spinHref: string | null;
+  onEnter: () => void;
+  onGetTickets: () => void;
+}) {
+  return (
+    <>
+      {closed ? (
+        <p className="py-3 text-center text-sm font-semibold text-neutral-300">
+          Drawing the winner…
+        </p>
+      ) : balance > 0 ? (
+        <Pill variant="glacier" size="lg" className="w-full" onClick={onEnter}>
+          {gate.my_tickets > 0 ? 'Add tickets' : 'Put tickets in'}
+        </Pill>
+      ) : spinHref ? (
+        <Pill
+          variant="secondary"
+          size="lg"
+          className="w-full"
+          onClick={onGetTickets}
+        >
+          Get tickets
+        </Pill>
+      ) : (
+        <Link
+          href="/task"
+          className={cn(
+            pillVariants({ variant: 'secondary', size: 'lg' }),
+            'w-full',
+          )}
+        >
+          Get tickets
+        </Link>
+      )}
+      {!closed && <GateClock to={gate.ends_at} nowMs={nowMs} />}
+    </>
   );
 }
 
@@ -263,40 +317,15 @@ function GateTicket({
       </div>
 
       <div className="mt-auto pt-4">
-        {closed ? (
-          <p className="py-3 text-center text-sm font-semibold text-neutral-300">
-            Drawing the winner…
-          </p>
-        ) : balance > 0 ? (
-          <Pill
-            variant="glacier"
-            size="lg"
-            className="w-full"
-            onClick={onEnter}
-          >
-            {gate.my_tickets > 0 ? 'Add tickets' : 'Put tickets in'}
-          </Pill>
-        ) : spinHref ? (
-          <Pill
-            variant="secondary"
-            size="lg"
-            className="w-full"
-            onClick={onGetTickets}
-          >
-            Get tickets
-          </Pill>
-        ) : (
-          <Link
-            href="/task"
-            className={cn(
-              pillVariants({ variant: 'secondary', size: 'lg' }),
-              'w-full',
-            )}
-          >
-            Get tickets
-          </Link>
-        )}
-        {!closed && <GateClock to={gate.ends_at} nowMs={nowMs} />}
+        <GateAction
+          gate={gate}
+          closed={closed}
+          nowMs={nowMs}
+          balance={balance}
+          spinHref={spinHref}
+          onEnter={onEnter}
+          onGetTickets={onGetTickets}
+        />
       </div>
     </article>
   );
@@ -453,6 +482,60 @@ export function useNewGates(gates: LuckyDrawGate[]): Set<string> {
   return useMemo(() => newGateIds(gates, seenAt?.at ?? null), [gates, seenAt]);
 }
 
+/** The three sheets a gate can open: a prize up close, who is in, where
+ *  tickets come from. One set for a whole list of gates. */
+export function useGateSheets(spinHref: string | null) {
+  const [zoom, setZoom] = useState<PoolPrize | null>(null);
+  const [playersOf, setPlayersOf] = useState<LuckyDrawGate | null>(null);
+  const [gettingTickets, setGettingTickets] = useState(false);
+  return {
+    zoom: setZoom,
+    players: setPlayersOf,
+    getTickets: () => setGettingTickets(true),
+    node: (
+      <>
+        {zoom && <PrizeZoom prize={zoom} onClose={() => setZoom(null)} />}
+        {playersOf && (
+          <GateSheet
+            title={`${num(playersOf.entrant_count)} ${playersOf.entrant_count === 1 ? 'player' : 'players'}`}
+            onClose={() => setPlayersOf(null)}
+          >
+            <TopEntrants
+              top={playersOf.top}
+              totalTickets={playersOf.total_tickets}
+              className="mt-3"
+            />
+          </GateSheet>
+        )}
+        {gettingTickets && spinHref && (
+          <GateSheet
+            title="Get tickets"
+            onClose={() => setGettingTickets(false)}
+          >
+            <p className="mt-1 text-sm text-neutral-400">
+              From tasks or a capsule.
+            </p>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Link
+                href="/task"
+                className={pillVariants({ variant: 'secondary', size: 'lg' })}
+              >
+                Tasks
+              </Link>
+              <Link
+                href={spinHref}
+                className={pillVariants({ variant: 'secondary', size: 'lg' })}
+              >
+                Capsules
+              </Link>
+            </div>
+          </GateSheet>
+        )}
+      </>
+    ),
+  };
+}
+
 /** The Pool tab: every running gate, one ticket each, stacked on a phone. */
 export function GateList({
   gates,
@@ -472,9 +555,7 @@ export function GateList({
 }) {
   const [tier, setTier] = useState<LuckyDrawTier | 'all'>('all');
   const [sort, setSort] = useState<GateSort>('closing');
-  const [zoom, setZoom] = useState<PoolPrize | null>(null);
-  const [playersOf, setPlayersOf] = useState<LuckyDrawGate | null>(null);
-  const [gettingTickets, setGettingTickets] = useState(false);
+  const sheets = useGateSheets(spinHref);
 
   const tiers = LUCKY_DRAW_TIERS.filter((t) => gates.some((g) => g.tier === t));
   // A chosen tier whose last gate has just been drawn falls back to all of them.
@@ -509,9 +590,9 @@ export function GateList({
               balance={balance}
               spinHref={spinHref}
               onEnter={() => onEnter(gate)}
-              onGetTickets={() => setGettingTickets(true)}
-              onZoom={setZoom}
-              onPlayers={() => setPlayersOf(gate)}
+              onGetTickets={sheets.getTickets}
+              onZoom={sheets.zoom}
+              onPlayers={() => sheets.players(gate)}
             />
           </li>
         ))}
@@ -519,40 +600,7 @@ export function GateList({
 
       <HowItWorks at={balance > 0 ? 'enter' : 'collect'} className="pt-3" />
 
-      {zoom && <PrizeZoom prize={zoom} onClose={() => setZoom(null)} />}
-      {playersOf && (
-        <GateSheet
-          title={`${num(playersOf.entrant_count)} ${playersOf.entrant_count === 1 ? 'player' : 'players'}`}
-          onClose={() => setPlayersOf(null)}
-        >
-          <TopEntrants
-            top={playersOf.top}
-            totalTickets={playersOf.total_tickets}
-            className="mt-3"
-          />
-        </GateSheet>
-      )}
-      {gettingTickets && spinHref && (
-        <GateSheet title="Get tickets" onClose={() => setGettingTickets(false)}>
-          <p className="mt-1 text-sm text-neutral-400">
-            From tasks or a capsule.
-          </p>
-          <div className="mt-4 grid grid-cols-2 gap-2">
-            <Link
-              href="/task"
-              className={pillVariants({ variant: 'secondary', size: 'lg' })}
-            >
-              Tasks
-            </Link>
-            <Link
-              href={spinHref}
-              className={pillVariants({ variant: 'secondary', size: 'lg' })}
-            >
-              Capsules
-            </Link>
-          </div>
-        </GateSheet>
-      )}
+      {sheets.node}
     </div>
   );
 }
