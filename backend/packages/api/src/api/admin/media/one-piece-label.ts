@@ -16,7 +16,7 @@
 // #       the card number without its set code (OP05-119 → #119)
 //
 // Promo / event / prize prints have no box: PSA prints "<year> ONE PIECE EN|JP"
-// and the event as the variety (172653222, 156101387). An unknown box keeps the
+// and the event as the variety (172653222, 156101387); see PROMO_YEAR. An unknown box keeps the
 // plain fallback (the uppercased PriceCharting set, the bracket text as-is)
 // rather than invented wording.
 import {
@@ -120,10 +120,39 @@ const boxLabel = (box: string, lang: string): string =>
 
 // Event / prize / promo prints: PSA labels them by event ("OFFICIAL EVENT
 // PRIZE", "ILLUSTRATION BOX VOL.3", "CHAMPIONSHIP EVENT PACK"…) with no box
-// code. The bracket text is printed as the variety; PSA's own hyphens and
-// abbreviations ("TREASURE CUP-TOP PRIZE") come from the card's label note.
+// code. The bracket text is printed as the variety, with PSA's own hyphens
+// where a real slab showed them (promoVariety); the year comes from PROMO_YEAR
+// or the set the event names. A typed label year / note still wins.
 const PRIZE_RE =
   /serial|judge|winner|top prize|top 8|treasure cup|championship|flagship|promo|welcome pack|campaign|one piece day|illustration box|lecafig|dash pack|finalist|tournament|event|celebration|prize|gift collection|storage box|learn together|treasure chest|weekly shonen/i;
+
+// PSA hyphenates an event from its prize or issue.
+function promoVariety(bracket: string): string {
+  return bracket
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase()
+    .replace(/\bRELEASE EVENT WINNER$/, 'RELEASE EVENT-WINNER') // 172653222
+    .replace(/^TREASURE CUP TOP PRIZE$/, 'TREASURE CUP-TOP PRIZE') // 144054482
+    .replace(
+      /^WEEKLY SHONEN JUMP (JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)$/,
+      'WEEKLY SHONEN JUMP-$1',
+    ); // 152236762
+}
+
+// The year PSA printed on an event print, per card (code, language, bracket as
+// PriceCharting writes it): the event's year, not the card's set's, so it
+// can't be derived ("Illustration Box Vol.3" OP07-109 is 2025, OP07 is 2024).
+const PROMO_YEAR: Record<string, string> = {
+  'ST03-008 EN CHAMPIONSHIP EVENT PACK': '2024', // 148696172
+  'OP07-109 EN ILLUSTRATION BOX VOL.3': '2025', // 156604108
+  'ST12-008 EN TREASURE CUP TOP PRIZE': '2024', // 144054482
+  'ST13-015 JP 2ND ANNIVERSARY SET': '2024', // 156101387
+  'ST21-014 JP ONE PIECE MAGAZINE VOL.20': '2025', // 134661995
+  'ST21-014 JP OFFICIAL EVENT TOP PRIZE': '2025', // ST21 JP Luffy #014 (cert masked)
+  'ST21-015 JP OFFICIAL EVENT PRIZE': '2025', // ST21 JP Zoro #015 (cert masked)
+  'ST01-001 JP WEEKLY SHONEN JUMP JAN': '2023', // 152236762
+};
 
 const kindOf = (bracket: string): ReprintKind => {
   if (/wanted/i.test(bracket)) return 'wanted';
@@ -199,6 +228,7 @@ export function onePieceLabel(f: {
   const bracket = [...name.matchAll(/\[([^\]]*)\]/g)].map((x) => x[1]).join(' ');
   name = name.replace(/\[[^\]]*\]/g, ' ');
   let cardCode: string | null = null; // "OP05-119"
+  let promoCode: string | null = null; // "P-135"
   let number = '';
   const hash = name.match(/\s*#\s*([A-Za-z0-9/-]+)\s*$/);
   if (hash) {
@@ -206,11 +236,13 @@ export function onePieceLabel(f: {
     const c = hash[1].match(CODE_RE);
     if (c) cardCode = `${c[1].toUpperCase()}-${c[2]}`;
     const promo = c ? null : hash[1].match(PROMO_CODE_RE);
+    if (promo) promoCode = `P-${promo[1]}`;
     number = `#${c ? c[2] : promo ? promo[1] : hash[1]}`; // "#OP01-120" typed -> "#120"
   } else {
     const c = name.match(CODE_RE);
     const p = c ? null : name.match(PROMO_CODE_RE);
     if (c) cardCode = `${c[1].toUpperCase()}-${c[2]}`;
+    if (p) promoCode = `P-${p[1]}`;
     const m = c ?? p;
     if (m) {
       number = `#${c ? c[2] : m[1]}`;
@@ -234,7 +266,10 @@ export function onePieceLabel(f: {
   // A Promo-set card keeps the promo line even with a booster code: PSA prints
   // "ONE PIECE JP" for ST13-015 (156101387) and ST21-014 (134661995).
   if (PRIZE_RE.test(bracket) || /\bpromo\b/.test(rest)) {
-    return { setLine: `ONE PIECE ${lang}`, year: '', name, number, variety: bracket.trim().toUpperCase() };
+    const key = `${cardCode ?? promoCode} ${lang} ${bracket.replace(/\s+/g, ' ').trim().toUpperCase()}`;
+    // "[OP16 Release Event Winner]": the event ran at that set's release (172653222).
+    const year = PROMO_YEAR[key] ?? (bracketBox ? (YEAR[`${bracketBox} ${lang}`] ?? '') : '');
+    return { setLine: `ONE PIECE ${lang}`, year, name, number, variety: promoVariety(bracket) };
   }
 
   // Which box the card came out of.
