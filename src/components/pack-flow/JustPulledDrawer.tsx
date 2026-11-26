@@ -93,7 +93,7 @@ function StatsSheet({
         aria-labelledby="jp-stats-heading"
         tabIndex={-1}
         data-jp-stats=""
-        className="max-h-[85svh] w-full overflow-y-auto overscroll-contain rounded-t-3xl border-t border-white/10 bg-neutral-900 px-4 pb-[max(env(safe-area-inset-bottom),1rem)] outline-none sm:max-w-xl sm:rounded-3xl sm:border"
+        className="max-h-[85svh] w-full overflow-y-auto overscroll-contain [scrollbar-color:var(--color-neutral-700)_transparent] [scrollbar-width:thin] rounded-t-3xl border-t border-white/10 bg-neutral-900 px-4 pb-[max(env(safe-area-inset-bottom),1rem)] outline-none sm:max-w-xl sm:rounded-3xl sm:border"
         onClick={(e) => e.stopPropagation()}
       >
         {/* The sheet has no top padding of its own: the rows would show
