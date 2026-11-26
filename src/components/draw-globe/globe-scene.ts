@@ -24,6 +24,8 @@ export type GlobeAnchor = { id: string; x: number; y: number; hidden: boolean };
 export type GlobeSceneOptions = {
   reducedMotion: boolean;
   onReady: () => void;
+  /** The earth's picture didn't load: the caller shows the list instead. */
+  onFail: () => void;
   onFrame: (anchors: readonly GlobeAnchor[]) => void;
   /** A tap on a plane, or on nothing (null). */
   onPick: (id: string | null) => void;
@@ -93,8 +95,20 @@ export function createGlobeScene(
     return thing;
   };
   let live = true;
-  const texture = (url: string, colour: boolean, done?: () => void) => {
-    const t = keep(loader.load(url, () => live && done?.()));
+  const texture = (
+    url: string,
+    colour: boolean,
+    done?: () => void,
+    failed?: () => void,
+  ) => {
+    const t = keep(
+      loader.load(
+        url,
+        () => live && done?.(),
+        undefined,
+        () => live && failed?.(),
+      ),
+    );
     if (colour) t.colorSpace = THREE.SRGBColorSpace;
     t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
     return t;
@@ -112,7 +126,7 @@ export function createGlobeScene(
       ball,
       keep(
         new THREE.MeshStandardMaterial({
-          map: texture(`${ASSETS}earth.webp`, true, opts.onReady),
+          map: texture(`${ASSETS}earth.webp`, true, opts.onReady, opts.onFail),
           displacementMap: relief,
           displacementScale: 0.022,
           bumpMap: relief,
@@ -330,6 +344,7 @@ export function createGlobeScene(
           world.remove(f.plane, f.marks);
           disposeTree(f.plane);
           disposeTree(f.marks);
+          f.dots.dispose();
         });
         flights.clear();
         for (const f of next) {
@@ -376,6 +391,7 @@ export function createGlobeScene(
       flights.forEach((f) => {
         disposeTree(f.plane);
         disposeTree(f.marks);
+        f.dots.dispose();
       });
       owned.forEach((o) => o.dispose());
       renderer.dispose();

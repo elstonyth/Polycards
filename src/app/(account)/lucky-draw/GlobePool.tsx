@@ -151,7 +151,6 @@ function Detail({
   balance,
   spinHref,
   cardRef,
-  maxHeight,
   onClose,
   onEnter,
   sheets,
@@ -163,7 +162,6 @@ function Detail({
   balance: number;
   spinHref: string | null;
   cardRef: React.RefObject<HTMLDialogElement | null>;
-  maxHeight: number | null;
   onClose: () => void;
   onEnter: () => void;
   sheets: ReturnType<typeof useGateSheets>;
@@ -245,12 +243,11 @@ function Detail({
       ref={cardRef}
       aria-labelledby={titleId}
       tabIndex={-1}
-      style={maxHeight ? { maxHeight } : undefined}
       className={cn(
         // It grows out of the pin's own point, the end of its stem; on a low
         // screen, out of the plane's side, in two columns. Under reduced
         // motion it only fades.
-        'absolute right-auto bottom-full left-1/2 m-0 mb-[3.75rem] w-[min(22rem,calc(100vw-1.5rem))] origin-[calc(50%-var(--card-shift,0px))_calc(100%+3.75rem)] translate-x-[calc(-50%+var(--card-shift,0px))] overflow-y-auto rounded-3xl border border-white/15 bg-neutral-900 p-3.5 text-inherit shadow-[0_18px_60px_rgba(0,0,0,0.6)] transition-[scale,opacity] duration-300 ease-[cubic-bezier(0.2,0.9,0.3,1.08)] outline-none starting:scale-[0.3] starting:opacity-0 motion-reduce:starting:scale-100',
+        'absolute right-auto bottom-full left-1/2 m-0 mb-[3.75rem] max-h-[var(--card-max,none)] w-[min(22rem,calc(100vw-1.5rem))] origin-[calc(50%-var(--card-shift,0px))_calc(100%+3.75rem)] translate-x-[calc(-50%+var(--card-shift,0px))] overflow-y-auto rounded-3xl border border-white/15 bg-neutral-900 p-3.5 text-inherit shadow-[0_18px_60px_rgba(0,0,0,0.6)] transition-[scale,opacity] duration-300 ease-[cubic-bezier(0.2,0.9,0.3,1.08)] outline-none starting:scale-[0.3] starting:opacity-0 motion-reduce:starting:scale-100',
         'short:top-0 short:bottom-auto short:left-15 short:mb-0 short:grid short:w-[min(30rem,calc(100vw-2rem))] short:origin-[calc(-3.75rem-var(--card-shift,0px))_calc(0px-var(--card-y,0px))] short:translate-x-[var(--card-shift,0px)] short:translate-y-[var(--card-y,0px)] short:grid-cols-[1.2fr_1fr] short:items-center short:gap-x-4 short:p-3',
         leaving &&
           'scale-[0.3] opacity-0 duration-150 ease-in motion-reduce:scale-100',
@@ -344,7 +341,9 @@ export function GlobePool({
   const [shown, setShown] = useState<{ id: string; leaving: boolean } | null>(
     null,
   );
-  const [maxHeight, setMaxHeight] = useState<number | null>(null);
+  // The open card's height cap, as a CSS variable on the stage.
+  const setMaxHeight = (px: number) =>
+    stage.current?.style.setProperty('--card-max', `${px}px`);
   const sideways = useMediaQuery(SIDEWAYS);
   const sidewaysNow = useRef(sideways);
   useEffect(() => {
@@ -412,6 +411,7 @@ export function GlobePool({
       made = createGlobeScene(host.current, {
         reducedMotion: reduced,
         onReady: () => setReady(true),
+        onFail: () => setFailed(true),
         onFrame,
         onPick: open,
       });
@@ -486,7 +486,8 @@ export function GlobePool({
       // A sheet opened from the card (players, tickets) closes first, alone.
       // Read in the capture phase: the sheet's own document listener removes
       // it before a bubbling window listener would look.
-      if (e.key === 'Escape' && !document.querySelector('[role="dialog"]'))
+      // Modal sheets only: the cookie banner is a dialog too, but not modal.
+      if (e.key === 'Escape' && !document.querySelector('[aria-modal="true"]'))
         open(null);
     };
     window.addEventListener('keydown', onKey, true);
@@ -562,10 +563,13 @@ export function GlobePool({
                 }}
                 data-hidden="true"
                 className={cn(
-                  'absolute top-0 left-0 h-0 w-0 transition-opacity duration-200 data-[hidden=true]:invisible data-[hidden=true]:opacity-0',
+                  'absolute top-0 left-0 h-0 w-0 transition-[opacity,visibility] duration-200 data-[hidden=true]:invisible data-[hidden=true]:opacity-0',
                   isOpen ? 'z-30' : 'z-20',
                   // One pin at a time: the rest step back while one is open.
-                  openId && !isOpen && 'pointer-events-none opacity-0',
+                  // invisible too, so Tab can't land on a faded pin.
+                  openId &&
+                    !isOpen &&
+                    'pointer-events-none invisible opacity-0',
                 )}
               >
                 {/* The stem: longer while the pin is open. */}
@@ -596,7 +600,6 @@ export function GlobePool({
                     balance={balance}
                     spinHref={spinHref}
                     cardRef={card}
-                    maxHeight={maxHeight}
                     onClose={() => open(null)}
                     onEnter={() => onEnter(gate)}
                     sheets={sheets}
