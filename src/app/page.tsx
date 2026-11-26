@@ -96,8 +96,9 @@ export default async function HomePage() {
 
   return (
     // Full-bleed by design (CLAUDE.md): boards carry their own px-fluid
-    // gutters; the marquee is the one true edge-to-edge band.
-    <div className="w-full">
+    // gutters; the marquee is the one true edge-to-edge band. `data-ink`: the
+    // home keeps ink black (globals.css, graphite skin).
+    <div data-ink className="w-full">
       {/* Brand introduction remains visible with an empty or offline catalog. */}
       <HeroBoard hits={topHits} freePackPromo={freePackPromo} />
 

@@ -229,7 +229,8 @@ export default async function HomePreviewPage({
   // The brand loader's pre-paint gate is in the root layout's <head>
   // (stage-loader-script.ts, STAGE_LOADER_PATHS); it reads ?loader= itself.
   return (
-    <div className="w-full">
+    // `data-ink`: the 3D flow is drawn against ink black (globals.css).
+    <div data-ink className="w-full">
       {start && (
         <script
           dangerouslySetInnerHTML={{

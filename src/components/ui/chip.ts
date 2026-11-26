@@ -1,6 +1,7 @@
 import { cn } from '@/lib/utils';
 
-// DESIGN.md Chips: graphite pill, silver label; selected = Paper White on Ink.
+// Chips: graphite pill, silver label; selected = a lighter grey with a rim and
+// a white label (owner, 2026-11-26: white is kept for the main button).
 // 44px tall, so a phone thumb never misses one. Shared by the pack page's
 // picker and the /slots catalog, so a filter chip is one thing everywhere.
 const CHIP =
@@ -11,6 +12,6 @@ export const chipVariants = (on: boolean): string =>
   cn(
     CHIP,
     on
-      ? 'bg-neutral-50 text-neutral-950'
+      ? 'bg-neutral-700 text-white ring-1 ring-white/30 ring-inset'
       : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-white',
   );

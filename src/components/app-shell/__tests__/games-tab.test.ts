@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { act, createElement } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { GAMES_EVENT } from '../games';
-import { TABS, isTabActive } from '../tabs';
+import { PHONE_TABS, TABS, isTabActive, markerIndex } from '../tabs';
 
 // The Games tab (operator 2026-10-25) is the one tab that does not navigate:
 // it opens the game picker. These pin that, that the game pages light Games
@@ -31,6 +31,7 @@ vi.mock('../DrawDotProvider', () => ({
 }));
 
 const TabBar = (await import('../TabBar')).default;
+const { TabLink } = await import('../TabLink');
 // Loaded here, not in its test: under full-suite load this import alone can
 // outlast the 5 s test timeout, and the late render then lands in the next test.
 const { GamesSheetBody } = await import('../GamesSheetBody');
@@ -93,15 +94,50 @@ describe('Games tab', () => {
     }
   });
 
-  test('Draw goes to the page, and only for a signed-in customer', async () => {
-    expect(draw.gated).toBe(true);
-    await act(async () => root.render(createElement(TabBar)));
-    const link = container.querySelector('a[href="/lucky-draw"]');
-    expect(link?.textContent).toBe('Draw');
+  test('the phone bar has five tabs, Home in the middle', () => {
+    expect(PHONE_TABS.map((t) => t.label)).toEqual([
+      'Rewards',
+      'Play',
+      'Home',
+      'Vault',
+      'Me',
+    ]);
   });
 
-  test('tapping Games opens the picker instead of navigating', async () => {
+  test('every destination lights exactly one phone tab', () => {
+    const lit = (path: string) =>
+      PHONE_TABS.filter((t) => isTabActive(t, path)).map((t) => t.label);
+    expect(lit('/task')).toEqual(['Rewards']);
+    expect(lit('/leaderboard')).toEqual(['Rewards']);
+    expect(lit('/lucky-draw')).toEqual(['Play']);
+    expect(lit('/vault/coin-flip')).toEqual(['Play']);
+    expect(lit('/vault')).toEqual(['Vault']);
+    expect(lit('/wallet')).toEqual(['Me']);
+    expect(lit('/')).toEqual(['Home']);
+  });
+
+  test('the lit-tab marker sits on the lit tab, and hides for the raised Home and for no tab', () => {
+    expect(markerIndex(TABS, '/vault')).toBe(5);
+    expect(markerIndex(TABS, '/')).toBe(3);
+    expect(markerIndex(PHONE_TABS, '/wallet')).toBe(4);
+    // Home lights itself on the phone bar.
+    expect(markerIndex(PHONE_TABS, '/')).toBe(-1);
+    expect(markerIndex(PHONE_TABS, '/terms')).toBe(-1);
+  });
+
+  test('Play goes to the Lucky Draw page, and only for a signed-in customer', async () => {
+    expect(draw.gated).toBe(true);
+    expect(PHONE_TABS.find((t) => t.label === 'Play')?.gated).toBe(true);
     await act(async () => root.render(createElement(TabBar)));
+    const link = container.querySelector('a[href="/lucky-draw"]');
+    expect(link?.textContent).toBe('Play');
+  });
+
+  // The desktop header's link; the phone bar has no Games tab.
+  test('tapping Games opens the picker instead of navigating', async () => {
+    await act(async () =>
+      root.render(createElement(TabLink, { tab: games, variant: 'pill' })),
+    );
     const button = [...container.querySelectorAll('button')].find(
       (b) => b.textContent === 'Games',
     )!;
@@ -124,11 +160,11 @@ describe('Games tab', () => {
     expect(document.querySelector('a[href="/vault/coin-flip"]')).not.toBeNull();
   });
 
-  test('Games shows as current while a game is open', async () => {
+  test('Play shows as current while a game is open', async () => {
     nav.pathname = '/vault/coin-flip';
     await act(async () => root.render(createElement(TabBar)));
     const current = container.querySelectorAll('[aria-current="page"]');
     expect(current).toHaveLength(1);
-    expect(current[0]?.textContent).toBe('Games');
+    expect(current[0]?.textContent).toBe('Play');
   });
 });

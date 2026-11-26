@@ -31,8 +31,8 @@ export default async function VaultPage() {
         sub="The cards you hold. Ship them, or sell back instantly."
       />
       <PageBody>
-        <VaultTabs current="/vault" />
         <VaultClient
+          tabs={<VaultTabs current="/vault" />}
           initial={initial}
           addresses={addresses}
           // Unreadable reads as none: the Packs row simply stays hidden.

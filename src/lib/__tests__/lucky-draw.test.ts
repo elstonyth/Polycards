@@ -187,6 +187,27 @@ describe('sortGates', () => {
     ]);
   });
 
+  it('puts a gate whose clock has run out below the ones still open', () => {
+    // b closed at 1000; at 1500 it only waits for its draw.
+    expect(ids(sortGates([a, b, c], 'closing', new Set(), 1500))).toEqual([
+      'c',
+      'a',
+      'b',
+    ]);
+    // A closed gate is not news: an open one still leads it.
+    expect(ids(sortGates([a, b, c], 'closing', new Set(['b']), 1500))).toEqual([
+      'c',
+      'a',
+      'b',
+    ]);
+    // No clock yet (the server render): the order of the sort alone.
+    expect(ids(sortGates([a, b, c], 'closing', new Set(), null))).toEqual([
+      'b',
+      'c',
+      'a',
+    ]);
+  });
+
   it('does not reorder the list it was given', () => {
     const list = [a, b, c];
     sortGates(list, 'closing', new Set());

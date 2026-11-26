@@ -231,15 +231,22 @@ const SORT_ORDER: Record<
   newest: (a, b) => Date.parse(liveAt(b)) - Date.parse(liveAt(a)),
 };
 
-/** Gates in showing order: a gate new since the last visit on top, then the
- *  chosen sort. The soonest draw leads by default (boss 2026-11-01). */
+/** Gates in showing order: the ones still open to enter first (owner
+ *  2026-11-26: a phone showed two closed gates above the only open one), then
+ *  a gate new since the last visit, then the chosen sort. The soonest draw
+ *  leads by default (boss 2026-11-01). With no clock yet (the server render)
+ *  no gate counts as closed, so hydration agrees. */
 export function sortGates(
   gates: LuckyDrawGate[],
   sort: GateSort,
   newIds: ReadonlySet<string>,
+  nowMs: number | null = null,
 ): LuckyDrawGate[] {
+  const closed = (g: LuckyDrawGate) =>
+    Number(nowMs != null && !countdownClock(g.ends_at, nowMs));
   return [...gates].sort(
     (a, b) =>
+      closed(a) - closed(b) ||
       Number(newIds.has(b.id)) - Number(newIds.has(a.id)) ||
       SORT_ORDER[sort](a, b) ||
       (a.id < b.id ? -1 : 1),

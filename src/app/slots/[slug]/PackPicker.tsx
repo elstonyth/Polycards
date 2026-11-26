@@ -117,7 +117,6 @@ export function PackPicker({
             categories={categoryTabs}
             active={pendingCategory ?? pack.categoryId}
             onChange={onCategory}
-            compact
           />
         ) : (
           <div className="flex h-11 items-center gap-2 rounded-full bg-white/[0.06] px-4 text-sm font-semibold text-white ring-1 ring-white/10">
@@ -165,7 +164,7 @@ export function PackPicker({
                         <span
                           className={cn(
                             'font-normal tabular-nums',
-                            on ? 'text-neutral-600' : 'text-neutral-400',
+                            on ? 'text-neutral-300' : 'text-neutral-400',
                           )}
                         >
                           {s.packs.length}

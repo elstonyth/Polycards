@@ -665,7 +665,7 @@ export function PullHistory({
               'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
               t === 'Stats' && 'w-11',
               tab === t
-                ? 'bg-neutral-50 text-neutral-950'
+                ? 'bg-neutral-700 text-white'
                 : 'text-neutral-400 hover:text-white',
             )}
           >

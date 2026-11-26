@@ -1,12 +1,14 @@
 import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
+import { unstable_rethrow } from 'next/navigation';
 import {
   Bell,
   ChevronRight,
   Download,
   Landmark,
   LifeBuoy,
+  LogOut,
   MapPin,
   Package,
   Receipt,
@@ -17,22 +19,25 @@ import {
 import { getCustomer } from '@/lib/data/customer';
 import { cn } from '@/lib/utils';
 import { pillVariants } from '@/components/ui/pill';
-import { PageBody, PageTitle } from '@/components/ui/page-frame';
 import { getOwnProfileHandle, getPublicProfile } from '@/lib/data/profiles';
 import { getWallet } from '@/lib/actions/wallet';
+import { getPaymentLimits } from '@/lib/actions/vault';
+import { getTicketBalance } from '@/lib/actions/lucky-draw';
+import { DEFAULT_PAYMENT_LIMITS } from '@/lib/payment-limits';
 import { sen, TOPUP_FIRST_HEADING } from '@/lib/wallet-split';
 import { getVip } from '@/lib/actions/vip';
 import { levelProgressPct } from '@/lib/actions/vip-map';
 import { getAvatarFrames } from '@/lib/data/avatar-frames';
 import { avatarForSeed } from '@/lib/avatar-seed';
-import { rm, rm0 } from '@/lib/format';
+import { num, rm, rm0 } from '@/lib/format';
 import { SlabImage } from '@/components/SlabImage';
 import { toCardView } from '@/lib/card-view';
-import { LogoutButton } from './MeActions';
-import { TopUpButton } from '@/components/account/TopUpButton';
+import { WithdrawSteps } from '@/components/account/WithdrawSteps';
+import { GlacierTopUpButton, LogoutButton } from './MeActions';
 import { WithdrawLink } from '@/components/account/WithdrawLink';
 import { MeHeader } from './MeAppearance';
 import { EquippedFrameProvider } from './equipped-frame';
+import { FAN_MAX, fanPose, joinedLabel } from './showcase-fan';
 
 export const metadata: Metadata = {
   title: 'Me',
@@ -63,6 +68,15 @@ const QUICK_ACCESS: { label: string; href: string; icon: LucideIcon }[] = [
 // so don't re-add the card here: it would show those links twice in one
 // scroll. `Support` in QUICK_ACCESS above still covers /contact.
 
+const LABEL =
+  'text-[11px] font-semibold tracking-[0.08em] text-neutral-400 uppercase';
+const PANEL = 'rounded-3xl border border-white/10 bg-neutral-900 p-4 sm:p-5';
+// A shortcut: a 48px round grey chip over its label, four to a row.
+const TILE =
+  'flex min-w-0 flex-col items-center gap-1.5 text-center text-[11px] font-semibold';
+const TILE_ICON =
+  'relative flex h-12 w-12 items-center justify-center rounded-full border border-white/10 bg-neutral-800 transition-colors';
+
 export default async function MePage() {
   // NOT guaranteed by the account layout's auth gate, despite how it reads:
   // App Router renders a layout and its page CONCURRENTLY, so the layout's
@@ -74,24 +88,36 @@ export default async function MePage() {
   const customer = await getCustomer();
   if (!customer) return null;
 
-  const [walletResult, handle, vipResult, avatarFrames] = await Promise.all([
-    getWallet(),
-    getOwnProfileHandle(),
-    getVip(),
-    getAvatarFrames(),
-  ]);
+  const [walletResult, handle, vipResult, avatarFrames, tickets, limits] =
+    await Promise.all([
+      getWallet(),
+      getOwnProfileHandle(),
+      getVip(),
+      getAvatarFrames(),
+      // null (unreadable) hides the Tickets number, as on the Vault.
+      getTicketBalance(),
+      // The deposit floor for the unlock steps (desktop) — the wallet page's
+      // same read; any failure keeps the defaults.
+      getPaymentLimits().catch((err: unknown) => {
+        unstable_rethrow(err);
+        return DEFAULT_PAYMENT_LIMITS;
+      }),
+    ]);
   // Locked gate (spend first): what packs must still take before withdrawals
   // open; null when withdrawals aren't waiting on packs.
   const gate = walletResult.ok ? walletResult.wallet : null;
   const unlockSpend = gate?.hold === 'locked' ? gate.unlockSpend : null;
-  // The Withdraw button only when there is something to withdraw.
+  // The Withdraw button goes to the withdraw form only when there is
+  // something to withdraw; otherwise to the wallet, which says why not.
   const canWithdraw =
     gate !== null && !gate.isFrozen && sen(gate.withdrawable) > 0;
-  // Second wave — needs the handle. Supplies header stats and the showcase
-  // strip in one cached public-route read.
+  const cantYet = gate?.hold === 'no_topup' || gate?.hold === 'locked';
+  // Second wave — needs the handle. Supplies the stats and the showcase in one
+  // cached public-route read.
   const profileResult = handle ? await getPublicProfile(handle) : null;
   const profile = profileResult?.status === 'ok' ? profileResult.profile : null;
   const showcased = profile?.collection ?? [];
+  const fanned = showcased.slice(0, FAN_MAX);
 
   const displayName =
     [customer.first_name, customer.last_name].filter(Boolean).join(' ') ||
@@ -118,318 +144,419 @@ export default async function MePage() {
   // null = "couldn't load", NOT "level 1" — a failed VIP read must never
   // render every frame as locked (2026-07-07 429-cascade incident).
   const highestLevel = vipResult.ok ? vipResult.vip.highestLevelEver : null;
-  // Level bar restarts at each level: fill measures spend inside the
-  // [current level threshold, next level threshold] segment, not lifetime
-  // spend / next threshold (which pins the bar near-full at high levels).
-  const levelStart =
-    vipResult.ok && vipResult.vip.next
-      ? (vipResult.vip.levels.find((l) => l.level === vipResult.vip.level)
-          ?.threshold ?? 0)
-      : 0;
+
+  // The tier: the bar says how far to the next level. The fill restarts at
+  // each level: it
+  // measures spend inside [this level's threshold, the next one's], not
+  // lifetime spend / next threshold (which pins it near-full at high levels).
+  let tier: {
+    level: number;
+    text: string;
+    bar: { now: number; min: number; max: number; next: number } | null;
+  } | null = null;
+  let progress = 0;
+  if (vipResult.ok) {
+    const { level, next, levels } = vipResult.vip;
+    if (next) {
+      const start = levels.find((l) => l.level === level)?.threshold ?? 0;
+      const spent = next.threshold - next.remaining;
+      progress = levelProgressPct(spent, start, next.threshold) / 100;
+      tier = {
+        level,
+        text: `${rm0(next.remaining)} more to LV ${next.level}`,
+        // Clamped to the segment floor: ARIA requires valuenow >= valuemin,
+        // and a state-row level can in principle run ahead of settled spend.
+        bar: {
+          now: Math.max(start, spent),
+          min: start,
+          max: next.threshold,
+          next: next.level,
+        },
+      };
+    } else {
+      progress = 1;
+      tier = { level, text: 'Max level', bar: null };
+    }
+  }
+
+  const balance = walletResult.ok ? walletResult.wallet : null;
+  const numbers = profile
+    ? [
+        { label: 'Pulls', value: num(profile.stats.pulls) },
+        {
+          label: 'Legendary',
+          value: num(profile.stats.by_rarity.Legendary ?? 0),
+        },
+        ...(tickets !== null
+          ? [{ label: 'Tickets', value: num(tickets) }]
+          : []),
+        { label: 'Joined', value: joinedLabel(profile.joined_at) },
+      ]
+    : [];
 
   return (
     <EquippedFrameProvider initial={equippedLevel}>
-      <div className="flex flex-col gap-4">
-        {/* The tab title in the shared style, but a <p>, not a heading:
-            MeHeader's display name is already this page's h1 (see
-            MeAppearance.tsx), so an AccountHeader here would give the page
-            two competing h1s. */}
-        <PageTitle as="p">Me</PageTitle>
-        <PageBody className="flex flex-col gap-4">
+      {/* `data-screen` lets the account layout drop its column: this page
+          lays out its own width (one column on a phone, two on a phone on its
+          side, three from lg as in the desktop mock-up). DOM order is the
+          phone's order, so focus order follows what is seen; from lg the
+          grid places each panel in its column. */}
+      <div
+        data-screen
+        className="mx-auto grid w-full max-w-2xl gap-3 px-fluid pb-[calc(6rem+env(safe-area-inset-bottom))] pt-3 flat:max-w-none flat:grid-cols-2 lg:max-w-[1440px] lg:grid-cols-3 lg:gap-5 lg:pb-10 lg:pt-8"
+      >
+        {/* Tier card: the profile row, then the level and its bar. */}
+        <section className="flex flex-col gap-4 rounded-3xl border border-white/10 bg-neutral-900 p-4 squat:gap-2 squat:p-3 sm:p-5 lg:col-start-1 lg:row-start-1 lg:min-h-[260px] lg:justify-between">
           <MeHeader
             displayName={displayName}
             username={customer.first_name ?? ''}
             handle={handle}
-            pulls={profile ? profile.stats.pulls : null}
             avatarUrl={avatarUrl}
             frames={avatarFrames}
             highestLevel={highestLevel}
+            vipBadge={vipResult.ok}
           />
-
-          {/* Level card (Show's Lv bar): compact, VIP emblem on the right.
-            The emblem is rendered on pure black and composited with
-            mix-blend-screen so it melts into the card background. */}
-          {vipResult.ok && (
-            <div className="rounded-2xl border border-white/10 bg-neutral-900 px-4 py-3">
-              <div className="flex items-center gap-3">
-                <div className="min-w-0 flex-1">
-                  <span className="font-heading text-chase text-xl">
-                    LV {vipResult.vip.level}
-                  </span>
-                  {vipResult.vip.next ? (
-                    <>
-                      <div
-                        className="mt-2 h-1.5 overflow-hidden rounded-full bg-neutral-800"
-                        role="progressbar"
-                        aria-valuemin={levelStart}
-                        aria-valuemax={vipResult.vip.next.threshold}
-                        // Clamped to the segment floor: ARIA requires
-                        // valuenow >= valuemin, and a state-row level can in
-                        // principle run ahead of settled spend.
-                        aria-valuenow={Math.max(
-                          levelStart,
-                          vipResult.vip.next.threshold -
-                            vipResult.vip.next.remaining,
-                        )}
-                        aria-label={`Progress to VIP level ${vipResult.vip.next.level}`}
-                      >
-                        <div
-                          className="bg-chase h-full rounded-full"
-                          style={{
-                            width: `${Math.max(
-                              2,
-                              levelProgressPct(
-                                vipResult.vip.next.threshold -
-                                  vipResult.vip.next.remaining,
-                                levelStart,
-                                vipResult.vip.next.threshold,
-                              ),
-                            )}%`,
-                          }}
-                        />
-                      </div>
-                      {/* Left = lifetime spend, right = next level's target —
-                        segment-bound labels read as "my spend" and confused
-                        real users (2026-07-22); the fill stays segment-
-                        relative. */}
-                      <div className="mt-1 flex justify-between text-[10px] font-semibold text-neutral-500">
-                        <span>
-                          {rm0(
-                            vipResult.vip.next.threshold -
-                              vipResult.vip.next.remaining,
-                          )}
-                        </span>
-                        <span>{rm0(vipResult.vip.next.threshold)}</span>
-                      </div>
-                      <p className="text-[12px] text-neutral-400">
-                        {rm0(vipResult.vip.next.remaining)} more to LV{' '}
-                        {vipResult.vip.next.level}
-                      </p>
-                    </>
-                  ) : (
-                    <p className="mt-1 text-[12px] text-neutral-400">
-                      Max level reached — you&rsquo;re at the top of the ladder.
-                    </p>
-                  )}
+          {tier && (
+            <div className="mt-auto lg:mt-0">
+              <span className="inline-flex h-6 items-center rounded-md bg-chase px-2 font-heading text-[13px] leading-none text-neutral-950">
+                LV {tier.level}
+              </span>
+              <p className="mt-2 text-[13px] font-medium text-neutral-50">
+                {tier.text}
+              </p>
+              {tier.bar && (
+                <div
+                  role="progressbar"
+                  aria-valuemin={tier.bar.min}
+                  aria-valuemax={tier.bar.max}
+                  aria-valuenow={tier.bar.now}
+                  aria-label={`Progress to VIP level ${tier.bar.next}`}
+                  className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-white/10"
+                >
+                  <div
+                    className="h-full rounded-full bg-glacier-grad"
+                    style={{ width: `${progress * 100}%` }}
+                  />
                 </div>
-                <span className="relative shrink-0">
-                  {/* Soft amber halo behind the badge. */}
-                  <span
-                    aria-hidden
-                    className="bg-chase/25 absolute left-1/2 top-1/2 h-12 w-24 -translate-x-1/2 -translate-y-1/2 rounded-full blur-xl"
-                  />
-                  {/* Transparent-background asset — no blend mode needed (the
-                    old wordmark was black-field + mix-blend-screen, which
-                    broke inside any ancestor with opacity < 1). */}
-                  <Image
-                    src="/images/app/vip-badge.webp"
-                    alt=""
-                    aria-hidden
-                    width={761}
-                    height={360}
-                    className="relative h-9 w-auto"
-                  />
-                </span>
-              </div>
+              )}
             </div>
           )}
+        </section>
 
-          {/* 橱窗 — showcased cards. Hidden when the profile read fails. */}
-          {profile && (
-            <section className="rounded-2xl border border-white/10 bg-neutral-900 p-5">
-              <div className="flex items-baseline justify-between">
-                <p className="text-[12px] font-semibold uppercase tracking-wide text-neutral-400">
-                  Showcase
-                </p>
-                <Link
-                  href="/vault"
-                  className="inline-flex min-h-11 items-center text-[12px] font-semibold text-white/70 underline-offset-2 hover:text-white hover:underline"
-                >
-                  Manage
-                </Link>
-              </div>
-              {showcased.length > 0 ? (
-                // overflow-x-auto clips BOTH axes, so the tier halo needs room
-                // reserved as padding (negative margins pull the rail back out to
-                // the card's own padding — the PoolByRarity rail pattern).
-                <div className="-mx-5 mt-2 flex gap-5 overflow-x-auto px-5 py-4">
-                  {showcased.map((card, i) => (
-                    <Link
-                      // Two showcased pulls of the SAME card are two distinct
-                      // items (and can carry different tier frames — rarity is
-                      // per (pack, card)). The payload has no pull id, so the
-                      // index disambiguates; the public profile keys the same way.
-                      key={`${card.handle}-${i}`}
-                      href={`/card/${card.handle}`}
-                      className="w-20 shrink-0 transition-opacity hover:opacity-90"
-                    >
-                      <SlabImage
-                        // The showcase strip is the one surface that renders the
-                        // profile WIRE row rather than the mapped view — the
-                        // shared mapper is what turns it into a card view here.
-                        card={toCardView(card)}
-                        // Thumbnail-sized slab: the full-size halo is wider than
-                        // the slab itself here and would bleed into neighbours.
-                        glowScale={0.4}
-                        sizes="80px"
-                        className="w-20"
-                      />
-                    </Link>
-                  ))}
-                </div>
-              ) : (
+        {/* Balance card: the money action in a phone's first screen. */}
+        <section
+          aria-label="Balance"
+          className={cn(
+            PANEL,
+            // squat: an SE-sized phone must still show Top Up above the tab bar.
+            'relative overflow-hidden pb-5 squat:p-3 squat:pb-4 sm:pb-6 lg:col-start-2 lg:row-start-1 lg:p-6',
+          )}
+        >
+          {balance ? (
+            <>
+              <Link
+                href="/wallet"
+                className="block min-w-0 rounded-lg hover:opacity-90"
+              >
+                <span className={cn(LABEL, 'flex items-center gap-0.5')}>
+                  Balance
+                  <ChevronRight className="h-3.5 w-3.5" aria-hidden />
+                </span>
+                <span className="mt-1.5 block whitespace-nowrap font-heading text-[2.25rem] leading-none text-white tabular-nums lg:text-[2.75rem]">
+                  {rm(balance.balance)}
+                </span>
+              </Link>
+              {!balance.isFrozen && (
                 <p className="mt-2 text-[13px] text-neutral-400">
-                  Nothing showcased yet —{' '}
-                  <Link
-                    href="/vault"
-                    className="font-semibold text-white underline underline-offset-2"
-                  >
-                    pick cards in your Vault
-                  </Link>
-                  .
+                  Withdrawable{' '}
+                  <span className="whitespace-nowrap">
+                    {rm(balance.withdrawable)}
+                  </span>
                 </p>
               )}
-            </section>
-          )}
-
-          {/* Balance bar */}
-          <section className="rounded-2xl border border-white/10 bg-neutral-900 p-4">
-            {walletResult.ok ? (
-              <>
-                {/* flex-wrap: a long balance pushes the buttons to their own
-                  row instead of truncating money. */}
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <Link href="/wallet" className="min-w-0 hover:opacity-90">
-                    <p className="flex items-center gap-0.5 text-[12px] font-semibold uppercase tracking-wide text-neutral-400">
-                      Balance
-                      <ChevronRight className="h-3.5 w-3.5" aria-hidden />
-                    </p>
-                    <p className="font-heading mt-0.5 text-2xl text-white">
-                      {rm(walletResult.wallet.balance)}
-                    </p>
-                    {/* Right beside the Withdraw button it would otherwise
-                      find out from. Bonus alone never withdraws, so no hint. */}
-                    {!walletResult.wallet.hasTopup &&
-                      !walletResult.wallet.isFrozen &&
-                      sen(walletResult.wallet.balance) >
-                        sen(walletResult.wallet.bonus) && (
-                        <p className="mt-0.5 text-[12px] font-semibold text-sky-400">
-                          {TOPUP_FIRST_HEADING}
-                        </p>
-                      )}
-                    {unlockSpend !== null && (
-                      <p className="mt-0.5 text-[12px] font-semibold text-sky-400">
-                        Use{' '}
-                        <span className="whitespace-nowrap">
-                          {rm(unlockSpend)}
-                        </span>{' '}
-                        more on packs to unlock withdrawals.
-                      </p>
+              {/* Right above the Withdraw button it would otherwise find out
+                  from. Bonus alone never withdraws, so no hint. */}
+              {!balance.hasTopup &&
+                !balance.isFrozen &&
+                sen(balance.balance) > sen(balance.bonus) && (
+                  <p className="mt-1 text-[12px] font-semibold text-glacier">
+                    {TOPUP_FIRST_HEADING}
+                  </p>
+                )}
+              {unlockSpend !== null && (
+                <p className="mt-1 text-[12px] font-semibold text-glacier">
+                  Use{' '}
+                  <span className="whitespace-nowrap">{rm(unlockSpend)}</span>{' '}
+                  more on packs to unlock withdrawals.
+                </p>
+              )}
+              <div className="mt-4 flex gap-2 squat:mt-3 lg:mt-6">
+                <GlacierTopUpButton className="flex-1 px-4" />
+                {canWithdraw ? (
+                  <WithdrawLink
+                    className={cn(
+                      pillVariants({ variant: 'secondary' }),
+                      'flex-1 px-4',
                     )}
+                  >
+                    Withdraw
+                  </WithdrawLink>
+                ) : unlockSpend !== null ? (
+                  <Link
+                    href="/slots"
+                    className={cn(
+                      pillVariants({ variant: 'secondary' }),
+                      'flex-1 px-4',
+                    )}
+                  >
+                    Open packs
                   </Link>
-                  <div className="flex shrink-0 gap-2">
-                    {canWithdraw ? (
-                      <WithdrawLink
-                        className={cn(
-                          pillVariants({ variant: 'secondary', size: 'sm' }),
-                        )}
-                      >
-                        Withdraw
-                      </WithdrawLink>
-                    ) : (
-                      unlockSpend !== null && (
-                        <Link
-                          href="/slots"
-                          className={cn(
-                            pillVariants({ variant: 'secondary', size: 'sm' }),
-                          )}
-                        >
-                          Open packs
-                        </Link>
-                      )
+                ) : (
+                  <Link
+                    href="/wallet"
+                    className={cn(
+                      pillVariants({ variant: 'secondary' }),
+                      'flex-1 px-4',
                     )}
-                    <TopUpButton size="sm" className="" />
-                  </div>
-                </div>
-              </>
-            ) : (
-              <p className="text-sm text-neutral-400">
-                Couldn&rsquo;t load your balance.{' '}
-                <Link
-                  href="/wallet"
-                  className="font-semibold text-white underline"
+                  >
+                    Withdraw
+                  </Link>
+                )}
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-neutral-400">
+              Couldn&rsquo;t load your balance.{' '}
+              <Link
+                href="/wallet"
+                className="font-semibold text-white underline"
+              >
+                Open wallet
+              </Link>
+            </p>
+          )}
+        </section>
+
+        {numbers.length > 0 && (
+          <dl
+            className={cn(
+              PANEL,
+              'grid auto-cols-fr grid-flow-col divide-x divide-white/10 px-0 py-3.5 sm:px-0 lg:col-start-1 lg:row-start-2',
+            )}
+          >
+            {numbers.map((n) => (
+              <div
+                key={n.label}
+                // justify-center: on desktop the row is as tall as its
+                // neighbour, and the numbers sat on the panel's floor.
+                className="flex min-w-0 flex-col-reverse items-center justify-center gap-1 px-1 text-center"
+              >
+                <dt className="truncate text-[12px] text-neutral-400">
+                  {n.label}
+                </dt>
+                <dd className="font-heading text-lg leading-none text-white tabular-nums lg:text-xl">
+                  {n.value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        )}
+
+        {/* Quick access, Log out its last tile. Frames live in the Edit
+            Profile modal (tap the avatar, the name or Edit). */}
+        <nav
+          aria-label="Quick access"
+          className="grid grid-cols-4 gap-x-2 gap-y-4 py-1 flat:row-span-2 flat:self-start lg:col-start-3 lg:row-start-1 lg:rounded-3xl lg:border lg:border-white/10 lg:bg-neutral-900 lg:p-5"
+        >
+          {QUICK_ACCESS.map((item) => {
+            const Icon = item.icon;
+            // A phoneless account is refused by every money/goods path
+            // (backend requirePhoneVerified: top-up, deposit, withdraw,
+            // delivery), and nothing on this screen says so until they hit
+            // the wall. Light the tile that fixes it.
+            const highlight = needsPhone && item.href === '/settings';
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  TILE,
+                  'group',
+                  highlight
+                    ? 'text-white'
+                    : 'text-neutral-300 hover:text-white',
+                )}
+              >
+                {/* Paper White, not Chase Gold: gold is reserved for prize
+                    and value moments, and a collector trained on gold =
+                    prize reads a gold Settings tile as "reward waiting". */}
+                <span
+                  className={cn(
+                    TILE_ICON,
+                    highlight
+                      ? 'bg-white/15 ring-1 ring-white/40'
+                      : 'group-hover:bg-neutral-700',
+                  )}
                 >
-                  Open wallet
+                  <Icon className="h-5 w-5" aria-hidden />
+                  {highlight && (
+                    <span
+                      aria-hidden
+                      className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-neutral-50"
+                    />
+                  )}
+                </span>
+                {item.label}
+                {/* Colour alone is invisible to a screen reader, and it is
+                    the only thing separating this tile from the others. */}
+                {highlight && (
+                  <span className="sr-only">— add your phone number</span>
+                )}
+              </Link>
+            );
+          })}
+          <LogoutButton
+            className={cn(
+              TILE,
+              'h-auto w-auto justify-start rounded-none border-0 text-[11px] text-neutral-300',
+            )}
+            icon={
+              <span className={TILE_ICON}>
+                <LogOut className="h-5 w-5" aria-hidden />
+              </span>
+            }
+          />
+        </nav>
+
+        {/* 橱窗 — showcased cards, fanned. Hidden when the profile read
+            fails. */}
+        {profile && (
+          <section
+            className={cn(PANEL, 'pb-3 sm:pb-4 lg:col-start-1 lg:row-start-3')}
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="font-heading text-lg text-white">Showcase</h2>
+              <Link
+                href="/vault"
+                className="inline-flex min-h-11 items-center gap-0.5 text-[13px] font-semibold text-glacier underline-offset-2 hover:underline"
+              >
+                Manage
+                <ChevronRight className="h-3.5 w-3.5" aria-hidden />
+              </Link>
+            </div>
+            {fanned.length > 0 ? (
+              <div className="relative flex h-[150px] items-center justify-center">
+                {fanned.map((card, i) => {
+                  const pose = fanPose(i, fanned.length);
+                  return (
+                    <Link
+                      // Two showcased pulls of the SAME card are two
+                      // distinct items (and can carry different tier
+                      // frames — rarity is per (pack, card)). The payload
+                      // has no pull id, so the index disambiguates; the
+                      // public profile keys the same way.
+                      key={`${card.handle}-${i}`}
+                      href={`/card/${card.handle}`}
+                      className="relative w-[58px] shrink-0 transition-transform duration-200 [transform:translateY(var(--y))_rotate(var(--r))_scale(var(--s))] [&:not(:first-of-type)]:-ml-2 hover:[transform:translateY(calc(var(--y)-6px))_rotate(var(--r))_scale(var(--s))]"
+                      style={
+                        {
+                          // the board's curve, at this panel's smaller slab
+                          '--y': `${pose.y * 0.7}px`,
+                          '--r': `${pose.rotate}deg`,
+                          '--s': pose.scale,
+                          zIndex: pose.z,
+                        } as React.CSSProperties
+                      }
+                    >
+                      <SlabImage
+                        // The showcase is the one surface that renders the
+                        // profile WIRE row rather than the mapped view —
+                        // the shared mapper turns it into a card view here.
+                        card={toCardView(card)}
+                        // Thumbnail-sized slab: the full-size halo is wider
+                        // than the slab and would bleed into neighbours.
+                        glowScale={0.4}
+                        sizes="58px"
+                        className="w-[58px] drop-shadow-[0_12px_12px_rgba(0,0,0,.7)]"
+                      />
+                    </Link>
+                  );
+                })}
+                {showcased.length > FAN_MAX && (
+                  <Link
+                    href="/vault"
+                    className="absolute -bottom-2 right-0 inline-flex min-h-11 items-center text-[12px] font-semibold text-neutral-400 hover:text-white"
+                  >
+                    +{showcased.length - FAN_MAX} more
+                  </Link>
+                )}
+              </div>
+            ) : (
+              <p className="pb-2 text-[13px] text-neutral-400">
+                Nothing showcased yet —{' '}
+                <Link
+                  href="/vault"
+                  className="font-semibold text-glacier underline underline-offset-2"
+                >
+                  pick cards in your Vault
                 </Link>
+                .
               </p>
             )}
           </section>
+        )}
 
-          {/* Quick access grid */}
-          <section className="rounded-2xl border border-white/10 bg-neutral-900 p-5">
-            <p className="text-[12px] font-semibold uppercase tracking-wide text-neutral-400">
-              Quick access
-            </p>
-            <div className="mt-4 grid grid-cols-3 gap-y-5">
-              {QUICK_ACCESS.map((item) => {
-                const Icon = item.icon;
-                // A phoneless account is refused by every money/goods path
-                // (backend requirePhoneVerified: top-up, deposit, withdraw,
-                // delivery), and nothing on this screen says so until they hit
-                // the wall. Light the tile that fixes it.
-                const highlight = needsPhone && item.href === '/settings';
-                return (
-                  <Link
-                    key={item.href}
-                    href={item.href}
-                    className={cn(
-                      'flex flex-col items-center gap-1.5 transition-colors',
-                      highlight
-                        ? 'text-white'
-                        : 'text-neutral-300 hover:text-white',
-                    )}
-                  >
-                    {/* Paper White, not Chase Gold: DESIGN.md §2 reserves gold
-                      for prize and value moments, and a collector trained on
-                      gold = prize reads a gold Settings tile as "reward
-                      waiting". White is this system's action color, which is
-                      exactly what this tile is asking for. */}
-                    <span
-                      className={cn(
-                        'relative flex h-11 w-11 items-center justify-center rounded-2xl',
-                        highlight
-                          ? 'bg-white/10 ring-1 ring-white/40'
-                          : 'bg-neutral-800',
-                      )}
-                    >
-                      <Icon className="h-5 w-5" aria-hidden />
-                      {highlight && (
-                        <span
-                          aria-hidden
-                          className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-neutral-50"
-                        />
-                      )}
-                    </span>
-                    <span className="text-[11px] font-semibold">
-                      {item.label}
-                    </span>
-                    {/* Colour alone is invisible to a screen reader, and it is
-                      the only thing separating this tile from the other
-                      seven. */}
-                    {highlight && (
-                      <span className="sr-only">— add your phone number</span>
-                    )}
-                  </Link>
-                );
-              })}
-            </div>
+        {/* Desktop only: the wallet's unlock steps (a phone has the one-line
+            note in the balance card), then the invite card. */}
+        {gate && cantYet && (
+          <section
+            className={cn(
+              PANEL,
+              'hidden lg:col-start-2 lg:row-span-2 lg:row-start-2 lg:block lg:self-start lg:p-6',
+            )}
+          >
+            <h2 className="font-heading text-lg text-white">
+              Unlock withdrawals
+            </h2>
+            <WithdrawSteps
+              className="mt-4"
+              topUpButton={false}
+              hasTopup={gate.hasTopup}
+              depositMinRm={limits.deposit.minRm}
+              available={gate.available}
+              bonus={gate.bonus}
+              remaining={gate.playthrough.remaining}
+            />
           </section>
+        )}
 
-          {/* Frames live in the Edit Profile modal (tap the avatar or name) —
-            Show's Me has no frames row. */}
-
-          <LogoutButton />
-        </PageBody>
+        <section
+          className={cn(
+            PANEL,
+            // The gift sits inside the card so its top lines up with the row.
+            'relative hidden lg:col-start-3 lg:row-span-2 lg:row-start-2 lg:block lg:self-start lg:p-6',
+          )}
+        >
+          <Image
+            src="/images/ice/gift.webp"
+            alt=""
+            width={512}
+            height={512}
+            className="pointer-events-none absolute right-3 top-1/2 h-36 w-36 -translate-y-1/2"
+          />
+          <h2 className="max-w-[55%] font-heading text-xl text-white">
+            Invite friends
+          </h2>
+          <p className="mt-2 max-w-[55%] text-[13px] text-neutral-400">
+            Every pack your friends rip pays you a weekly cut.
+          </p>
+          <Link
+            href="/referral"
+            className={cn(pillVariants({ variant: 'primary' }), 'mt-5')}
+          >
+            Get your link
+          </Link>
+        </section>
       </div>
     </EquippedFrameProvider>
   );

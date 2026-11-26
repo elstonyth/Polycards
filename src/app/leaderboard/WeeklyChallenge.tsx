@@ -1,4 +1,3 @@
-import Image from 'next/image';
 import Link from 'next/link';
 import { Trophy, Coins, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -16,177 +15,155 @@ const RULES = [
   'At the end of the week, the top 10 on the Weekly Pull Value board receive all rewards unlocked that week.',
 ];
 
+/** The challenge's title with the reset countdown as a small grey chip. Sits
+ *  at the top of the standings column on /leaderboard (the Ranks tab). */
+export function ChallengeHead({ challenge }: { challenge: Challenge }) {
+  return (
+    <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+      <h2 className="text-xl font-semibold text-neutral-50 sm:text-2xl">
+        Weekly Pulled Value
+      </h2>
+      <ResetCountdown
+        resetAt={challenge.resetAt}
+        label={challenge.resetLabel}
+      />
+    </header>
+  );
+}
+
 /**
- * Weekly Pulled Value Challenge — hero, community pool, reward stages and the
- * cumulative rewards summary. Lives above the standings on /leaderboard (the
- * Ranks tab): the "This Week" board below IS the board this challenge settles
- * on, so the challenge's own top-10 list is intentionally not repeated here.
+ * The community goal: "RM x / RM y", the staged bar and the next-stage line.
+ * Rendered between the podium and the other ranks; its top edge carries the
+ * podium's blocks. null when the backend sent no pool.
+ */
+export function CommunityGoal({ challenge }: { challenge: Challenge }) {
+  const { pool } = challenge;
+  if (!pool) return null;
+  return (
+    <section
+      className="rounded-3xl border border-white/10 bg-neutral-900 p-4 sm:p-5"
+      aria-label="Community progress"
+    >
+      <p className="text-base font-semibold text-neutral-50">Community goal</p>
+
+      {/* The standard's "RM X / RM Y ── NN%" readout. */}
+      <p className="font-heading mt-1 text-lg text-white tabular-nums sm:text-2xl">
+        {pool.pooled}
+        <span className="mx-1.5 text-neutral-500">/</span>
+        {pool.topThreshold}
+        <span className="ml-2 align-middle text-sm font-semibold text-neutral-400">
+          {Math.round(pool.overallPct)}%
+        </span>
+      </p>
+
+      {/* Checkpoint bar on real data: the fill width IS the pool percentage,
+          and the stage milestones ride ON the track as checkpoints that turn
+          gold the moment the pool clears them. No overflow-hidden here on
+          purpose — the checkpoints stand proud of the track and a clipping
+          parent would shave them. */}
+      <div className="relative mt-4 mb-1 h-6">
+        <div
+          className="absolute inset-x-0 top-1/2 h-1.5 -translate-y-1/2 overflow-hidden rounded-full bg-white/10"
+          role="meter"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(pool.overallPct)}
+          aria-label={`Community pool at ${pool.pooled} of ${pool.topThreshold}`}
+        >
+          <div
+            className="bg-glacier-grad absolute inset-y-0 left-0 rounded-full"
+            style={{ width: `${pool.overallPct}%` }}
+          />
+        </div>
+
+        {challenge.stages.map((s) => {
+          const done = s.state === 'complete';
+          return (
+            // Unscaled anchor box, sized to the checkpoint. Keeping the
+            // threshold label a SIBLING of the checkpoint (not a child) keeps
+            // the labels in line whatever the checkpoint's state.
+            <span
+              key={s.stageNumber}
+              // Stable hook for the QA script — it asserts checkpoint spacing
+              // and label sizing.
+              data-challenge-checkpoint=""
+              className={cn(
+                'absolute top-1/2 h-5 w-5 -translate-y-1/2',
+                s.pct > 90 ? 'right-0' : '-translate-x-1/2',
+              )}
+              style={s.pct > 90 ? undefined : { left: `${s.pct}%` }}
+            >
+              <span
+                className={cn(
+                  // Server-rendered and never flips client-side: no
+                  // transition, so nothing needs a reduced-motion opt-out.
+                  'absolute inset-0 flex items-center justify-center rounded-full',
+                  done
+                    ? 'bg-chase text-neutral-950'
+                    : 'border-2 border-neutral-500 bg-neutral-900 text-transparent',
+                )}
+                aria-hidden
+              >
+                <Check className="h-3 w-3" strokeWidth={3.5} />
+              </span>
+              {/* Thresholds hang off each checkpoint. Hidden below sm — they
+                  collide on a narrow bar; the stage pills below carry them on
+                  a phone. */}
+              <span
+                className={cn(
+                  'absolute top-full mt-1.5 hidden text-[10px] font-semibold whitespace-nowrap sm:block',
+                  // Centred under its checkpoint, except the last one: that
+                  // one sits ON the track's right edge, so a centred label
+                  // would hang half its width past the bar.
+                  s.pct > 90 ? 'right-0' : 'left-1/2 -translate-x-1/2',
+                  done ? 'text-chase' : 'text-neutral-400',
+                )}
+              >
+                {s.thresholdCompact}
+              </span>
+            </span>
+          );
+        })}
+      </div>
+
+      {/* Reserves the row the sm-and-up threshold labels overhang into. */}
+      <div className="hidden h-4 sm:block" aria-hidden />
+
+      {pool.next ? (
+        <p className="mt-2 text-center text-xs text-neutral-400">
+          Stage {pool.next.stageNumber} unlocks at{' '}
+          <span className="font-semibold text-neutral-300">
+            {pool.next.threshold}
+          </span>{' '}
+          — {pool.next.remaining} to go
+        </p>
+      ) : (
+        <p className="text-chase mt-2 text-center text-xs font-semibold">
+          Every stage is unlocked — grand finale week!
+        </p>
+      )}
+    </section>
+  );
+}
+
+/**
+ * The challenge's reward stages and the cumulative rewards summary, below the
+ * standings on /leaderboard: the "This Week" board above IS the board this
+ * challenge settles on, so the challenge's own top-10 list is not repeated.
  */
 export function WeeklyChallenge({ challenge }: { challenge: Challenge }) {
   const { pool, summary } = challenge;
 
   return (
-    // Same width as the standings below — one column down the page. The stage
+    // Same width as the standings above — one column down the page. The stage
     // rail sizes items from the viewport (--slab-w: min(82vw,360px)), which
     // still fits this container at every breakpoint (measured).
-    <div className={cn(PAGE_COLUMN, 'pt-4')}>
-      {/* Hero — generated gold trophy emblem (public/images/task, alpha webp) */}
-      <header className="text-center">
-        <span className="from-chase/15 mx-auto flex h-28 w-28 items-center justify-center rounded-3xl bg-gradient-to-b to-transparent">
-          <Image
-            src="/images/task/challenge-emblem.webp"
-            alt=""
-            width={96}
-            height={96}
-            priority
-          />
-        </span>
-        <h2 className="font-heading mt-4 text-4xl text-white">
-          WEEKLY PULLED VALUE CHALLENGE
-        </h2>
-        <ResetCountdown
-          resetAt={challenge.resetAt}
-          label={challenge.resetLabel}
-        />
-      </header>
-
-      {/* Community Progress — adapted uiverse strong-parrot-96 panel. */}
-      {pool && (
-        <section
-          className="mt-8 rounded-2xl border border-white/10 bg-neutral-900 p-6"
-          aria-label="Community progress"
-        >
-          <div className="flex items-center justify-center gap-2">
-            <span
-              className="challenge-dot bg-chase h-2 w-2 rounded-full"
-              aria-hidden
-            />
-            <span className="text-xs font-semibold tracking-[0.2em] text-neutral-300 uppercase">
-              Community Weekly Pulled Value
-            </span>
-          </div>
-
-          {/* The standard's "RM X / RM Y ── NN%" readout. */}
-          <p className="font-heading mt-4 text-center text-lg text-white sm:text-2xl">
-            <span className="text-chase [text-shadow:0_0_10px_rgb(255_176_32_/_0.3)]">
-              {pool.pooled}
-            </span>
-            <span className="mx-2 text-neutral-600">/</span>
-            {pool.topThreshold}
-            <span className="ml-3 align-middle text-sm font-semibold text-neutral-400">
-              {Math.round(pool.overallPct)}%
-            </span>
-          </p>
-
-          {/* Checkpoint bar — uiverse "moody-squid-55" reworked to run on real
-              data instead of a 6s demo loop: the fill width IS the pool
-              percentage, and the stage milestones ride ON the track as
-              checkpoints that flip gold the moment the pool clears them (the
-              original's grey→green ticks). That folds in the separate marker
-              row this replaced, so one element carries progress AND thresholds.
-              No overflow-hidden here on purpose — the checkpoints stand proud
-              of the track and a clipping parent would shave them. */}
-          <div className="relative mt-6 mb-2 h-6">
-            <div
-              className="absolute inset-x-0 top-1/2 h-3 -translate-y-1/2 rounded-full bg-white/5"
-              role="meter"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={Math.round(pool.overallPct)}
-              aria-label={`Community pool at ${pool.pooled} of ${pool.topThreshold}`}
-            >
-              <div
-                className="challenge-fill absolute inset-y-0 left-0 rounded-full"
-                style={{ width: `${pool.overallPct}%` }}
-              />
-              {/* rounded-full clips the dot pattern to the track on its own */}
-              <div
-                className="challenge-particles absolute inset-0 rounded-full"
-                aria-hidden
-              />
-            </div>
-
-            {challenge.stages.map((s) => {
-              const done = s.state === 'complete';
-              return (
-                // Unscaled anchor box, sized to the pill. The pill's locked
-                // state shrinks itself; keeping the threshold label a SIBLING
-                // of the pill (not a child) stops that scale from shrinking
-                // the text and dropping it out of line with the gold labels.
-                <span
-                  key={s.stageNumber}
-                  // Stable hook for the QA script — it asserts checkpoint
-                  // spacing and label sizing, and structural selectors made
-                  // that silently skippable across a markup tweak.
-                  data-challenge-checkpoint=""
-                  className={cn(
-                    'absolute top-1/2 h-5 w-5 -translate-y-1/2 sm:h-6 sm:w-6',
-                    s.pct > 90 ? 'right-0' : '-translate-x-1/2',
-                  )}
-                  style={s.pct > 90 ? undefined : { left: `${s.pct}%` }}
-                >
-                  <span
-                    className={cn(
-                      // No transition/animation on purpose: this is
-                      // server-rendered, the state never flips client-side, and
-                      // a new animated class would need a reduced-motion
-                      // opt-out.
-                      'absolute inset-0 flex items-center justify-center rounded-full ring-2',
-                      // The ring is the panel colour, so each checkpoint reads
-                      // as punched THROUGH the track, not floating over it.
-                      'ring-neutral-900',
-                      done
-                        ? 'bg-chase text-neutral-950 shadow-[0_0_10px_rgb(255_176_32_/_0.55)]'
-                        : 'scale-75 bg-neutral-600 text-transparent',
-                    )}
-                    aria-hidden
-                  >
-                    <Check className="h-3 w-3" strokeWidth={3.5} />
-                  </span>
-                  {/* Thresholds hang off each checkpoint. Hidden below sm —
-                      they collide on a narrow bar; the stage list right below
-                      carries them on mobile. */}
-                  <span
-                    className={cn(
-                      'absolute top-full mt-1.5 hidden text-[10px] font-semibold whitespace-nowrap sm:block',
-                      // Centred under its checkpoint, except the last one: that
-                      // pill sits ON the track's right edge, so a centred label
-                      // would hang half its width past the bar.
-                      s.pct > 90 ? 'right-0' : 'left-1/2 -translate-x-1/2',
-                      done ? 'text-chase' : 'text-neutral-400',
-                    )}
-                  >
-                    {s.thresholdCompact}
-                  </span>
-                </span>
-              );
-            })}
-          </div>
-
-          {/* Reserves the row the sm-and-up threshold labels overhang into. */}
-          <div className="hidden h-4 sm:block" aria-hidden />
-
-          {pool.next ? (
-            <p className="mt-3 text-center text-xs text-neutral-400">
-              Stage {pool.next.stageNumber} unlocks at{' '}
-              <span className="font-semibold text-neutral-300">
-                {pool.next.threshold}
-              </span>{' '}
-              — {pool.next.remaining} to go
-            </p>
-          ) : (
-            <p className="text-chase mt-3 text-center text-xs font-semibold">
-              Every stage is unlocked — grand finale week!
-            </p>
-          )}
-        </section>
-      )}
-
+    <div className={PAGE_COLUMN}>
       {/* Weekly Reward Stages — swipeable rail, same interaction as VIP. */}
       <section className="mt-8">
-        <h3 className="font-heading text-lg text-white">
+        <h2 className="text-lg font-semibold text-neutral-50">
           Weekly reward stages
-        </h3>
+        </h2>
         <StageCarousel
           stages={challenge.stages}
           pooled={pool?.pooled ?? null}
@@ -195,8 +172,10 @@ export function WeeklyChallenge({ challenge }: { challenge: Challenge }) {
 
       {/* Rewards Summary — cumulative unlocked rewards for this week's top 10. */}
       {summary && (
-        <section className="border-chase/20 mt-8 rounded-2xl border bg-gradient-to-b from-neutral-900 to-neutral-950 p-5">
-          <h3 className="font-heading text-lg text-white">Rewards summary</h3>
+        <section className="mt-8 rounded-3xl border border-white/10 bg-neutral-900 p-4 sm:p-5">
+          <h3 className="text-lg font-semibold text-neutral-50">
+            Rewards summary
+          </h3>
           {summary.unlockedCount === 0 ? (
             <p className="mt-2 text-sm text-neutral-400">
               No stages unlocked yet — the pool is climbing toward Stage 1.
@@ -214,8 +193,8 @@ export function WeeklyChallenge({ challenge }: { challenge: Challenge }) {
                     whole tile rather than show the heading over zero
                     thumbnails. */}
                 {summary.cards.length > 0 && (
-                  <div className="rounded-xl border border-white/5 bg-neutral-900 p-5">
-                    <p className="flex items-center gap-2 text-xs font-semibold tracking-wide text-neutral-300 uppercase">
+                  <div className="rounded-2xl bg-neutral-800/60 p-4 sm:p-5">
+                    <p className="flex items-center gap-2 text-xs font-semibold tracking-[0.08em] text-neutral-400 uppercase">
                       <Trophy className="text-chase h-4 w-4" aria-hidden />
                       Top 3 will receive
                     </p>
@@ -236,8 +215,8 @@ export function WeeklyChallenge({ challenge }: { challenge: Challenge }) {
                     </p>
                   </div>
                 )}
-                <div className="rounded-xl border border-white/5 bg-neutral-900 p-5">
-                  <p className="flex items-center gap-2 text-xs font-semibold tracking-wide text-neutral-300 uppercase">
+                <div className="rounded-2xl bg-neutral-800/60 p-4 sm:p-5">
+                  <p className="flex items-center gap-2 text-xs font-semibold tracking-[0.08em] text-neutral-400 uppercase">
                     <Coins className="text-chase h-4 w-4" aria-hidden />
                     Top 4–10 will receive
                   </p>
@@ -277,14 +256,14 @@ export function WeeklyChallenge({ challenge }: { challenge: Challenge }) {
 export function ChallengeRules() {
   return (
     <section className={cn(PAGE_COLUMN, 'mt-8')} aria-label="How it works">
-      <h2 className="font-heading text-lg text-white">How it works</h2>
-      <ul className="mt-3 space-y-2 rounded-2xl border border-white/5 bg-neutral-900/60 p-5">
+      <h2 className="text-lg font-semibold text-neutral-50">How it works</h2>
+      <ul className="mt-3 space-y-2 rounded-3xl border border-white/10 bg-neutral-900 p-4 sm:p-5">
         {RULES.map((rule) => (
           <li
             key={rule}
             className="flex gap-2.5 text-sm leading-relaxed text-neutral-400"
           >
-            <span className="bg-chase/60 mt-2 h-1 w-1 shrink-0 rounded-full" />
+            <span className="mt-2 h-1 w-1 shrink-0 rounded-full bg-neutral-500" />
             {rule}
           </li>
         ))}

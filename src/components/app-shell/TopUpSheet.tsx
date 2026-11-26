@@ -1,7 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, CheckCircle2, ChevronRight, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  Check,
+  CheckCircle2,
+  ChevronRight,
+  Lock,
+  X,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { rm, rm0 } from '@/lib/format';
 import {
@@ -394,13 +401,13 @@ export default function TopUpSheet({
         aria-label="Top up credits"
         tabIndex={-1}
         className={cn(
-          'glass-panel absolute inset-x-0 bottom-0 mx-auto w-full max-w-md rounded-t-2xl border-t p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] outline-none',
-          'sm:inset-x-0 sm:top-1/2 sm:bottom-auto sm:-translate-y-1/2 sm:rounded-2xl sm:border',
+          'glass-panel absolute inset-x-0 bottom-0 mx-auto w-full max-h-[100dvh] max-w-md overflow-y-auto overscroll-contain rounded-t-3xl border-t p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] outline-none',
+          'sm:inset-x-0 sm:top-1/2 sm:bottom-auto sm:-translate-y-1/2 sm:rounded-3xl sm:border sm:p-6',
           'motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-4 motion-safe:duration-200',
         )}
       >
         <div className="flex items-center justify-between">
-          <h2 className="font-heading text-xl text-white">TOP UP</h2>
+          <h2 className="font-heading text-2xl text-white">Top Up</h2>
           <div className="flex items-center gap-2">
             {/* Never in gateway mode: this sheet redirects to a real cashier
                 and takes real money, so a "Demo" badge would be a lie on the
@@ -445,7 +452,12 @@ export default function TopUpSheet({
                 This top-up was already processed — no double charge.
               </p>
             )}
-            <Pill onClick={onClose} size="lg" className="mt-6 w-full">
+            <Pill
+              variant="glacier"
+              onClick={onClose}
+              size="lg"
+              className="mt-6 w-full"
+            >
               Done
             </Pill>
           </div>
@@ -507,22 +519,56 @@ export default function TopUpSheet({
           <>
             {/* The chosen currency, and the way back to the list. Hidden in
                 demo mode, which has RM only and no list to go back to. */}
+            {/* Currency chips: the chosen one is the white pill, another
+                switches straight to it (the same chooseCurrency the list
+                uses), and Change goes back to the full list with its hints.
+                The full name rides along for screen readers. */}
             {USE_GATEWAY && chosen && (
-              <div className="mt-4 flex items-center justify-between rounded-xl bg-neutral-800/60 px-3 py-2">
-                <span className="flex items-center gap-1.5 text-[13px] text-neutral-400">
-                  Paying in
-                  <CountryFlag country={chosen.flag} className="h-3 w-[18px]" />
-                  <span className="font-semibold text-white">
-                    {chosen.name} ({chosen.symbol})
-                  </span>
-                </span>
+              <div className="mt-4 flex items-center gap-2">
+                <div
+                  role="group"
+                  aria-label="Paying in"
+                  className="flex min-w-0 flex-1 gap-2 overflow-x-auto"
+                >
+                  {currencyOptions.map((option) => {
+                    const current = option.code === currency;
+                    return (
+                      <button
+                        key={option.code}
+                        type="button"
+                        aria-pressed={current}
+                        onClick={() => {
+                          if (!current) chooseCurrency(option.code);
+                        }}
+                        disabled={option.disabled}
+                        className={cn(
+                          'inline-flex h-11 shrink-0 items-center gap-1.5 rounded-full border px-4 text-[13px] font-semibold transition-colors',
+                          'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60 disabled:cursor-not-allowed disabled:opacity-50',
+                          current
+                            ? 'border-white/30 bg-neutral-700 text-white'
+                            : 'border-white/10 bg-neutral-800 text-neutral-300 hover:text-white',
+                        )}
+                      >
+                        <CountryFlag
+                          country={option.flag}
+                          className="h-3 w-[18px]"
+                        />
+                        {option.code}
+                        <span className="sr-only">
+                          {' '}
+                          {option.name} ({option.symbol})
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
                 <button
                   type="button"
                   onClick={() => {
                     setCurrency(null);
                     setError(null);
                   }}
-                  className="inline-flex h-9 items-center gap-1 rounded-full px-3 text-[13px] font-semibold text-neutral-300 transition-colors hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white/60"
+                  className="inline-flex h-11 shrink-0 items-center gap-1 rounded-full px-2 text-[13px] font-semibold text-neutral-400 transition-colors hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-white/60"
                 >
                   <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
                   Change
@@ -530,28 +576,39 @@ export default function TopUpSheet({
               </div>
             )}
 
-            <div className="mt-4 flex flex-wrap gap-2">
+            <p className="mt-4 text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400">
+              Amount
+            </p>
+            <div className="mt-2 grid grid-cols-2 gap-2">
               {presets.map((preset) => {
                 const selected = amountText === String(preset);
                 return (
                   <button
                     key={preset}
                     type="button"
+                    aria-pressed={selected}
                     onClick={() => setAmountText(String(preset))}
                     className={cn(
-                      'inline-flex h-11 items-center justify-center rounded-full px-4 text-[13px] font-semibold transition-colors',
+                      'font-heading relative flex h-14 items-center justify-center rounded-2xl border bg-neutral-800 text-base tabular-nums transition-colors',
+                      'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/60',
                       selected
-                        ? 'bg-neutral-50 text-neutral-950'
-                        : 'bg-neutral-800 text-neutral-400 hover:text-white',
+                        ? 'border-glacier text-neutral-50 ring-1 ring-glacier'
+                        : 'border-white/10 text-neutral-300 hover:text-white',
                     )}
                   >
                     {money0(preset)}
+                    {selected && (
+                      <Check
+                        className="absolute right-3 h-4 w-4 text-glacier"
+                        aria-hidden
+                      />
+                    )}
                   </button>
                 );
               })}
             </div>
 
-            <label className="mt-3 flex items-center gap-2 rounded-xl bg-neutral-800 px-4 py-3">
+            <label className="mt-2 flex h-14 items-center gap-2 rounded-2xl border border-white/10 bg-neutral-800 px-4 transition-colors focus-within:border-white/30">
               <span className="text-sm font-semibold text-neutral-400">
                 {rail ? rail.ui.symbol : 'RM'}
               </span>
@@ -684,13 +741,13 @@ export default function TopUpSheet({
                       className={cn(
                         'cursor-pointer rounded-xl border px-3 py-2.5 text-left transition-colors',
                         'has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-white/60',
-                        // Selected inverts to the solid light fill the amount
-                        // presets above already use. A brighter border alone
-                        // (the first cut) was too quiet to answer "which one am
-                        // I paying with" at a glance — and this is the control
+                        // Selected takes the grey fill and rim the amount
+                        // presets above use. A brighter border alone (the
+                        // first cut) was too quiet to answer "which one am I
+                        // paying with" at a glance — and this is the control
                         // that decides where the customer's money goes.
                         selected
-                          ? 'border-transparent bg-neutral-50'
+                          ? 'border-white/30 bg-neutral-700'
                           : 'border-white/10 bg-white/[0.03] hover:border-white/20',
                       )}
                     >
@@ -705,7 +762,7 @@ export default function TopUpSheet({
                       <span
                         className={cn(
                           'block text-[13px] font-semibold',
-                          selected ? 'text-neutral-950' : 'text-neutral-300',
+                          selected ? 'text-white' : 'text-neutral-300',
                         )}
                       >
                         {option.label}
@@ -713,7 +770,7 @@ export default function TopUpSheet({
                       <span
                         className={cn(
                           'mt-0.5 block text-[11px] leading-snug',
-                          selected ? 'text-neutral-600' : 'text-neutral-500',
+                          selected ? 'text-neutral-300' : 'text-neutral-500',
                         )}
                       >
                         {option.hint}
@@ -792,7 +849,31 @@ export default function TopUpSheet({
               </div>
             )}
 
+            {/* Real gateway only: the mock credits right here, so "you pay
+                on another page" would be false for it. Only RM online banking
+                (hosted FPX) ends on the bank's own login page; QR, the S$ rail
+                and USDT are paid on the provider's hosted cashier. */}
+            {USE_GATEWAY && (
+              <div className="mt-4 flex items-center gap-3 rounded-2xl border border-white/10 bg-neutral-800 px-4 py-3">
+                <Lock
+                  className="h-5 w-5 shrink-0 text-neutral-300"
+                  aria-hidden
+                />
+                <div className="min-w-0">
+                  <p className="text-[13px] font-semibold text-white">
+                    Secure payment
+                  </p>
+                  <p className="text-[12px] leading-snug text-neutral-400">
+                    {!rail && method === 'OB'
+                      ? 'You pay on your bank’s own page.'
+                      : 'You pay on the payment provider’s own page.'}
+                  </p>
+                </div>
+              </div>
+            )}
+
             <Pill
+              variant="glacier"
               onClick={submit}
               disabled={submitting || !canPay}
               size="lg"

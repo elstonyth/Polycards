@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { checkInToday } from '@/lib/actions/tasks';
 import { useTopUp } from '@/components/app-shell/TopUpProvider';
-import { Pill, pillVariants } from '@/components/ui/pill';
+import { pillVariants } from '@/components/ui/pill';
 import {
   PAGE_COLUMN,
   PAGE_FILL,
@@ -96,24 +96,24 @@ function GoalArt({ goal }: { goal: Challenge }) {
   const pull = goal.kind === 'pull';
   const src = goal.art && !broken && !(pull && reduced) ? goal.art : null;
   return (
-    <span className="relative flex h-14 w-11 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/[0.04]">
+    <span className="relative flex h-8 w-7 shrink-0 items-center justify-center rounded-md bg-neutral-800">
       {src ? (
         <Image
           src={src}
           alt={goal.subject ?? ''}
           fill
-          sizes="44px"
+          sizes="28px"
           // Pixel sprites stay crisp (and animated) unscaled by the optimizer.
           unoptimized={pull}
           onError={() => setBroken(true)}
           className={cn(
             'object-contain',
-            pull ? 'p-1.5 [image-rendering:pixelated]' : 'p-1',
+            pull ? 'p-0.5 [image-rendering:pixelated]' : 'p-0.5',
           )}
         />
       ) : (
         <>
-          <Icon className="h-5 w-5 text-neutral-300" aria-hidden />
+          <Icon className="h-4 w-4 text-neutral-300" aria-hidden />
           {goal.subject && <span className="sr-only">{goal.subject}</span>}
         </>
       )}
@@ -122,13 +122,12 @@ function GoalArt({ goal }: { goal: Challenge }) {
 }
 
 /**
- * One task as a ticket (2026-10-19, "left is the challenge, right is the
- * reward"). The body reads the goal as a sum the player gets at a glance —
- * "RIP [Bronze Pack] ×10" — then the task's own words and how far along it
- * is, a pip per step when the goal is a small count. The prize sits on a
- * perforated tear-off stub: a Claim pill once it can be claimed, a Locked
- * chip until then. A claimable ticket goes gold (the prize sparkles, a light
- * sweeps its Claim); a claimed one is stamped and steps back.
+ * One task as a panel (redesign v3, 2026-11-26): the prize's own art on the
+ * left, then the goal as a sum ("RIP [Bronze Pack] ×10"), the task's words, a
+ * thin progress bar with its count (a pip per step when the goal is a small
+ * count), the status line and the reward as gold chips. The action sits on the
+ * right: an outlined Claim once it can be claimed, a Locked chip until then.
+ * A claimable prize sparkles; a claimed one is stamped and steps back.
  */
 function TaskRow({ task, onClaim, claimingId }: { task: TaskEntry } & Claim) {
   const claimable = isClaimable(task);
@@ -136,49 +135,56 @@ function TaskRow({ task, onClaim, claimingId }: { task: TaskEntry } & Claim) {
   const goal = challengeOf(task);
   const progress = progressOf(task);
   const { target } = task.progress;
-  const fill = claimed ? 'bg-neutral-600' : 'bg-chase';
+  const fill = claimed ? 'bg-neutral-600' : 'bg-glacier-grad';
   return (
-    <li className="relative isolate flex [--stub:7rem] sm:[--stub:8.5rem]">
-      <span
-        aria-hidden
-        className={cn(
-          'ticket-cut absolute inset-0 -z-10 rounded-xl border',
-          claimable
-            ? 'border-chase/45 [--ticket-body:rgb(255_176_32/0.04)] [--ticket-stub:rgb(255_176_32/0.11)]'
-            : claimed
-              ? 'border-white/[0.06] [--ticket-body:transparent] [--ticket-stub:rgb(255_255_255/0.02)]'
-              : 'border-white/10 [--ticket-body:rgb(255_255_255/0.025)] [--ticket-stub:rgb(255_255_255/0.055)]',
+    <li
+      className={cn(
+        'flex items-center gap-3 rounded-3xl border bg-neutral-900 p-3.5 sm:gap-4 sm:p-4',
+        claimable ? 'border-chase/40' : 'border-white/10',
+      )}
+    >
+      <span className="relative shrink-0">
+        <RewardArt
+          reward={task.reward}
+          claimable={claimable}
+          claimed={claimed}
+          className="h-[68px] w-14 rounded-2xl bg-neutral-800"
+        />
+        {claimed && (
+          <span className="font-heading absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 -rotate-[14deg] rounded-md border-2 border-neutral-300/80 bg-neutral-950/70 px-1 py-0.5 text-[10px] leading-none whitespace-nowrap text-neutral-200">
+            CLAIMED
+          </span>
         )}
-      />
+      </span>
 
-      <div className="flex min-w-0 flex-1 flex-col justify-center py-3.5 pr-3 pl-3.5">
+      <div className="min-w-0 flex-1">
         {/* What to do, as a sum: verb · what · how many. */}
         <div
           className={cn(
-            'flex flex-wrap items-center gap-x-2 gap-y-1',
+            'flex flex-wrap items-center gap-x-1.5 gap-y-1',
             claimed && 'opacity-50',
           )}
         >
-          <span className="font-heading text-lg leading-none text-white">
+          <span className="font-heading text-sm leading-none text-neutral-50">
             {goal.verb}
           </span>
           <GoalArt key={goal.art ?? goal.kind} goal={goal} />
-          <span className="font-heading text-2xl leading-none whitespace-nowrap text-white tabular-nums">
+          <span className="font-heading text-base leading-none whitespace-nowrap text-neutral-50 tabular-nums">
             {goal.amount}
           </span>
         </div>
         <p
           className={cn(
-            'mt-2.5 text-xs leading-snug',
-            claimed ? 'text-neutral-400' : 'text-neutral-300',
+            'mt-1.5 text-sm leading-snug font-semibold',
+            claimed ? 'text-neutral-400' : 'text-neutral-50',
           )}
         >
           {task.title}
         </p>
-        <div className="mt-2.5 flex items-center gap-2.5">
+        <div className="mt-2 flex items-center gap-2.5">
           <div
             className={cn(
-              'flex h-2 flex-1',
+              'flex h-1.5 flex-1',
               progress.pips
                 ? 'gap-[3px]'
                 : 'overflow-hidden rounded-full bg-white/10',
@@ -210,13 +216,9 @@ function TaskRow({ task, onClaim, claimingId }: { task: TaskEntry } & Claim) {
               />
             )}
           </div>
-          <span className="font-heading shrink-0 text-sm leading-none whitespace-nowrap text-white tabular-nums">
+          <span className="shrink-0 text-xs leading-none whitespace-nowrap text-neutral-400 tabular-nums">
             {progress.count.done}
-            {progress.count.of && (
-              <span className="text-[11px] text-neutral-400">
-                /{progress.count.of}
-              </span>
-            )}
+            {progress.count.of && <>/{progress.count.of}</>}
           </span>
         </div>
         <p
@@ -227,75 +229,58 @@ function TaskRow({ task, onClaim, claimingId }: { task: TaskEntry } & Claim) {
         >
           {challengeStatus(task)}
         </p>
-      </div>
-
-      {/* The perforation the stub tears off along. */}
-      <span
-        aria-hidden
-        className="my-3 border-l border-dashed border-white/15"
-      />
-
-      <div className="flex w-[var(--stub)] shrink-0 flex-col items-center px-2 pt-3.5 pb-3">
-        <span className="relative">
-          <RewardArt
-            reward={task.reward}
-            claimable={claimable}
-            claimed={claimed}
-            className="h-[72px] w-[60px]"
-          />
-          {claimed && (
-            <span className="font-heading absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 -rotate-[14deg] rounded-md border-2 border-neutral-300/80 bg-neutral-950/70 px-1.5 py-0.5 text-[11px] leading-none whitespace-nowrap text-neutral-200">
-              CLAIMED
-            </span>
-          )}
-        </span>
-        {/* The name WRAPS rather than truncates: a card name clipped to
-            "Poncho-Weari…" on a phone is exactly the "what do I get?"
-            complaint this page exists to answer. */}
-        <p
-          className={cn(
-            'mt-3.5 text-center text-[11px] leading-tight text-balance',
-            claimed ? 'text-neutral-400' : 'text-neutral-200',
-          )}
-        >
-          {stubName(task.reward)}
-        </p>
-        {/* The Lucky Draw tickets this task also pays; taps through to the
-            draw so the player sees where they go. */}
-        {task.tickets > 0 && (
-          <Link
-            href="/lucky-draw"
+        {/* The reward as gold chips. The name WRAPS rather than truncates: a
+            card name clipped to "Poncho-Weari…" on a phone is exactly the
+            "what do I get?" complaint this page exists to answer. The tickets
+            chip taps through to the draw so the player sees where they go. */}
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <span
             className={cn(
-              // Tighter on a phone: "+999 tickets" must fit the 7rem stub.
-              'mt-2 inline-flex items-center gap-0.5 rounded-full border px-1.5 py-1 text-[11px] font-semibold whitespace-nowrap sm:gap-1 sm:px-2.5',
+              'rounded-lg border px-2 py-0.5 text-[11px] leading-snug font-semibold text-balance',
               claimed
                 ? 'border-white/10 text-neutral-400'
-                : 'border-chase/40 text-chase',
+                : 'border-chase/30 bg-chase/10 text-chase',
             )}
           >
-            <TicketArt width={16} className="shrink-0" />+{task.tickets}{' '}
-            {task.tickets === 1 ? 'ticket' : 'tickets'}
-          </Link>
-        )}
-        {/* Only a prize that can be claimed gets a button; one still being
-            worked for says so instead of showing a dead Claim. */}
-        {claimable ? (
-          <Pill
-            disabled={claimingId === task.id}
-            onClick={() => onClaim(task)}
-            aria-label={`Claim ${task.title}`}
-            className="claim-sweep mt-2.5 w-full px-0"
-          >
-            Claim
-          </Pill>
-        ) : (
-          !claimed && (
-            <span className="mt-2 inline-flex items-center gap-1 rounded-full border border-white/10 px-2.5 py-1 text-[11px] font-semibold text-neutral-400">
-              <Lock className="h-3 w-3" aria-hidden /> Locked
-            </span>
-          )
-        )}
+            {stubName(task.reward)}
+          </span>
+          {task.tickets > 0 && (
+            <Link
+              href="/lucky-draw"
+              className={cn(
+                'inline-flex items-center gap-1 rounded-lg border px-2 py-0.5 text-[11px] leading-snug font-semibold whitespace-nowrap',
+                claimed
+                  ? 'border-white/10 text-neutral-400'
+                  : 'border-chase/30 bg-chase/10 text-chase',
+              )}
+            >
+              <TicketArt width={14} className="shrink-0" />+{task.tickets}{' '}
+              {task.tickets === 1 ? 'ticket' : 'tickets'}
+            </Link>
+          )}
+        </div>
       </div>
+
+      {/* Only a prize that can be claimed gets a button; one still being
+          worked for says so instead of showing a dead Claim. Outlined: the
+          screen's one filled glacier button is Check in. */}
+      {claimable ? (
+        <button
+          type="button"
+          disabled={claimingId === task.id}
+          onClick={() => onClaim(task)}
+          aria-label={`Claim ${task.title}`}
+          className="border-glacier text-glacier inline-flex h-11 shrink-0 items-center justify-center rounded-full border px-4 text-sm font-semibold transition-colors outline-none select-none hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-950 disabled:pointer-events-none disabled:opacity-40"
+        >
+          Claim
+        </button>
+      ) : (
+        !claimed && (
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-neutral-800 px-2.5 py-1 text-[11px] font-semibold text-neutral-400">
+            <Lock className="h-3 w-3" aria-hidden /> Locked
+          </span>
+        )
+      )}
     </li>
   );
 }
@@ -314,22 +299,22 @@ function TaskList({
   tasks: TaskEntry[];
   empty: string;
 } & Claim) {
-  // No panel around the tickets: each is its own surface, and a box around
+  // No panel around the rows: each is its own surface, and a box around
   // boxes is a nested card.
   return (
     <section>
-      <div className="flex items-center justify-between gap-2 px-1">
-        <p className="flex items-center gap-1.5 text-sm font-semibold text-white">
+      <div className="flex items-center justify-between gap-2">
+        <p className="flex items-center gap-1.5 text-base font-semibold text-neutral-50">
           <Icon className="h-4 w-4 text-neutral-400" aria-hidden /> {heading}
         </p>
-        {resets && <p className="text-[11px] text-neutral-400">{resets}</p>}
+        {resets && <p className="text-xs text-neutral-400">{resets}</p>}
       </div>
       {tasks.length === 0 ? (
-        <Panel className="mt-2.5 py-5 text-center text-sm text-neutral-400">
+        <Panel className="mt-3 rounded-3xl bg-neutral-900 py-5 text-center text-sm text-neutral-400">
           {empty}
         </Panel>
       ) : (
-        <ul className="mt-2.5 space-y-2.5">
+        <ul className="mt-3 space-y-2.5">
           {tasks.map((t) => (
             <TaskRow key={t.id} task={t} {...claim} />
           ))}
@@ -346,7 +331,7 @@ function TaskList({
 function PendingSpins({ spins }: { spins: TaskHub['pending_spins'] }) {
   if (spins.length === 0) return null;
   return (
-    <Panel className="border-chase/40 bg-chase/[0.06]">
+    <Panel className="border-chase/40 rounded-3xl bg-neutral-900">
       <p className="text-sm font-semibold text-white">
         {spins.length === 1
           ? 'You have a free rip waiting'
@@ -547,8 +532,9 @@ export function TaskHubClient({
   const claimProps: Claim = { onClaim: claim, claimingId: pendingId };
 
   return (
-    <div className={cn(PAGE_COLUMN, PAGE_FILL, 'pt-6 pb-6')}>
-      <PageTitle>TASK</PageTitle>
+    <div className={cn(PAGE_COLUMN, PAGE_FILL, 'pb-6 lg:pt-6')}>
+      {/* Below lg the Tasks | Ranks switch above names the page. */}
+      <PageTitle className="sr-only lg:not-sr-only">TASK</PageTitle>
 
       <PageBody>
         {taskHub && (
@@ -563,7 +549,7 @@ export function TaskHubClient({
         <div
           role="group"
           aria-label="Task hub sections"
-          className="mt-4 grid grid-cols-[1fr_1fr_1.45fr] gap-1 rounded-full border border-white/10 bg-neutral-900 p-1 sm:grid-cols-3"
+          className="mt-4 grid grid-cols-[1fr_1fr_1.45fr] gap-2 sm:grid-cols-3"
         >
           {TABS.map(({ key, label }) => {
             const n = ready?.[key] ?? 0;
@@ -575,11 +561,11 @@ export function TaskHubClient({
                 onClick={() => setTab(key)}
                 aria-label={n > 0 ? `${label}, ${n} to claim` : label}
                 className={cn(
-                  'flex min-h-11 items-center justify-center gap-1 rounded-full px-1.5 text-[13px] font-semibold transition-colors sm:gap-1.5 sm:px-2 sm:text-sm',
+                  'flex min-h-11 items-center justify-center gap-1 rounded-full border px-1.5 text-[13px] font-semibold transition-colors sm:gap-1.5 sm:px-2 sm:text-sm',
                   'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
                   tab === key
-                    ? 'bg-neutral-50 text-neutral-950'
-                    : 'text-neutral-400 hover:text-white',
+                    ? 'border-white/30 bg-neutral-700 text-white'
+                    : 'border-white/10 bg-neutral-900 text-neutral-400 hover:text-white',
                 )}
               >
                 {label}
@@ -659,7 +645,7 @@ export function TaskHubClient({
               rewards are bonus credit for packs.{' '}
               <Link
                 href="/wallet"
-                className="font-semibold text-neutral-300 underline-offset-2 hover:text-white hover:underline"
+                className="font-semibold whitespace-nowrap text-glacier underline underline-offset-2 hover:text-white"
               >
                 How it works <span aria-hidden="true">&rarr;</span>
               </Link>

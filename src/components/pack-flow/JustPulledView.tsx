@@ -265,7 +265,7 @@ export function JustPulledView({
                 'flex min-h-10 min-w-0 items-center justify-center gap-1 rounded-full px-1 text-[11px] font-semibold transition-colors sm:text-[12px]',
                 focusRing,
                 tab === t
-                  ? 'bg-neutral-50 text-neutral-950'
+                  ? 'bg-neutral-700 text-white'
                   : 'text-neutral-400 hover:text-white',
               )}
             >

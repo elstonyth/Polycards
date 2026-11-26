@@ -79,8 +79,10 @@ export function HowItWorks({
                   )}
                 >
                   {s.title}
+                  {/* The space keeps "…runs out" and "Now" two words when read out. */}
+                  {now && ' '}
                   {now && (
-                    <span className="ml-2 inline-block rounded-full bg-neutral-50 px-1.5 align-[1px] text-[10px] font-semibold text-neutral-950">
+                    <span className="ml-1 inline-block rounded-full bg-neutral-50 px-1.5 align-[1px] text-[10px] font-semibold text-neutral-950">
                       Now
                     </span>
                   )}
@@ -91,7 +93,7 @@ export function HowItWorks({
                 {s.stage === 'collect' && (
                   <Link
                     href="/task"
-                    className="mt-1 inline-block text-sm font-semibold text-white underline underline-offset-4"
+                    className="mt-1 inline-block text-sm font-semibold text-glacier underline underline-offset-4 hover:text-white"
                   >
                     Go to tasks
                   </Link>

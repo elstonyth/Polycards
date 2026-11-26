@@ -1,13 +1,14 @@
 'use client';
 
 /**
- * The open half of the pack sorting (StageChips): the chips, the language
- * toggles, the rules for what a press does, and everything that only matters
- * once the panel opens (focus on the current choice, arrow keys, Escape, a tap
+ * The open half of the pack sorting (StageChips): the list of pack types and
+ * languages, the rules for what a press does, and everything that only matters
+ * once the list opens (focus on the current choice, arrow keys, Escape, a tap
  * outside, tabbing away). Its own chunk, loaded on the first intent to open
- * (or when the page is idle), so the first load carries only the closed tab.
+ * (or when the page is idle), so the first load carries only the trigger.
  */
 import { useEffect, useLayoutEffect, type RefObject } from 'react';
+import { Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { StageCategory } from './contract';
 import {
@@ -158,47 +159,56 @@ export default function StageSortPanel({
     requestAnimationFrame(() => onPick(next));
   };
 
+  // A select's list: one row a choice, a tick on the current one.
+  const row = (on: boolean) =>
+    cn(
+      RING,
+      'flex min-h-11 w-full items-center gap-2 rounded-xl px-3 text-left text-sm font-semibold whitespace-nowrap transition-colors',
+      on
+        ? 'bg-white/10 text-white'
+        : 'text-neutral-300 hover:bg-white/5 hover:text-white',
+    );
+  const tick = (
+    <Check className="ml-auto h-4 w-4 shrink-0" strokeWidth={2.5} aria-hidden />
+  );
+
   return (
     <>
-      <div className="flex items-stretch justify-center gap-1 border-t border-white/[0.06] pt-1">
-        {shelves.map((s) => {
-          const on = s.key === filter.shelf;
-          return (
-            <button
-              key={s.key}
-              type="button"
-              aria-pressed={on}
-              onClick={() => choose(withShelf(category, filter, s.key))}
-              className={cn(
-                RING,
-                'flex min-h-11 flex-1 flex-col items-center justify-center whitespace-nowrap rounded-full px-2 text-[13px] font-semibold leading-[1.15] transition-colors lg:text-sm',
-                on
-                  ? 'bg-white/10 text-white'
-                  : 'text-neutral-400 hover:text-white',
-              )}
-            >
-              {s.label}
-              {s.caption && (
-                <span
-                  className={cn(
-                    'text-[10px] font-medium lg:text-[11px]',
-                    on ? 'text-neutral-300' : 'text-neutral-500',
-                  )}
-                >
-                  {s.caption}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+      {shelves.map((s) => {
+        const on = s.key === filter.shelf;
+        return (
+          <button
+            key={s.key}
+            type="button"
+            aria-pressed={on}
+            onClick={() => choose(withShelf(category, filter, s.key))}
+            className={row(on)}
+          >
+            {s.label}
+            {s.caption && (
+              <span className="text-xs font-medium text-neutral-400">
+                {s.caption}
+              </span>
+            )}
+            {on && tick}
+          </button>
+        );
+      })}
       {languages.length > 0 && (
-        // A two-part segmented pill; pressing the lit one clears it.
+        // Pressing the ticked language clears it.
         <div
           role="group"
           aria-label="Language"
-          className="mx-auto mt-1 flex w-fit gap-1 rounded-full border border-white/10 p-1"
+          className={cn(
+            shelves.length > 0 && 'mt-1 border-t border-white/[0.08] pt-1',
+          )}
         >
+          <p
+            aria-hidden
+            className="px-3 pt-1.5 pb-1 text-[11px] font-medium text-neutral-400"
+          >
+            Language
+          </p>
           {languages.map((l) => {
             const on = l.key === filter.language;
             return (
@@ -207,15 +217,10 @@ export default function StageSortPanel({
                 type="button"
                 aria-pressed={on}
                 onClick={() => choose(withLanguage(category, filter, l.key))}
-                className={cn(
-                  RING,
-                  'min-h-10 flex-1 rounded-full px-4 text-[13px] font-semibold transition-colors',
-                  on
-                    ? 'bg-neutral-50 text-neutral-950'
-                    : 'text-neutral-400 hover:text-white',
-                )}
+                className={row(on)}
               >
                 {l.label}
+                {on && tick}
               </button>
             );
           })}

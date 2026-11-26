@@ -444,7 +444,12 @@ export function AddressesClient({
             </p>
           )}
           <div className="mt-4 flex items-center gap-3">
-            <Pill type="submit" disabled={busy} className="px-5">
+            <Pill
+              variant="glacier"
+              type="submit"
+              disabled={busy}
+              className="px-5"
+            >
               {busy ? 'Saving…' : editingId ? 'Save changes' : 'Save address'}
             </Pill>
             {/* Cancel is only an exit when there IS something to go back to —

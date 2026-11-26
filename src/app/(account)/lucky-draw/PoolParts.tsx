@@ -96,7 +96,7 @@ export function PrizeZoom({
         aria-labelledby="prize-zoom-title"
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className="glass-panel max-h-[90dvh] w-full overflow-y-auto rounded-t-2xl border p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] outline-none sm:max-w-sm sm:rounded-2xl"
+        className="glass-panel max-h-[90dvh] w-full overflow-y-auto rounded-t-3xl border p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] outline-none sm:max-w-sm sm:rounded-3xl"
       >
         <div className="flex justify-end">
           <button

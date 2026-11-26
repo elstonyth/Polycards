@@ -20,14 +20,12 @@ import {
   GATE_SORTS,
   heroFirst,
   heroPrize,
-  holoSheet,
   LUCKY_DRAW_TIERS,
   newGateIds,
   POOL_TITLE,
   potTotal,
   sortGates,
   TIER_LABEL,
-  TIER_VEIL,
   tilePrice,
   type GateSort,
   type LuckyDrawTier,
@@ -54,60 +52,31 @@ export function gateTarget(gate: LuckyDrawGate): EnterTarget {
   };
 }
 
-const CLOCK_UNITS = [
-  ['d', 'Days'],
-  ['h', 'Hrs'],
-  ['m', 'Min'],
-  ['s', 'Sec'],
-] as const;
-
-// Prizes grow with the phone, kept small enough that a whole ticket and the top
-// of the next fit between the page's controls and the tab bar (boss 2026-11-01:
-// "看得完"). A wider ticket has the room for more.
+// Several prizes swipe in a rail of small tiles; a lone prize stands larger.
+// Both stay small enough that a whole card fits between the page's controls and
+// the tab bar on a short phone (boss 2026-11-01: "看得完").
 const ART_HEIGHT = 'h-[clamp(5rem,15dvh,8rem)] sm:h-[clamp(8rem,20dvh,11rem)]';
+const HERO_HEIGHT =
+  'h-[clamp(6.5rem,22dvh,12rem)] sm:h-[clamp(9rem,24dvh,14rem)]';
 
-/** The clock on the stub. Digits size from the stub's own width, so they fill it
- *  on a folded phone and on a monitor alike; a gate under a day drops its Days
- *  column and its digits grow. Null `nowMs` is the server render. */
+/** "Gate closes in 02:14:09" under the action, days first when there are any.
+ *  Null `nowMs` is the server render. */
 function GateClock({ to, nowMs }: { to: string; nowMs: number | null }) {
   const clock = nowMs == null ? null : countdownClock(to, nowMs);
-  const units = CLOCK_UNITS.filter(([key]) => key !== 'd' || clock?.d !== '00');
+  const days = clock && clock.d !== '00' ? `${Number(clock.d)}d ` : '';
   return (
-    <div className="mt-3 [container-type:inline-size]">
-      <p className="text-xs font-semibold">Gate closes in</p>
-      <div
-        role="timer"
-        aria-label={
-          nowMs == null
-            ? undefined
-            : `Gate closes in ${drawCountdown(to, nowMs)}`
-        }
-        className={cn(
-          'mt-1.5 grid divide-x divide-neutral-950/15',
-          units.length === 4 ? 'grid-cols-4' : 'grid-cols-3',
-        )}
-      >
-        {units.map(([key, unit]) => (
-          <div key={key} className="pl-[4cqw] first:pl-0">
-            <p
-              // leading after the size: cn drops a leading that a size follows.
-              className={cn(
-                'font-heading tabular-nums',
-                units.length === 4
-                  ? 'text-[min(17cqw,2.5rem)]'
-                  : 'text-[min(23cqw,3.25rem)]',
-                'leading-none',
-              )}
-            >
-              {clock?.[key] ?? '--'}
-            </p>
-            <p className="mt-1 text-[9px] font-semibold tracking-wide text-neutral-700 uppercase">
-              {unit}
-            </p>
-          </div>
-        ))}
-      </div>
-    </div>
+    <p
+      role="timer"
+      aria-label={
+        nowMs == null ? undefined : `Gate closes in ${drawCountdown(to, nowMs)}`
+      }
+      className="mt-2 text-center text-sm text-neutral-400"
+    >
+      Gate closes in{' '}
+      <span className="font-semibold text-neutral-200 tabular-nums">
+        {clock ? `${days}${clock.h}:${clock.m}:${clock.s}` : '--:--:--'}
+      </span>
+    </p>
   );
 }
 
@@ -129,14 +98,14 @@ function GatePrizes({
         type="button"
         onClick={() => onZoom(prize)}
         aria-label={`See ${prize.title}, ${rmAuto(prize.value_myr)}`}
-        className="mt-2.5 block w-full cursor-zoom-in rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+        className="mt-3 block w-full cursor-zoom-in rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-white/60"
       >
         <span
-          className={cn('pool-float mx-auto block aspect-[5/7]', ART_HEIGHT)}
+          className={cn('pool-float mx-auto block aspect-[5/7]', HERO_HEIGHT)}
         >
           <FramedArt prize={prize} holo eager />
         </span>
-        <span className="mt-1.5 block truncate text-center text-[11px] text-neutral-300">
+        <span className="mt-2 block truncate text-center text-xs text-neutral-300">
           {prize.title}
         </span>
       </button>
@@ -145,7 +114,7 @@ function GatePrizes({
   return (
     <div
       {...drag}
-      className="-mx-3 mt-1.5 -mb-1 flex cursor-grab snap-x gap-2 overflow-x-auto scroll-px-3 px-3 py-1 active:cursor-grabbing [-ms-overflow-style:none] [scrollbar-width:none] sm:-mx-4 sm:scroll-px-4 sm:px-4 [&::-webkit-scrollbar]:hidden"
+      className="-mx-4 mt-3 -mb-1 flex cursor-grab snap-x gap-2 overflow-x-auto scroll-px-4 px-4 py-1 active:cursor-grabbing [-ms-overflow-style:none] [scrollbar-width:none] sm:-mx-5 sm:scroll-px-5 sm:px-5 [&::-webkit-scrollbar]:hidden"
     >
       {prizes.map((p, i) => (
         <button
@@ -184,26 +153,22 @@ function Stat({
   children: ReactNode;
 }) {
   return (
-    <span className="block min-w-0">
-      <span className="block truncate text-[10px] text-neutral-400 max-[359px]:hidden">
+    <span className="block min-w-0 px-1 text-center">
+      <span className="font-heading flex items-center justify-center text-xl leading-tight text-white tabular-nums">
+        {children}
+      </span>
+      <span className="mt-0.5 block truncate text-[11px] text-neutral-400 max-[359px]:hidden">
         {label}
       </span>
-      <span className="hidden truncate text-[10px] text-neutral-400 max-[359px]:block">
+      <span className="mt-0.5 hidden truncate text-[11px] text-neutral-400 max-[359px]:block">
         {short}
-      </span>
-      <span className="font-heading mt-0.5 flex items-center text-sm leading-tight text-white tabular-nums">
-        {children}
       </span>
     </span>
   );
 }
 
-const STUB_ACTION =
-  'h-11 w-full bg-neutral-950 px-2 text-[13px] text-white hover:bg-neutral-800 sm:text-sm';
-
-/** One gate, a pass torn top to bottom like the desktop page always was: on the
- *  foil its tier, its clock and the one action; on the dark half what it is
- *  worth and where the player stands. */
+/** One gate as one prize card: its tier and state, what it is worth, the
+ *  prizes, where the player stands, then the one action and the clock. */
 function GateTicket({
   gate,
   isNew,
@@ -232,108 +197,106 @@ function GateTicket({
   return (
     <article
       aria-labelledby={titleId}
-      className="grid h-full grid-cols-[minmax(7.75rem,39%)_0_minmax(0,1fr)] lg:grid-cols-[clamp(15rem,30%,24rem)_0_minmax(0,1fr)]"
+      className="flex h-full flex-col rounded-3xl border border-white/10 bg-neutral-900 p-4 sm:p-5"
     >
-      {/* No filter or mask here: the foil is the surface itself. */}
-      <div
-        className={cn(
-          'relative flex min-w-0 flex-col rounded-l-[20px] p-3 text-neutral-950 sm:p-4',
-          closed ? 'bg-neutral-300' : 'holo-turn [--holo-period:28s]',
-        )}
-        style={
-          closed
-            ? undefined
-            : { background: holoSheet(TIER_VEIL[tier ?? 'business']) }
-        }
-      >
-        <span
-          aria-hidden
-          className="pool-guilloche pointer-events-none absolute inset-0 rounded-[inherit]"
-        />
-        <div className="relative flex flex-1 flex-col">
-          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-            <h2
-              id={titleId}
-              className="font-heading text-[clamp(1.05rem,5.4vw,1.375rem)] leading-none"
-            >
-              {tier ? TIER_LABEL[tier] : POOL_TITLE}
-            </h2>
-            {isNew && (
-              <span className="rounded-full bg-neutral-950 px-1.5 py-0.5 text-[9px] leading-none font-semibold text-white">
-                NEW
-              </span>
-            )}
-          </div>
-          {closed ? (
-            <p className="font-heading mt-3 text-[clamp(1.05rem,5.4vw,1.375rem)] leading-tight">
-              Gate is closed
-            </p>
-          ) : (
-            <GateClock to={gate.ends_at} nowMs={nowMs} />
-          )}
-          <div className="mt-auto pt-3">
-            {closed ? (
-              <p className="text-xs leading-snug font-semibold">
-                Drawing the winner…
-              </p>
-            ) : balance > 0 ? (
-              <Pill size="sm" className={STUB_ACTION} onClick={onEnter}>
-                {gate.my_tickets > 0 ? 'Add tickets' : 'Put tickets in'}
-              </Pill>
-            ) : spinHref ? (
-              <Pill size="sm" className={STUB_ACTION} onClick={onGetTickets}>
-                Get tickets
-              </Pill>
-            ) : (
-              <Link
-                href="/task"
-                className={cn(
-                  pillVariants({ variant: 'primary', size: 'sm' }),
-                  STUB_ACTION,
-                )}
-              >
-                Get tickets
-              </Link>
-            )}
-          </div>
-        </div>
-      </div>
-      <div aria-hidden className="pool-perf pool-perf-split" />
-      <div className="min-w-0 rounded-r-[20px] border border-l-0 border-white/10 bg-neutral-900 p-3 sm:p-4">
-        <p className="text-xs font-semibold text-neutral-300">{POOL_TITLE}</p>
-        <p className="font-heading mt-0.5 truncate text-[clamp(1.0625rem,5.2vw,1.5rem)] leading-tight text-chase tabular-nums">
-          {rmAuto(potTotal(prizes))}
-        </p>
-        <p className="mt-0.5 truncate text-[11px] text-neutral-400">
-          {prizes.length === 1
-            ? 'One winner takes it'
-            : `One winner takes all ${num(prizes.length)}`}
-        </p>
-
-        <GatePrizes prizes={prizes} onZoom={onZoom} />
-
-        <div className="mt-2 grid grid-cols-3 gap-1.5 border-t border-white/10 pt-2">
-          <Stat label="Your tickets" short="Yours">
-            {num(gate.my_tickets)}
-          </Stat>
-          <Stat label="Your chance" short="Chance">
-            {chancePercent(gate.my_tickets, gate.total_tickets)}
-          </Stat>
-          <button
-            type="button"
-            onClick={onPlayers}
-            aria-label={`Players: ${num(gate.entrant_count)}. See the top 10`}
-            className="-m-1 min-w-0 rounded-lg p-1 text-left transition-colors outline-none hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-white/60"
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <h2
+            id={titleId}
+            className="text-[11px] font-semibold tracking-[0.08em] text-neutral-400 uppercase"
           >
-            <Stat label="Players">
-              {num(gate.entrant_count)}
-              <ChevronRight
-                className="ml-0.5 h-3.5 w-3.5 shrink-0 text-neutral-400"
-                aria-hidden
-              />
-            </Stat>
-          </button>
+            {POOL_TITLE}
+            {tier && ` · ${TIER_LABEL[tier]}`}
+          </h2>
+          {isNew && (
+            <span className="rounded-full bg-neutral-50 px-1.5 py-0.5 text-[9px] leading-none font-semibold text-neutral-950">
+              NEW
+            </span>
+          )}
         </div>
+        {closed ? (
+          <span className="shrink-0 rounded-full bg-neutral-800 px-2.5 py-1 text-[11px] font-semibold text-neutral-300">
+            Gate closed
+          </span>
+        ) : (
+          <span className="flex shrink-0 items-center gap-1.5 rounded-full bg-coral px-2.5 py-1 text-[11px] font-semibold text-neutral-950">
+            <span
+              aria-hidden
+              className="h-1.5 w-1.5 rounded-full bg-neutral-950"
+            />
+            Live
+          </span>
+        )}
+      </div>
+      <p className="font-heading mt-1.5 truncate text-[clamp(1.75rem,9vw,2.5rem)] leading-none text-chase tabular-nums">
+        {rmAuto(potTotal(prizes))}
+      </p>
+      <p className="mt-1 truncate text-sm text-neutral-400">
+        {prizes.length === 1
+          ? 'One winner takes it'
+          : `One winner takes all ${num(prizes.length)}`}
+      </p>
+
+      <GatePrizes prizes={prizes} onZoom={onZoom} />
+
+      <div className="mt-3 grid grid-cols-3 divide-x divide-white/10 border-t border-white/10 pt-3">
+        <Stat label="Your tickets" short="Yours">
+          {num(gate.my_tickets)}
+        </Stat>
+        <Stat label="Your chance" short="Chance">
+          {chancePercent(gate.my_tickets, gate.total_tickets)}
+        </Stat>
+        <button
+          type="button"
+          onClick={onPlayers}
+          aria-label={`Players: ${num(gate.entrant_count)}. See the top 10`}
+          className="min-h-11 min-w-0 rounded-lg transition-colors outline-none hover:bg-white/5 focus-visible:ring-2 focus-visible:ring-white/60"
+        >
+          <Stat label="Players">
+            {num(gate.entrant_count)}
+            <ChevronRight
+              className="ml-0.5 h-4 w-4 shrink-0 text-neutral-400"
+              aria-hidden
+            />
+          </Stat>
+        </button>
+      </div>
+
+      <div className="mt-auto pt-4">
+        {closed ? (
+          <p className="py-3 text-center text-sm font-semibold text-neutral-300">
+            Drawing the winner…
+          </p>
+        ) : balance > 0 ? (
+          <Pill
+            variant="glacier"
+            size="lg"
+            className="w-full"
+            onClick={onEnter}
+          >
+            {gate.my_tickets > 0 ? 'Add tickets' : 'Put tickets in'}
+          </Pill>
+        ) : spinHref ? (
+          <Pill
+            variant="secondary"
+            size="lg"
+            className="w-full"
+            onClick={onGetTickets}
+          >
+            Get tickets
+          </Pill>
+        ) : (
+          <Link
+            href="/task"
+            className={cn(
+              pillVariants({ variant: 'secondary', size: 'lg' }),
+              'w-full',
+            )}
+          >
+            Get tickets
+          </Link>
+        )}
+        {!closed && <GateClock to={gate.ends_at} nowMs={nowMs} />}
       </div>
     </article>
   );
@@ -364,7 +327,7 @@ function GateSheet({
         aria-labelledby="gate-sheet-title"
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className="glass-panel max-h-[80dvh] w-full overflow-y-auto rounded-t-2xl border p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] outline-none sm:max-w-sm sm:rounded-2xl"
+        className="glass-panel max-h-[80dvh] w-full overflow-y-auto rounded-t-3xl border p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] outline-none sm:max-w-sm sm:rounded-3xl"
       >
         <div className="flex items-start justify-between gap-3">
           <h2
@@ -392,7 +355,7 @@ const chipClass = (on: boolean) =>
   cn(
     'relative h-9 shrink-0 rounded-full px-3.5 text-[13px] font-semibold whitespace-nowrap transition-colors outline-none before:absolute before:inset-x-0 before:-inset-y-1 focus-visible:ring-2 focus-visible:ring-white/40',
     on
-      ? 'bg-neutral-50 text-neutral-950'
+      ? 'bg-neutral-700 text-white ring-1 ring-white/30 ring-inset'
       : 'bg-neutral-800 text-neutral-300 hover:text-white',
   );
 
@@ -520,6 +483,7 @@ export function GateList({
     shownTier === 'all' ? gates : gates.filter((g) => g.tier === shownTier),
     sort,
     newIds,
+    nowMs,
   );
 
   return (
@@ -535,7 +499,7 @@ export function GateList({
         />
       )}
 
-      <ul className="grid gap-3 lg:grid-cols-[repeat(auto-fit,minmax(34rem,1fr))] lg:gap-4">
+      <ul className="grid gap-3 lg:grid-cols-[repeat(auto-fit,minmax(22rem,1fr))] lg:gap-4">
         {shown.map((gate) => (
           <li key={gate.id} className="min-w-0">
             <GateTicket
@@ -603,7 +567,7 @@ export function NoPool({
 }) {
   return (
     <div className="space-y-6">
-      <div className="rounded-[20px] border border-dashed border-white/15 px-4 py-8 text-center">
+      <div className="rounded-3xl border border-dashed border-white/15 px-4 py-8 text-center">
         <TicketArt width={96} className="mx-auto" />
         <p className="font-heading mt-3 text-[22px] leading-tight text-white">
           No pool running right now

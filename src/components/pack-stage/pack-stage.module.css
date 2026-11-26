@@ -222,10 +222,10 @@
 .stage {
   /* Phone: centre pack about 190x352 on an iPhone 13, neighbours' inner
      halves showing at the screen edges. Fits the panel: heading, tabs, row
-     and info block in one screen (326 px is everything but the art). */
+     and info block in one screen (306 px is everything but the art). */
   /* the floor lets a short phone (320 x 568) keep the price and Open above
      the tab bar */
-  --art-h: clamp(112px, calc(var(--panel, 100svh) - 326px), 352px);
+  --art-h: clamp(112px, calc(var(--panel, 100svh) - 306px), 352px);
   --art-w: calc(var(--art-h) * 0.54);
   --step: calc(var(--art-h) * 0.511);
   /* Phones label only the centred pack, in the info block. */
@@ -242,7 +242,7 @@
        block stays on the first screen. */
     /* the floor lets a short laptop view (1280 x 600, 1366 x 650 with the
        browser's bars) keep the price and Open on the first screen */
-    --art-h: clamp(160px, calc(var(--panel, 100svh) - 411px), 560px);
+    --art-h: clamp(160px, calc(var(--panel, 100svh) - 387px), 560px);
     --art-w: calc(var(--art-h) * 0.5357);
     --step: calc(var(--art-h) * 0.589);
     --label-h: 3.5rem;
@@ -391,76 +391,104 @@
   opacity: 0;
 }
 
-/* ---- Pack sorting: a tab on the pill that grows a second level ---------- */
+/* ---- Pack sorting: a filter button in the category bar ------------------- */
 
-/* The tab's row (24 px). It fades while its category has no choices (Poly);
-   its height stays, so the stage never moves when the category changes. */
+/* The bar's last part: a hairline, then the button. It folds out of the bar
+   (width and opacity) while its category has no choices (Poly): the column
+   animates between 1fr and 0fr, so the bar's width follows. */
 .chipRow {
-  position: relative;
-  display: flex;
-  height: 1.5rem;
-  width: 100%;
-  align-items: flex-start;
-  justify-content: center;
-  transition: opacity 200ms linear;
+  display: grid;
+  flex: none;
+  grid-template-columns: 1fr;
+  transition:
+    grid-template-columns 300ms cubic-bezier(0.25, 1, 0.5, 1),
+    opacity 200ms linear;
 }
 
 .chipRow[data-off] {
+  grid-template-columns: 0fr;
   opacity: 0;
   pointer-events: none;
 }
 
-/* The tab hangs from the pill's lower edge and names the current choice. */
+/* Clips sideways only: the button's tap area still reaches the bar's edges. */
+.chipClip {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  overflow-x: clip;
+}
+
+.chipSep {
+  flex: none;
+  width: 1px;
+  height: 1.25rem;
+  margin: 0 0.25rem;
+  background: rgb(255 255 255 / 0.12);
+}
+
+/* no tabs before it (one franchise): no hairline */
+.chipRow:first-child .chipSep {
+  display: none;
+}
+
+/* The trigger: a 36 px round button, as an idle franchise tab. */
 .growTab {
   position: relative;
   display: flex;
-  height: 1.5rem;
-  margin-top: -1px;
+  flex: none;
+  width: 2.25rem;
+  height: 2.25rem;
   align-items: center;
-  gap: 0.375rem;
-  padding: 0 0.875rem;
-  white-space: nowrap;
-  border: 1px solid rgb(255 255 255 / 0.1);
-  border-top: 0;
-  border-radius: 0 0 1rem 1rem;
-  background: #171717;
+  justify-content: center;
+  border-radius: 9999px;
   color: #a3a3a3;
-  font-size: 11px;
-  font-weight: 600;
   outline: none;
   transition:
     color 150ms linear,
-    opacity 120ms linear;
-}
-
-@media (min-width: 1024px) {
-  .growTab {
-    font-size: 12px;
-  }
+    background-color 150ms linear;
 }
 
 .growTab:hover,
-.growTab[data-chosen] {
+.growTab[data-chosen],
+.growTab[aria-expanded='true'] {
   color: #fff;
 }
 
-.growTab:focus-visible {
-  box-shadow: 0 0 0 2px rgb(255 255 255 / 0.4);
+.growTab:hover,
+.growTab[aria-expanded='true'] {
+  background: rgb(255 255 255 / 0.08);
 }
 
-/* 24 px tall: the touch target reaches 12 px past each edge (44+ px,
-   measured from the padding box inside the 1 px border). */
+/* inset: the bar clips sideways */
+.growTab:focus-visible {
+  box-shadow: inset 0 0 0 2px rgb(255 255 255 / 0.4);
+}
+
+/* 36 px tall: the tap target reaches the bar's edges (44 px). */
 .growTab::after {
   content: '';
   position: absolute;
-  inset: -12px -4px;
+  inset: -4px 0;
+}
+
+/* A choice is on: a dot on the button. */
+.growTab[data-chosen]::before {
+  content: '';
+  position: absolute;
+  top: 0.375rem;
+  right: 0.375rem;
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 9999px;
+  background: #fafafa;
+  box-shadow: 0 0 0 2px #171717;
 }
 
 .growTab svg {
-  width: 0.875rem;
-  height: 0.875rem;
+  width: 1rem;
+  height: 1rem;
   flex-shrink: 0;
-  opacity: 0.7;
   fill: none;
   stroke: currentColor;
   stroke-width: 2;
@@ -468,61 +496,43 @@
   stroke-linejoin: round;
 }
 
-/* Opened, the tab steps aside at once: the panel unrolling over it never
-   shows the two labels through each other. */
-.growTab[aria-expanded='true'] {
-  opacity: 0;
-  transition: none;
-}
-
-/* The pill's second level floats over the stage: it never takes room, so
-   nothing moves when it opens or closes. It unrolls from under the pill
-   (clip-path) while the pill's lower corners square off, so the two read as
-   one shape. CSS only; a closed panel is hidden (visibility) once faded. */
+/* The list of choices drops under the bar (its box is the stage head: the
+   bar and this row are not positioned) and floats over the stage: it never
+   takes room, so nothing moves when it opens or closes. CSS only; a closed
+   list is hidden (visibility) once faded. */
 .growPanel {
   position: absolute;
   z-index: 30;
-  top: -1px;
-  left: 0;
-  right: 0;
-  padding: 0 0.25rem 0.25rem;
+  top: calc(100% + 0.5rem);
+  left: 50%;
+  width: min(100%, 17rem);
+  padding: 0.25rem;
   border: 1px solid rgb(255 255 255 / 0.1);
-  border-top: 0;
-  border-radius: 0 0 1.75rem 1.75rem;
+  border-radius: 1rem;
   background: #171717;
+  box-shadow: 0 16px 40px -12px rgb(0 0 0 / 0.9);
   opacity: 0;
   visibility: hidden;
-  clip-path: inset(0 0 100% 0);
+  translate: -50% -4px;
+  scale: 0.98;
+  transform-origin: top center;
   transition:
-    opacity 160ms ease-out,
-    clip-path 200ms cubic-bezier(0.32, 0.72, 0, 1),
-    visibility 0s linear 200ms;
+    opacity 140ms ease-out,
+    translate 160ms ease-out,
+    scale 160ms ease-out,
+    visibility 0s linear 160ms;
 }
 
 .growPanel[data-open] {
   opacity: 1;
   visibility: visible;
-  clip-path: inset(0 0 0 0);
+  translate: -50% 0;
+  scale: 1;
   transition:
-    opacity 180ms ease-out,
-    clip-path 240ms cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 160ms ease-out,
+    translate 200ms cubic-bezier(0.32, 0.72, 0, 1),
+    scale 200ms cubic-bezier(0.32, 0.72, 0, 1),
     visibility 0s;
-}
-.stage :global([aria-label='Pack categories']) {
-  /* Over half the pill's height: drawn exactly as rounded-full, but a radius
-     that can animate down to the squared corners. */
-  border-radius: 2.25rem;
-  transition:
-    border-radius 200ms cubic-bezier(0.32, 0.72, 0, 1),
-    border-color 200ms linear;
-}
-
-/* Open (the tab says so): the pill's lower corners square off. */
-.pillWrap:has([data-stage-chips] > [aria-expanded='true'])
-  :global([aria-label='Pack categories']) {
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-  border-bottom-color: transparent;
 }
 /* Capsules (Poly): the flat panel sways gently around its upright axis. */
 .sway {
@@ -916,8 +926,7 @@
   .chipRow,
   .growPanel,
   .growPanel[data-open],
-  .growTab,
-  .stage :global([aria-label='Pack categories']) {
+  .growTab {
     transition: none;
   }
 }

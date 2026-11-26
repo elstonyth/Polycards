@@ -49,7 +49,7 @@ const segment = (on: boolean) =>
   cn(
     'flex min-h-10 items-center justify-center gap-1 rounded-full px-1 text-[12px] font-semibold transition-colors disabled:opacity-50',
     'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
-    on ? 'bg-neutral-50 text-neutral-950' : 'text-neutral-400 hover:text-white',
+    on ? 'bg-neutral-700 text-white' : 'text-neutral-400 hover:text-white',
   );
 
 // Latest results (owner 2026-11-04, a plain take on a baccarat bead plate): how

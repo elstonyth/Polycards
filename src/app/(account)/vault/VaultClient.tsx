@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
@@ -49,12 +49,9 @@ import { useConsent } from '@/lib/use-consent';
 // The customer's vault: every pulled card still held, each with a sell-back
 // offer (current FMV × the flat buyback rate — the server quotes the percent).
 // Selling removes the card here and credits the site balance shown at the top.
-/** An action on the tickets row: full width in a pair on a phone. */
+/** An action on the slim tickets row. */
 const ticketPill = (lead: boolean) =>
-  cn(
-    pillVariants({ variant: lead ? 'primary' : 'secondary', size: 'sm' }),
-    'flex-1 sm:flex-none',
-  );
+  pillVariants({ variant: lead ? 'primary' : 'secondary', size: 'sm' });
 
 export default function VaultClient({
   initial,
@@ -62,7 +59,10 @@ export default function VaultClient({
   initialGifts,
   tickets: initialTickets,
   spinHref = null,
+  tabs,
 }: {
+  /** The In vault | Pull history switch, drawn under the summary card. */
+  tabs?: ReactNode;
   initial: VaultResult;
   addresses: AddressView[];
   /** Packs gifted into this vault, unopened — the Packs row above the cards. */
@@ -369,41 +369,52 @@ export default function VaultClient({
   return (
     <>
       {/* Title + subtitle live in the server page (shared AccountHeader). */}
-      {/* Stat strip */}
-      <div className="grid grid-cols-3 divide-x divide-white/10 rounded-2xl border border-white/10 bg-neutral-900 py-4">
-        {[
-          // rm0 (whole ringgit) keeps both money stats from clipping in the
-          // 3-col strip on narrow phones; exact figures live per-card and in
-          // the header chip.
-          { label: 'Vault value', value: rm0(vaultValue) },
-          { label: 'Cards', value: String(items.length) },
-          { label: 'Balance', value: rm0(providerBalance ?? balance) },
-        ].map((stat) => (
-          <div key={stat.label} className="px-2 text-center sm:px-4">
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
-              {stat.label}
-            </p>
-            {/* nowrap + a smaller phone step, NOT truncate: a seven-figure
-                balance clipped to "RM 6,66…" is worse than a smaller number,
-                and money is the one value this strip exists to state. */}
-            <p className="font-heading mt-0.5 whitespace-nowrap text-[13px] tabular-nums text-white sm:text-base lg:text-lg">
-              {stat.value}
-            </p>
-          </div>
-        ))}
-      </div>
+      {/* Summary: the vault door breaks out of the card's right edge. */}
+      <section
+        aria-label="Vault summary"
+        className="relative rounded-3xl border border-white/10 bg-neutral-900 p-4 sm:p-6"
+      >
+        <div className="relative z-10 min-w-0 pr-24 sm:pr-40">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400">
+            Vault value
+          </p>
+          {/* rm0 + nowrap, NOT truncate: a seven-figure value clipped to
+              "RM 6,66…" is worse than a smaller number. */}
+          <p className="font-heading mt-1 whitespace-nowrap text-[clamp(1.75rem,9vw,3rem)] leading-none tabular-nums text-neutral-50">
+            {rm0(vaultValue)}
+          </p>
+          <p className="mt-2 text-[13px] text-neutral-400">
+            {num(items.length)} card{items.length === 1 ? '' : 's'}
+            <span aria-hidden> · </span>
+            <span className="whitespace-nowrap">
+              Balance {rm0(providerBalance ?? balance)}
+            </span>
+          </p>
+        </div>
+        <Image
+          src="/images/ice/vault-door.webp"
+          alt=""
+          aria-hidden
+          width={512}
+          height={512}
+          className="pointer-events-none absolute right-1 -top-3 h-32 w-32 object-contain sm:right-3 sm:-top-8 sm:h-44 sm:w-44"
+        />
+      </section>
+
+      {/* VaultTabs carries its own mb-4, which suits the history page. */}
+      {tabs && <div className="mt-4 [&>nav]:mb-0">{tabs}</div>}
 
       {/* Lucky Draw tickets: always shown when readable, so a player with none
           is pointed at what pays them. Get tickets is the lead action until
           they hold some, then Use is. */}
       {tickets !== null && (
-        <section aria-label="Lucky Draw tickets" className="mt-4">
-          <div className="rounded-2xl border border-white/10 bg-neutral-900 p-3">
-            <div className="flex flex-wrap items-center gap-3">
-              <TicketArt width={64} className="shrink-0" />
+        <section aria-label="Lucky Draw tickets" className="mt-3">
+          <div className="rounded-2xl border border-white/10 bg-neutral-900 px-3 py-2.5">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2.5">
+              <TicketArt width={44} className="shrink-0" />
               <div className="min-w-0 flex-1 basis-40">
                 <p className="truncate text-sm font-semibold text-white">
-                  Lucky Draw Tickets ×{num(tickets)}
+                  {num(tickets)} Lucky Draw ticket{tickets === 1 ? '' : 's'}
                 </p>
                 <p className="mt-0.5 text-[12px] text-neutral-400">
                   {tickets > 0 ? (
@@ -412,7 +423,7 @@ export default function VaultClient({
                         Put them in the prize pool, or{' '}
                         <Link
                           href="/vault/coin-flip?stake=tickets"
-                          className="font-semibold text-white underline underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                          className="font-semibold text-glacier underline underline-offset-2 outline-none hover:text-white focus-visible:ring-2 focus-visible:ring-glacier"
                         >
                           flip them
                         </Link>
@@ -427,7 +438,7 @@ export default function VaultClient({
                   )}
                 </p>
               </div>
-              <div className="flex w-full gap-2 sm:w-auto">
+              <div className="ml-auto flex gap-2">
                 {spinHref ? (
                   <button
                     type="button"
@@ -528,9 +539,9 @@ export default function VaultClient({
 
       {/* Search + rarity filter */}
       {items.length > 0 && (
-        <div className="mt-4 flex flex-col gap-2.5">
-          <label className="flex h-11 items-center gap-2 rounded-xl bg-neutral-800 px-3.5">
-            <Search className="h-4 w-4 shrink-0 text-neutral-500" aria-hidden />
+        <div className="mt-3 flex flex-col gap-2.5">
+          <label className="flex h-12 items-center gap-2.5 rounded-2xl border border-white/10 bg-neutral-800 px-4 transition-colors focus-within:border-white/30">
+            <Search className="h-4 w-4 shrink-0 text-neutral-400" aria-hidden />
             <input
               type="search"
               value={query}
@@ -546,10 +557,10 @@ export default function VaultClient({
                 type="button"
                 onClick={() => setRarityFilter(null)}
                 className={cn(
-                  'inline-flex h-8 shrink-0 items-center rounded-full px-3.5 text-[12px] font-semibold transition-colors',
+                  'inline-flex h-11 shrink-0 items-center rounded-full border px-4 text-[13px] font-semibold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-white/40',
                   rarityFilter === null
-                    ? 'bg-neutral-50 text-neutral-950'
-                    : 'bg-neutral-800 text-neutral-400 hover:text-white',
+                    ? 'border-white/30 bg-neutral-700 text-white'
+                    : 'border-white/10 bg-neutral-900 text-neutral-400 hover:text-white',
                 )}
               >
                 All
@@ -562,10 +573,10 @@ export default function VaultClient({
                     setRarityFilter((cur) => (cur === r ? null : r))
                   }
                   className={cn(
-                    'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-3.5 text-[12px] font-semibold transition-colors',
+                    'inline-flex h-11 shrink-0 items-center gap-1.5 rounded-full border px-4 text-[13px] font-semibold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-white/40',
                     rarityFilter === r
-                      ? 'bg-neutral-50 text-neutral-950'
-                      : 'bg-neutral-800 text-neutral-400 hover:text-white',
+                      ? 'border-white/30 bg-neutral-700 text-white'
+                      : 'border-white/10 bg-neutral-900 text-neutral-400 hover:text-white',
                   )}
                 >
                   <span
@@ -610,7 +621,7 @@ export default function VaultClient({
       )}
 
       {items.length === 0 ? (
-        <div className="mt-5 rounded-2xl border border-white/10 bg-neutral-900 px-6 py-12 text-center">
+        <div className="mt-4 rounded-3xl border border-white/10 bg-neutral-900 px-6 py-12 text-center">
           <p className="text-sm font-semibold text-white">
             {/* Not "empty" under a Packs row that holds something. */}
             {gifts.length > 0 ? 'No cards yet.' : 'Your vault is empty.'}
@@ -626,7 +637,7 @@ export default function VaultClient({
           </Link>
         </div>
       ) : visible.length === 0 ? (
-        <div className="mt-5 rounded-2xl border border-white/10 bg-neutral-900 px-6 py-10 text-center">
+        <div className="mt-4 rounded-3xl border border-white/10 bg-neutral-900 px-6 py-10 text-center">
           <p className="text-sm text-neutral-400">
             Nothing matches
             {query ? ` “${query.trim()}”` : ''}
@@ -645,9 +656,9 @@ export default function VaultClient({
           </Pill>
         </div>
       ) : (
-        // Mobile-first: 3-up keeps a scroll rhythm of ~2 rows per screen —
-        // 2-up slabs dominated the viewport and made browsing feel stuck.
-        <div className="mt-5 grid grid-cols-3 gap-2 sm:gap-3 lg:grid-cols-4">
+        // Redesign v3: 2-up on phones with larger tiles, 3-up from sm, 4-up
+        // from lg.
+        <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4">
           {shown.map((item) => {
             const isSelected = selected.has(item.pullId);
             // null (an unknown/absent tier) reads as Common gray, exactly as
@@ -669,7 +680,7 @@ export default function VaultClient({
                 // A prize keeps the frame it was won in: the challenge's prism,
                 // or the Lucky Draw's, the same one it wore in the draw.
                 frameVariant={prizeFrameVariant(item)}
-                sizes="(max-width: 1024px) 33vw, 25vw"
+                sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
                 className="w-full"
               />
             );
@@ -677,9 +688,9 @@ export default function VaultClient({
               <div
                 key={item.pullId}
                 className={cn(
-                  'relative flex flex-col rounded-2xl border bg-neutral-900 p-2 transition-colors sm:p-3',
+                  'relative flex flex-col rounded-3xl border bg-neutral-900 p-2.5 transition-colors sm:p-3',
                   isSelected
-                    ? 'border-white ring-2 ring-white/50'
+                    ? 'border-glacier ring-1 ring-glacier'
                     : 'border-white/10',
                 )}
               >
@@ -715,7 +726,7 @@ export default function VaultClient({
                         className={cn(
                           'absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border text-[13px] font-bold',
                           isSelected
-                            ? 'border-white bg-neutral-50 text-neutral-950'
+                            ? 'border-glacier bg-glacier text-glacier-ink'
                             : 'border-white/40 bg-black/50 text-transparent',
                         )}
                         aria-hidden
@@ -775,7 +786,8 @@ export default function VaultClient({
                         : 'Feature on profile'
                     }
                     className={cn(
-                      'absolute left-1 top-1 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 transition-colors disabled:opacity-50 sm:h-9 sm:w-9',
+                      // after: a 44px thumb target round the 28px disc on a phone.
+                      'absolute left-1 top-1 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-black/60 transition-colors after:absolute after:-inset-2 disabled:opacity-50 sm:h-9 sm:w-9 sm:after:-inset-1',
                       item.showcased
                         ? 'text-chase'
                         : 'text-neutral-400 hover:text-white',
@@ -806,21 +818,20 @@ export default function VaultClient({
                       })
                     }
                     aria-label={`View details for ${item.card.name}`}
-                    className="absolute bottom-1 left-1 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-neutral-950/70 text-white/80 backdrop-blur transition-colors hover:bg-neutral-950/90 hover:text-white sm:bottom-2 sm:left-2 sm:h-8 sm:w-8"
+                    className="absolute bottom-1 left-1 z-10 flex h-7 w-7 items-center justify-center rounded-full bg-neutral-950/70 text-white/80 backdrop-blur transition-colors after:absolute after:-inset-2 hover:bg-neutral-950/90 hover:text-white sm:bottom-2 sm:left-2 sm:h-8 sm:w-8 sm:after:-inset-1.5"
                   >
                     <Eye className="h-4 w-4" aria-hidden />
                   </button>
                 </div>
                 <p
-                  className="mt-1.5 line-clamp-2 min-h-[1.9rem] text-[11px] font-semibold leading-snug text-white sm:mt-2 sm:min-h-[2.1rem] sm:text-[12px]"
+                  className="mt-2 line-clamp-2 min-h-[2.1rem] text-[12px] font-semibold leading-snug text-white sm:text-[13px] sm:min-h-[2.3rem]"
                   title={item.card.name}
                 >
                   {item.card.name}
                 </p>
-                {/* Stacked on phone: side by side, a 3-up tile left the rarity
-                    ~40px and it rendered as "IM…" / "COM…". Rarity is a signal
-                    word — it either reads or it shouldn't be there. */}
-                <div className="mt-1 flex flex-col gap-0.5 text-[10px] sm:flex-row sm:items-center sm:justify-between sm:gap-1 sm:text-[11px]">
+                {/* Side by side: a 2-up phone tile is wide enough for the
+                    rarity word and the price on one row. */}
+                <div className="mt-1 flex items-center justify-between gap-1.5 text-[10px] sm:text-[11px]">
                   {item.luckyDrawPrize ? (
                     // No tier: its frame and this word are how a Lucky Draw
                     // win reads.

@@ -122,7 +122,9 @@ function isSkippedRoute(pathname: string): boolean {
     pathname === '/slots' ||
     pathname.startsWith('/slots/') ||
     pathname === '/vault' ||
-    pathname === '/leaderboard'
+    pathname === '/leaderboard' ||
+    // one screen with its own dock and corners: the chip would sit on its shortcuts
+    pathname === '/me'
   );
 }
 

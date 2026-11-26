@@ -6,12 +6,14 @@ import {
   useState,
   useSyncExternalStore,
   type MouseEvent,
+  type ReactNode,
 } from 'react';
 import Link, { useLinkStatus } from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { openAuth } from '@/components/AuthButton';
 import { useAuth } from '@/components/auth/AuthProvider';
+import PolycardsMark from '@/components/brand/PolycardsMark';
 import { useDrawDot } from './DrawDotProvider';
 import { useVaultDot } from './VaultDotProvider';
 import { openGames } from './games';
@@ -21,6 +23,7 @@ import {
   homeFlowShown,
   homeTapTaken,
   isTabActive,
+  markerIndex,
   subscribeHomeFlow,
   type Tab,
 } from './tabs';
@@ -31,8 +34,59 @@ const AUTH_WAIT_MS = 1500;
 
 type Variant = 'bar' | 'pill';
 
-/** The press, focus and tap-highlight states both variants share. */
-const ITEM = 'group outline-none [-webkit-tap-highlight-color:transparent]';
+/** The press, focus and tap-highlight states both variants share. Positioned,
+ *  so an item paints over its nav's TabMarker. */
+const ITEM =
+  'group relative outline-none [-webkit-tap-highlight-color:transparent]';
+
+/** One step of the marker per tab: its own width, a column of the nav. */
+const SHIFT = [
+  'translate-x-0',
+  'translate-x-full',
+  'translate-x-[200%]',
+  'translate-x-[300%]',
+  'translate-x-[400%]',
+  'translate-x-[500%]',
+  'translate-x-[600%]',
+];
+
+/**
+ * The lit-tab marker of a nav whose tabs are equal columns: one element that
+ * slides to the column of the tab you are on, so a tab change glides without
+ * a page transition (those are off: PageTransition.tsx). `className` gives it
+ * one column's box; the children draw it. First in the nav, under the tabs.
+ */
+export function TabMarker({
+  tabs,
+  className,
+  children,
+}: {
+  tabs: Tab[];
+  className: string;
+  children?: ReactNode;
+}) {
+  const pathname = usePathname();
+  const homeFlow = useSyncExternalStore(
+    subscribeHomeFlow,
+    homeFlowShown,
+    () => false,
+  );
+  const at = markerIndex(tabs, pathname, homeFlow);
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        // The clear border is the marker in forced colours, which drop
+        // backgrounds and shadows.
+        'pointer-events-none absolute rounded-full border border-transparent transition-[translate,opacity] duration-300 ease-(--ease-out-quart) motion-reduce:transition-none',
+        at < 0 ? 'opacity-0' : SHIFT[at],
+        className,
+      )}
+    >
+      {children}
+    </span>
+  );
+}
 
 // The press state is `data-pressed`, set from pointer events, not `:active`:
 // Chrome on a touch screen applies :active only once it is sure the touch is
@@ -41,9 +95,9 @@ const ITEM = 'group outline-none [-webkit-tap-highlight-color:transparent]';
 // tab-flow target is 100ms).
 const ITEM_VARIANT: Record<Variant, string> = {
   // Inset: the bar's items touch each other and the bar's edges.
-  bar: 'flex min-w-0 flex-1 items-center justify-center focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-white/40',
+  bar: 'flex min-w-0 flex-1 items-center justify-center focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-glacier',
   // The press scale of Pill (DESIGN.md "Buttons").
-  pill: 'rounded-full transition-transform data-[pressed]:scale-[0.98] focus-visible:ring-2 focus-visible:ring-white/40 motion-reduce:transition-none motion-reduce:data-[pressed]:scale-100',
+  pill: 'rounded-full transition-transform data-[pressed]:scale-[0.98] focus-visible:ring-2 focus-visible:ring-glacier motion-reduce:transition-none motion-reduce:data-[pressed]:scale-100',
 };
 
 /**
@@ -205,13 +259,34 @@ function TabFace({
   const Icon = tab.icon;
   const pendingDelay = pending && !active && 'delay-100';
 
+  if (variant === 'bar' && tab.raised) {
+    // The centre tab: a round button that rises 10px out of the bar, wearing
+    // the brand mark. Lit, its ring and mark take the glacier tone.
+    return (
+      <span
+        className={cn(
+          '-mt-3 flex h-16 w-16 flex-col items-center justify-center gap-0.5 rounded-full border bg-linear-to-b from-neutral-700 to-neutral-900 transition-[color,border-color,box-shadow,transform] duration-200 group-data-[pressed]:duration-100 motion-safe:group-data-[pressed]:scale-95',
+          lit
+            ? 'border-glacier/60 text-glacier shadow-[0_0_0_4px_rgb(255_255_255/0.07),0_10px_22px_-8px_rgb(0_0_0/0.9),inset_0_1px_0_rgb(255_255_255/0.16)]'
+            : 'border-white/15 text-neutral-50 shadow-[0_10px_22px_-8px_rgb(0_0_0/0.9),inset_0_1px_0_rgb(255_255_255/0.14)]',
+          pendingDelay,
+        )}
+      >
+        <PolycardsMark className="h-5 w-auto" />
+        <span className="text-[10px] leading-none font-semibold">
+          {tab.label}
+        </span>
+      </span>
+    );
+  }
+
   if (variant === 'bar') {
     return (
       <span
         className={cn(
           'flex flex-col items-center justify-center gap-1 transition-colors',
           lit
-            ? 'text-neutral-50'
+            ? 'text-glacier'
             : 'text-neutral-400 group-hover:text-neutral-300',
           pendingDelay,
         )}
@@ -232,7 +307,7 @@ function TabFace({
           {dotLabel && (
             <span
               aria-hidden
-              className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-neutral-50"
+              className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-coral"
             />
           )}
         </span>
@@ -243,33 +318,28 @@ function TabFace({
     );
   }
 
+  // The desktop link: a label in its column of the header's nav pill. The
+  // nav's TabMarker lights the page you are on; the link only takes the
+  // glacier tone.
   return (
     <span
       className={cn(
-        'flex h-10 items-center gap-2 rounded-full px-3.5 text-[13px] font-semibold transition-colors',
+        'flex h-9 items-center justify-center rounded-full px-4 text-sm font-semibold transition-colors',
         lit
-          ? 'bg-neutral-50 text-neutral-950'
+          ? 'text-glacier'
           : 'text-neutral-400 group-hover:bg-white/5 group-hover:text-white',
         pendingDelay,
       )}
     >
-      <span className="relative inline-flex">
-        <Icon className="h-4 w-4" aria-hidden />
+      <span className="relative">
+        {tab.label}
         {dotLabel && (
-          // The lit pill is bg-neutral-50, so Paper White would vanish on
-          // it. Normally moot (being on /vault clears the dot), but
-          // reachable: a pull can land while the customer sits on the page
-          // and the next focus refresh relights it.
           <span
             aria-hidden
-            className={cn(
-              'absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full',
-              lit ? 'bg-neutral-950' : 'bg-neutral-50',
-            )}
+            className="absolute -top-1 -right-2 h-2 w-2 rounded-full bg-coral"
           />
         )}
       </span>
-      {tab.label}
     </span>
   );
 }

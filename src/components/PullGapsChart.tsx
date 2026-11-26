@@ -142,7 +142,7 @@ export function PullGapsChart({
                 'min-h-10 rounded-full px-3 text-[12px] font-semibold transition-colors',
                 'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
                 tier === r
-                  ? 'bg-neutral-50 text-neutral-950'
+                  ? 'bg-neutral-700 text-white'
                   : 'text-neutral-400 hover:text-white',
               )}
             >

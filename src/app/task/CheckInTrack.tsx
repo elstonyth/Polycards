@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { Check, Lock } from 'lucide-react';
 import { Pill } from '@/components/ui/pill';
 import { HelpTip } from '@/components/ui/help-tip';
@@ -70,7 +71,7 @@ function TopUpBar({
   const done = Math.max(0, Math.min(unlock.topped_up_myr, required));
   const pct = required > 0 ? Math.floor((done / required) * 100) : 0;
   return (
-    <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-3">
+    <div className="mt-3 rounded-2xl border border-white/10 bg-neutral-800/60 p-3">
       <div className="flex items-center gap-3">
         <Lock className="h-4 w-4 shrink-0 text-neutral-400" aria-hidden />
         <p className="min-w-0 flex-1 text-xs leading-snug text-neutral-300">
@@ -91,7 +92,7 @@ function TopUpBar({
           aria-label="Topped up this week"
         >
           <span
-            className="bar-grow rounded-full bg-neutral-50"
+            className="bar-grow bg-glacier-grad rounded-full"
             style={{ width: `${pct}%` }}
           />
         </div>
@@ -146,14 +147,14 @@ export function CheckInTrack({
   return (
     <section
       aria-labelledby="checkin-heading"
-      className="rounded-2xl border border-white/10 bg-neutral-900 p-4"
+      className="relative rounded-3xl border border-white/10 bg-neutral-900 p-4 sm:p-5"
     >
       <div className="flex items-baseline justify-between gap-3">
         <h2
           id="checkin-heading"
-          className="font-heading flex items-center gap-1 text-lg text-white"
+          className="flex items-center gap-1 text-lg font-semibold text-neutral-50 sm:text-xl"
         >
-          CHECK-IN
+          Daily check-in
           <HelpTip label="How check-in works">
             Check in once a day. Every check-in fills the next slot.
             {unlock
@@ -163,15 +164,15 @@ export function CheckInTrack({
             time), so claim before then.
           </HelpTip>
         </h2>
-        <p className="text-xs text-neutral-400">
-          <span className="font-heading text-base text-white tabular-nums">
-            {count}
-          </span>
+        <p className="shrink-0 text-xs text-neutral-400 sm:text-sm">
+          <span className="text-neutral-50 tabular-nums">{count}</span>
           /7 this week
         </p>
       </div>
 
-      <ol className="mt-3 grid grid-cols-7 gap-1.5 sm:gap-2">
+      {/* Six day tiles and a larger day 7, bottoms aligned; the gift on day 7
+          hangs off its tile's corner but stays inside the card's padding. */}
+      <ol className="mt-4 grid grid-cols-[repeat(6,minmax(0,1fr))_minmax(0,1.5fr)] items-end gap-1.5 sm:gap-2">
         {DAYS.map((day) => {
           const tasks = milestones.get(day) ?? [];
           const lead =
@@ -180,6 +181,9 @@ export function CheckInTrack({
             tasks[0];
           const done = day <= count;
           const isNext = !checkedInToday && day === count + 1;
+          // Today's slot: the one to fill, or the one today's check-in filled.
+          const isToday = isNext || (checkedInToday && day === count);
+          const big = day === 7;
           const claimable = Boolean(lead && isClaimable(lead));
           const waiting = Boolean(lead && !claimable && isWaitingOnTopUp(lead));
           const claimed = Boolean(lead && tasks.every((t) => t.claimed));
@@ -188,6 +192,17 @@ export function CheckInTrack({
 
           const face = (
             <>
+              {/* Painted first, so the day's art, tick and ticket count sit
+                  over it. */}
+              {big && (
+                <Image
+                  src="/images/ice/gift.webp"
+                  alt=""
+                  width={128}
+                  height={128}
+                  className="pointer-events-none absolute -right-3 -bottom-6 h-auto w-[78%] max-w-24 select-none sm:-right-4"
+                />
+              )}
               {(lead || done) && (
                 <span
                   className={cn(
@@ -203,18 +218,27 @@ export function CheckInTrack({
                   reward={lead.reward}
                   claimed={claimed}
                   compact
-                  className="h-[72%] w-[88%] rounded-md border-0 bg-transparent"
+                  className={cn(
+                    'rounded-md border-0 bg-transparent',
+                    // Day 7 lifts its prize clear of the gift in its corner.
+                    big
+                      ? 'mt-[12%] h-[52%] w-[62%] self-start'
+                      : 'h-[72%] w-[88%]',
+                  )}
                 />
               ) : done ? (
-                <Check className="h-4 w-4 text-white" aria-hidden />
+                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-neutral-50 text-neutral-950">
+                  <Check className="h-4 w-4" strokeWidth={3} aria-hidden />
+                </span>
               ) : (
                 // A slot with no prize still reads as a day to fill: its
-                // numeral, set large in Nekst, lit when it is the next one.
+                // numeral, set large in Nekst, lit when it is today's.
                 <span
                   aria-hidden
                   className={cn(
-                    'font-heading text-lg tabular-nums sm:text-3xl',
-                    isNext ? 'text-white' : 'text-neutral-700',
+                    'font-heading relative text-lg tabular-nums sm:text-3xl',
+                    big && 'self-start pt-2 sm:pt-3',
+                    isToday ? 'text-neutral-50' : 'text-neutral-500',
                   )}
                 >
                   {day}
@@ -223,7 +247,7 @@ export function CheckInTrack({
               {done && lead && (
                 <span
                   className={cn(
-                    'absolute right-1 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-white text-neutral-950',
+                    'absolute right-1 flex h-4 w-4 items-center justify-center rounded-full bg-neutral-50 text-neutral-950',
                     // Clears the ticket count, which hangs off the bottom edge.
                     ticketCount ? 'bottom-2.5' : 'bottom-1',
                   )}
@@ -259,11 +283,13 @@ export function CheckInTrack({
           );
 
           const tile = cn(
-            'relative flex aspect-[5/7] w-full items-center justify-center rounded-lg border transition-transform',
+            'relative flex w-full items-center justify-center rounded-xl border transition-transform',
+            // Day 7 is wider at the same 5:7, so it stands taller too.
+            big ? 'aspect-[6/7]' : 'aspect-[5/7]',
             done
-              ? 'border-white/20 bg-white/[0.09]'
-              : 'border-white/10 bg-neutral-950',
-            isNext && 'border-white/60',
+              ? 'border-white/20 bg-neutral-700'
+              : 'border-white/10 bg-neutral-800',
+            isToday && 'border-glacier border-2',
             claimable && 'claim-ring border-transparent bg-chase/[0.08]',
           );
 
@@ -307,9 +333,10 @@ export function CheckInTrack({
         })}
       </ol>
 
+      {/* pr clears the gift hanging under day 7. */}
       <p
         className={cn(
-          'mt-3 text-xs',
+          'mt-4 pr-[22%] text-xs leading-relaxed sm:text-sm',
           line.ready ? 'text-chase font-semibold' : 'text-neutral-400',
         )}
       >
@@ -318,9 +345,11 @@ export function CheckInTrack({
 
       {showBar && unlock && <TopUpBar unlock={unlock} onTopUp={onTopUp} />}
 
+      {/* The screen's one glacier button. */}
       <Pill
-        className="mt-3 w-full"
-        variant={checkedInToday ? 'secondary' : 'primary'}
+        className="mt-4 w-full"
+        size="lg"
+        variant={checkedInToday ? 'secondary' : 'glacier'}
         disabled={checkedInToday || checkingIn || count >= 7}
         onClick={onCheckIn}
       >

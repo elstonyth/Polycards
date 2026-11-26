@@ -1,12 +1,21 @@
 import type { Metadata } from 'next';
 import LeaderboardClient from './LeaderboardClient';
-import { WeeklyChallenge, ChallengeRules } from './WeeklyChallenge';
+import {
+  ChallengeHead,
+  ChallengeRules,
+  CommunityGoal,
+  WeeklyChallenge,
+} from './WeeklyChallenge';
 import { getLeaderboard, getOwnWeekly } from '@/lib/data/leaderboard';
 import { getChallenge } from '@/lib/data/challenge';
 import { getOwnProfileHandle } from '@/lib/data/profiles';
 import { getAvatarFrames } from '@/lib/data/avatar-frames';
 import { PAGE_COLUMN, PageBody, PageTitle } from '@/components/ui/page-frame';
 import { cn } from '@/lib/utils';
+import {
+  REWARDS_SECTIONS,
+  SectionSwitch,
+} from '@/components/app-shell/SectionSwitch';
 
 // Live leaderboard + Weekly Pulled Value Challenge, aggregated from the gacha
 // Pull ledger. Fetched server-side (the storefront origin can reach the backend;
@@ -42,22 +51,30 @@ export default async function LeaderboardPage() {
 
   return (
     <>
+      <div className={cn(PAGE_COLUMN, 'pt-4 lg:hidden')}>
+        <SectionSwitch label="Rewards" items={REWARDS_SECTIONS} />
+      </div>
       {/* The page owns the h1 — the tab is "Ranks", and the page is both the
           challenge and the standings, neither of which can claim the other's
-          heading. Shown in the shared tab title style (page-frame.tsx), so
-          the challenge hero and LEADERBOARD below are h2s under it. */}
-      <header className={cn(PAGE_COLUMN, 'pt-6')}>
-        <PageTitle>RANKS</PageTitle>
+          heading; the challenge title and the standings are h2s under it.
+          Below lg the Tasks | Ranks switch above names the page, so the big
+          title shows from lg only. */}
+      <header className={cn(PAGE_COLUMN, 'lg:pt-6')}>
+        <PageTitle className="sr-only lg:not-sr-only">RANKS</PageTitle>
       </header>
       <PageBody>
-        {challenge && <WeeklyChallenge challenge={challenge} />}
+        {/* Challenge title, podium, community goal, then the other ranks;
+            the reward stages and summary follow the standings. */}
         <LeaderboardClient
           weekly={weekly}
           alltime={alltime}
           ownHandle={ownHandle}
           ownWeekly={ownWeekly}
           weeklyPrizes={challenge?.rankPrizes ?? []}
+          head={challenge && <ChallengeHead challenge={challenge} />}
+          goal={challenge?.pool && <CommunityGoal challenge={challenge} />}
         />
+        {challenge && <WeeklyChallenge challenge={challenge} />}
         {challenge && <ChallengeRules />}
       </PageBody>
       {/* Clearance so the fixed your-rank card never covers the last block. */}

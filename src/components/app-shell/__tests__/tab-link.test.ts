@@ -294,7 +294,7 @@ describe('TabLink: feedback', () => {
     status.pending = true;
     await render('Task');
     const face = container.querySelector('a > span');
-    expect(face?.className).toContain('text-neutral-50');
+    expect(face?.className).toContain('text-glacier');
     expect(face?.className).toContain('delay-100');
     // Lit, not active: aria-current stays with the page actually shown.
     expect(container.querySelector('a')?.getAttribute('aria-current')).toBe(

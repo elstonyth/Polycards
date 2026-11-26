@@ -414,6 +414,7 @@ export function BankAccountsClient({ realName }: { realName?: string | null }) {
 
           <div className="mt-4 flex gap-2">
             <Pill
+              variant="glacier"
               onClick={submitAdd}
               disabled={submitting || !formValid}
               size="lg"
@@ -440,6 +441,7 @@ export function BankAccountsClient({ realName }: { realName?: string | null }) {
             <div className="flex gap-2">
               {canAdd && (
                 <Pill
+                  variant="glacier"
                   onClick={() => setAdding(true)}
                   size="lg"
                   className="flex-1"

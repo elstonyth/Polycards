@@ -69,7 +69,8 @@ export default function StageInfo({
             <IntentLink
               href={packHref(pack.id, n)}
               tabIndex={-1}
-              className="outline-none hover:text-neutral-200"
+              // after: a short name ("151") is a 27x23 target on a phone.
+              className="relative outline-none after:absolute after:-inset-3 hover:text-neutral-200 lg:after:hidden"
             >
               {pack.name}
             </IntentLink>

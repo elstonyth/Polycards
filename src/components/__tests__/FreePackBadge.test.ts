@@ -83,8 +83,14 @@ describe('GlobalFreePackBadge', () => {
     expect(container.textContent).toBe('');
   });
 
-  test('/ (home hero owns it), /vault, /leaderboard, /slots/<slug> → no fetch, no render', async () => {
-    for (const p of ['/', '/vault', '/leaderboard', '/slots/some-pack']) {
+  test('/ (home hero owns it), /vault, /leaderboard, /me (one screen), /slots/<slug> → no fetch, no render', async () => {
+    for (const p of [
+      '/',
+      '/vault',
+      '/leaderboard',
+      '/me',
+      '/slots/some-pack',
+    ]) {
       pathname = p;
       fetchMock.mockReset();
       // A claim answer, so a stray fetch would visibly render the badge —

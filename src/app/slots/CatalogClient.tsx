@@ -635,15 +635,13 @@ export default function CatalogClient({
         </div>
 
         {/* Franchise switch — only once there are two to pick from. Not sticky:
-            the app header is sticky itself and would cover it. The switch is
-            the plate; this is its tray. */}
+            the app header is sticky itself and would cover it. */}
         {tabs.length > 1 && (
-          <div className="w-full shrink-0 rounded-full bg-white/[0.04] p-1.5 ring-1 ring-white/10 md:w-[26rem]">
+          <div className="shrink-0">
             <PackCategoryTabs
               categories={tabs}
               active={active}
               onChange={pick}
-              compact
             />
           </div>
         )}

@@ -7,6 +7,8 @@
 @custom-variant short (@media (max-height: 31.25rem));
 /* A short phone upright (SE-sized): every line of the first screen counts. */
 @custom-variant squat (@media (min-height: 31.26rem) and (max-height: 43.75rem) and (max-width: 39.99rem));
+/* Low and wide, below the desktop layout (a phone on its side, a fold): room for two columns, not for a stack. */
+@custom-variant flat (@media (max-height: 35rem) and (min-width: 33.75rem) and (max-width: 63.99rem));
 
 @theme inline {
   --color-background: var(--background);
@@ -29,6 +31,14 @@
      small sizes (#10834a = 4.81:1 vs white; the old #118c4f was 4.30:1). */
   --color-buyback: #10834a;
   --color-buyback-fg: #2fbf6e;
+  /* The action colour: the one main button on a screen, the lit tab, progress
+     and links. White on black since 2026-11-26 (the "Vercel" theme: no hue);
+     the names are from the blue it replaced. `glacier` is the fill and the
+     text/icon tone, `glacier-ink` the text on the fill. Coral is the
+     "something new" dot. */
+  --color-glacier: #fafafa;
+  --color-glacier-ink: #0a0a0a;
+  --color-coral: #ff6b5e;
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -95,6 +105,43 @@
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
+}
+
+/* ---- One ground (2026-11-26) ----
+   Every page sits on the same ink black (#0a0a0a) with Tailwind's stock
+   neutral greys: the "Vercel" theme, no hue anywhere in the surfaces. The 3D
+   stages (the home flow, the pack stages, the coin scene) mark themselves
+   with `data-ink`; the rules below skip them, since their art is tuned
+   against the stock greys and their scenes draw to the screen's foot. */
+:root:not(:has([data-ink])) {
+  /* Muted text: 4.7:1 on a raised panel (the stock #737373 reads 3.2:1). */
+  --color-neutral-500: #8f8f8f;
+}
+/* Page content fades out under the floating phone tab bar rather than running
+   behind it. */
+:root:not(:has([data-ink])) .tab-bar-fade::before {
+  content: '';
+  position: absolute;
+  inset: -1.5rem 0 0;
+  z-index: -1;
+  background: linear-gradient(to top, #0a0a0a 40%, transparent);
+}
+
+/* A focused control scrolls clear of the floating phone tab bar (56px pill,
+   8px gap, Home rising 10px). Not on the ink pages: Home's flow snaps. */
+@media (width < 64rem) {
+  :root:not(:has([data-ink])) {
+    scroll-padding-bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+/* The Vault's action bar floats over the grid at every width. */
+:root:has([data-vault-bar]) {
+  scroll-padding-bottom: calc(16rem + env(safe-area-inset-bottom, 0px));
+}
+
+/* The action fill. Flat since the blue gradient went; the name is from it. */
+@utility bg-glacier-grad {
+  background-color: var(--color-glacier);
 }
 
 /* ---- Motion tokens ---- */
@@ -583,6 +630,21 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* One keyboard focus ring for every control that sets none of its own: the
+     grey default measured 1.9:1 on the soft-black ground, 3:1 is the floor.
+     In the base layer, so a component's own ring utilities still win. */
+  :where(
+    a,
+    button,
+    input,
+    select,
+    textarea,
+    summary,
+    [tabindex]
+  ):focus-visible {
+    outline: 2px solid var(--color-glacier);
+    outline-offset: 2px;
+  }
   body {
     @apply bg-background text-foreground;
     /* Body copy: let the browser pull down orphaned last words. */
@@ -623,7 +685,7 @@
   .glass-panel {
     /* 55%: worst case is a sheet over a wall of bright slab art — 45% let
        too much luminance through for AA body text (review 2026-07-17). */
-    background-color: rgb(10 10 10 / 0.55);
+    background-color: rgb(var(--glass-rgb, 10 10 10) / 0.55);
     border-color: rgb(255 255 255 / 0.15);
     box-shadow:
       0 25px 60px -15px rgb(0 0 0 / 0.85),
@@ -637,14 +699,14 @@
   .glass-chrome {
     /* 82%: the lightest that keeps neutral-400 tab labels at 4.5:1 over a bright
        pack passing behind the bar. */
-    background-color: rgb(10 10 10 / 0.82);
+    background-color: rgb(var(--glass-rgb, 10 10 10) / 0.82);
     -webkit-backdrop-filter: blur(24px) saturate(1.5);
     backdrop-filter: blur(24px) saturate(1.5);
   }
 
   /* Full-screen overlay backdrops. */
   .glass-scrim {
-    background-color: rgb(10 10 10 / 0.8);
+    background-color: rgb(var(--glass-rgb, 10 10 10) / 0.8);
     -webkit-backdrop-filter: blur(24px);
     backdrop-filter: blur(24px);
   }
@@ -670,7 +732,7 @@
     .glass-panel,
     .glass-chrome,
     .glass-scrim {
-      background-color: rgb(10 10 10 / 0.94);
+      background-color: rgb(var(--glass-rgb, 10 10 10) / 0.94);
     }
   }
 
@@ -681,7 +743,7 @@
     .glass-panel,
     .glass-chrome,
     .glass-scrim {
-      background-color: rgb(10 10 10 / 0.94);
+      background-color: rgb(var(--glass-rgb, 10 10 10) / 0.94);
       -webkit-backdrop-filter: none;
       backdrop-filter: none;
     }

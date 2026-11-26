@@ -205,7 +205,7 @@ export function PrizeCard({
   const closed = nowMs != null && nowMs >= Date.parse(prize.draw_at);
   const notOpen = nowMs != null && nowMs < Date.parse(opensAt);
   return (
-    <li className="flex flex-col rounded-2xl border border-white/10 bg-neutral-900 p-4">
+    <li className="flex flex-col rounded-3xl border border-white/10 bg-neutral-900 p-4 sm:p-5">
       <div className="flex gap-4">
         {art && (
           <span className="relative aspect-[5/7] w-24 shrink-0 overflow-hidden rounded-xl border border-white/10 bg-white/[0.04] p-1.5 sm:w-28">
@@ -290,6 +290,7 @@ export function PrizeCard({
           </p>
         ) : (
           <Pill
+            variant="glacier"
             size="lg"
             className="w-full"
             disabled={balance <= 0 || notOpen}

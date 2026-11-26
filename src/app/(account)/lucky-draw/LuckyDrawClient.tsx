@@ -321,21 +321,22 @@ export function LuckyDrawClient({
 
   return (
     <div className="pool-wide">
-      {/* Title and balance over the tabs on a phone; one row where there is room
-          across or no room down. */}
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-4 squat:-mt-3 squat:gap-y-2 short:-mt-3 lg:gap-x-6">
-        <div className="min-w-0">
-          <PageTitle className="whitespace-nowrap short:text-xl">
+      {/* Below lg the Section switch above names the page: the title is for
+          screen readers only, and the tabs share a row with the ticket count. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-4 squat:gap-y-2 lg:gap-x-6 lg:squat:-mt-3 lg:short:-mt-3">
+        {/* contents below lg: an empty box would still take a gap in the row. */}
+        <div className="contents lg:block lg:min-w-0">
+          <PageTitle className="sr-only whitespace-nowrap short:text-xl lg:not-sr-only">
             LUCKY DRAW
           </PageTitle>
           {view === 'per_prize' && event && (
-            <p className="mt-1 text-sm text-neutral-400">
+            <p className="w-full text-sm text-neutral-400 lg:mt-1">
               {event.name} · until {mytDate(event.ends_at)}
             </p>
           )}
         </div>
         {page && (
-          <p className="flex shrink-0 items-center gap-1.5 rounded-full bg-neutral-800 py-2 pr-3.5 pl-3 text-sm font-semibold text-white short:order-last lg:order-last">
+          <p className="order-last flex min-h-11 shrink-0 items-center gap-1.5 rounded-full bg-neutral-800 py-2 pr-3.5 pl-3 text-sm font-semibold text-white squat:min-h-10 short:min-h-9">
             <TicketArt width={26} className="-my-1" />
             <span className="tabular-nums">{num(balance)}</span>
             <span className="sr-only">tickets</span>
@@ -344,7 +345,7 @@ export function LuckyDrawClient({
         <div
           role="group"
           aria-label="Lucky Draw sections"
-          className="grid w-full grid-cols-3 gap-1 rounded-full border border-white/10 bg-neutral-900 p-1 short:w-[clamp(15rem,40vw,20rem)] lg:w-[26rem]"
+          className="grid min-w-0 flex-1 grid-cols-3 gap-1 rounded-full border border-white/10 bg-neutral-900 p-1 short:w-[clamp(15rem,40vw,20rem)] short:flex-none lg:w-[26rem] lg:flex-none"
         >
           {TABS.map(({ key, label }) => (
             <button
@@ -355,7 +356,7 @@ export function LuckyDrawClient({
               className={cn(
                 'flex min-h-11 items-center justify-center rounded-full px-2 text-[13px] font-semibold whitespace-nowrap transition-colors outline-none focus-visible:ring-2 focus-visible:ring-white/40 squat:min-h-10 short:min-h-9 max-[340px]:px-1 max-[340px]:text-xs sm:text-sm',
                 tab === key
-                  ? 'bg-neutral-50 text-neutral-950'
+                  ? 'bg-neutral-700 text-white'
                   : 'text-neutral-400 hover:text-white',
               )}
             >

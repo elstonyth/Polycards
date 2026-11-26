@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Clock } from 'lucide-react';
 // Pure module, NOT '@/lib/data/challenge' — importing the data layer here
 // would ship the Medusa SDK and zod to every visitor of this route.
 import { formatResetLeft, resetMsLeft } from '@/lib/reset-countdown';
@@ -79,7 +80,8 @@ export function ResetCountdown({
   }, [resetAt, router]);
 
   return (
-    <p className="mt-3 text-xs font-medium tracking-wide text-neutral-400 uppercase">
+    <p className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-neutral-800 px-3 py-1.5 text-xs font-medium text-neutral-400">
+      <Clock className="h-3.5 w-3.5 shrink-0" aria-hidden />
       {left === null ? (
         label
       ) : (

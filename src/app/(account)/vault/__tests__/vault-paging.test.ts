@@ -219,7 +219,7 @@ describe('Lucky Draw tickets row', () => {
 
   test('holding tickets: count, hint, and Use into the intro', async () => {
     await mount(3);
-    expect(container.textContent).toContain('Lucky Draw Tickets ×3');
+    expect(container.textContent).toContain('3 Lucky Draw tickets');
     expect(container.textContent).toContain('Put them in the prize pool');
     expect(link('Use')?.getAttribute('href')).toBe('/lucky-draw?open=1');
   });
@@ -254,12 +254,12 @@ describe('Lucky Draw tickets row', () => {
 
   test('a large balance is grouped like the Lucky Draw page shows it', async () => {
     await mount(1250);
-    expect(container.textContent).toContain('Lucky Draw Tickets ×1,250');
+    expect(container.textContent).toContain('1,250 Lucky Draw tickets');
   });
 
   test('none yet: points at the tasks, and Use still opens the pool', async () => {
     await mount(0);
-    expect(container.textContent).toContain('Lucky Draw Tickets ×0');
+    expect(container.textContent).toContain('0 Lucky Draw tickets');
     expect(container.textContent).toContain('Earn tickets from tasks');
     expect(link('Get tickets')?.getAttribute('href')).toBe('/task');
     // No tickets to open: no intro.

@@ -45,7 +45,7 @@ export type EnterTarget = Pick<
 >;
 
 const stepBtn =
-  'flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-neutral-800 text-white transition-colors outline-none hover:bg-neutral-700 focus-visible:ring-2 focus-visible:ring-white/40 disabled:opacity-40';
+  'flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-neutral-800 text-white transition-colors outline-none hover:bg-neutral-700 focus-visible:ring-2 focus-visible:ring-white/40 disabled:opacity-40';
 
 /**
  * Pick how many tickets go on one prize (spec §5), or into a one-winner event's
@@ -131,7 +131,7 @@ export function EnterSheet({
         aria-busy={pending}
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className="glass-panel max-h-[90dvh] w-full overflow-y-auto rounded-t-2xl border p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] outline-none short:py-3 sm:max-w-md sm:rounded-2xl short:sm:max-w-3xl"
+        className="glass-panel max-h-[90dvh] w-full overflow-y-auto rounded-t-3xl border p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] outline-none short:py-3 sm:max-w-md sm:rounded-3xl short:sm:max-w-3xl"
       >
         <div className="flex items-start gap-3">
           {!pot && (
@@ -252,7 +252,7 @@ export function EnterSheet({
                 disabled={pending || max === 0}
                 onChange={(e) => setRaw(e.target.value)}
                 onBlur={() => setAmount(amount)}
-                className="font-heading h-12 min-w-0 flex-1 rounded-xl bg-neutral-800 px-3 text-center text-xl text-white tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+                className="font-heading h-14 min-w-0 flex-1 [appearance:textfield] rounded-xl bg-transparent px-2 text-center text-4xl text-white tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-white/40 short:h-12 short:text-3xl [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
               />
               <button
                 type="button"
@@ -318,6 +318,7 @@ export function EnterSheet({
                 </div>
               )}
               <Pill
+                variant="glacier"
                 size="lg"
                 className="w-full"
                 disabled={pending || !valid || closed}

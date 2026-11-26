@@ -1,6 +1,7 @@
 import {
   CircleUserRound,
   Gamepad2,
+  Gift,
   Home,
   ListChecks,
   Ticket,
@@ -49,6 +50,8 @@ export type Tab = {
   gated?: boolean;
   /** Opens a picker sheet instead of navigating (`href` is only its home). */
   opens?: 'games';
+  /** The phone bar's centre tab: a round button that rises out of the bar. */
+  raised?: boolean;
 };
 
 /** The seven app destinations (operator 2026-10-25 added Games; 2026-10-30
@@ -90,6 +93,46 @@ export const TABS: Tab[] = [
     ],
   },
 ];
+
+const tabAt = (href: string): Tab => {
+  const tab = TABS.find((t) => t.href === href);
+  if (!tab) throw new Error(`no tab at ${href}`);
+  return tab;
+};
+
+/**
+ * The phone bar: five tabs for the same seven destinations (2026-11-26; a
+ * phone fits five, and seven left 55px a tab). Tasks and Ranks share Rewards,
+ * Lucky Draw and Coin Flip share Play; each of those pages carries a
+ * SectionSwitch to its partner. The desktop header keeps all seven (TABS).
+ * Play keeps Draw's href, so the "new gate" dot and the visitor gate follow.
+ */
+export const PHONE_TABS: Tab[] = [
+  { label: 'Rewards', href: '/task', icon: Gift, match: ['/leaderboard'] },
+  {
+    label: 'Play',
+    href: '/lucky-draw',
+    icon: Gamepad2,
+    gated: true,
+    match: ['/coin-flip', '/vault/coin-flip'],
+  },
+  { ...tabAt('/'), raised: true },
+  tabAt('/vault'),
+  tabAt('/me'),
+];
+
+/**
+ * Where a nav's lit-tab marker sits: the lit tab's place in `tabs`, or -1 when
+ * none is lit or the lit one is the raised centre tab, which lights itself.
+ */
+export function markerIndex(
+  tabs: Tab[],
+  pathname: string,
+  homeFlow = false,
+): number {
+  const i = tabs.findIndex((t) => isTabActive(t, pathname, homeFlow));
+  return tabs[i]?.raised ? -1 : i;
+}
 
 export function isTabActive(
   tab: Tab,

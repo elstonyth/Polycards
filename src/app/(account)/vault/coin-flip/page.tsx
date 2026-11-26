@@ -1,6 +1,10 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import { COIN_FLIP_OPEN } from '@/components/app-shell/games';
+import {
+  PLAY_SECTIONS,
+  SectionSwitch,
+} from '@/components/app-shell/SectionSwitch';
 import { getCustomer } from '@/lib/data/customer';
 import { getVault } from '@/lib/actions/vault';
 import { getCoinFlipSettings } from '@/lib/actions/coin-flip';
@@ -26,14 +30,19 @@ export default async function CoinFlipPage({
   ]);
   if (!customer) redirect('/?auth=login');
   return (
-    <CoinFlipClient
-      key={customer.id}
-      customerId={customer.id}
-      initialVault={vault}
-      initialSettings={settings}
-      initialPullId={params.pull}
-      initialTickets={tickets}
-      initialStake={params.stake === 'tickets' ? 'tickets' : 'cards'}
-    />
+    <>
+      {/* The coin scene is drawn against ink black (globals.css, `data-ink`). */}
+      <span data-ink hidden />
+      <SectionSwitch label="Play" items={PLAY_SECTIONS} className="mb-4" />
+      <CoinFlipClient
+        key={customer.id}
+        customerId={customer.id}
+        initialVault={vault}
+        initialSettings={settings}
+        initialPullId={params.pull}
+        initialTickets={tickets}
+        initialStake={params.stake === 'tickets' ? 'tickets' : 'cards'}
+      />
+    </>
   );
 }

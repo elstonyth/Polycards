@@ -591,7 +591,10 @@ export default function WithdrawForm({
               </p>
               <Link
                 href="/bank"
-                className={cn(pillVariants({ size: 'lg' }), 'mt-4 w-full')}
+                className={cn(
+                  pillVariants({ variant: 'glacier', size: 'lg' }),
+                  'mt-4 w-full',
+                )}
               >
                 Add a bank account
               </Link>
@@ -728,6 +731,7 @@ export default function WithdrawForm({
           {errorAlert}
 
           <Pill
+            variant="glacier"
             onClick={submit}
             disabled={submitting || !formValid || withdrawalsClosed || blocked}
             size="lg"

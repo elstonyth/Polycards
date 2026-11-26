@@ -10,12 +10,16 @@ import { cn } from '@/lib/utils';
  * element directly: `<Link className={cn(pillVariants({ variant }), extra)} />`.
  */
 const PILL_BASE =
-  'inline-flex shrink-0 items-center justify-center gap-2 rounded-full text-sm font-semibold whitespace-nowrap outline-none select-none transition-[background-color,color,transform] active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-950 disabled:pointer-events-none motion-reduce:transition-[background-color,color] motion-reduce:active:scale-100';
+  'inline-flex shrink-0 items-center justify-center gap-2 rounded-full text-sm font-semibold whitespace-nowrap outline-none select-none transition-[background-color,color,transform] active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-glacier focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-950 disabled:pointer-events-none motion-reduce:transition-[background-color,color] motion-reduce:active:scale-100';
 
 const PILL_VARIANT = {
+  // The one main action on a screen (Top Up, Check in, Enter). Never two.
+  glacier:
+    'bg-glacier-grad text-glacier-ink hover:bg-white disabled:opacity-40',
   primary: 'bg-neutral-50 text-neutral-950 hover:bg-white disabled:opacity-40',
+  // The hairline is the button's edge: the fill alone stands 1.1:1 off a panel.
   secondary:
-    'bg-neutral-800 text-white hover:bg-neutral-700 disabled:opacity-50',
+    'border border-white/10 bg-neutral-800 text-white hover:bg-neutral-700 disabled:opacity-50',
   ghost:
     'border border-white/10 bg-white/5 text-neutral-200 hover:bg-white/10 disabled:opacity-50',
 } as const;

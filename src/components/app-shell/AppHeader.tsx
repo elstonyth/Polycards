@@ -1,8 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { LogIn, Plus, Volume2, VolumeX } from 'lucide-react';
-import { useSound } from '@/lib/use-sound';
+import { LogIn, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { rm } from '@/lib/format';
 import { useCountedValue } from '@/lib/use-counted-value';
@@ -13,8 +12,9 @@ import { openAuth } from '@/components/AuthButton';
 import { useAuth } from '@/components/auth/AuthProvider';
 import NotificationBell from '@/components/NotificationBell';
 import { Pill } from '@/components/ui/pill';
+import { SoundMenu } from './SoundMenu';
 import { useTopUp } from './TopUpProvider';
-import { TabLink } from './TabLink';
+import { TabLink, TabMarker } from './TabLink';
 import { TABS, homeTapTaken } from './tabs';
 
 /**
@@ -24,7 +24,6 @@ import { TABS, homeTapTaken } from './tabs';
  */
 export default function AppHeader() {
   const { customer, isLoading } = useAuth();
-  const { muted, toggleMuted } = useSound();
   const { balance, openTopUp } = useTopUp();
   // A pack open or a sell-back moves this number; counting to the new figure
   // (and tinting money-in green for a beat) is what tells the customer the
@@ -44,7 +43,7 @@ export default function AppHeader() {
         <div className="flex min-w-0 items-center gap-5 max-lg:-m-1 max-lg:overflow-hidden max-lg:p-1">
           <Link
             href="/"
-            className="flex min-h-11 shrink-0 items-center"
+            className="flex min-h-11 min-w-11 shrink-0 items-center"
             aria-label="Polycards home"
             onClick={(e) => {
               const modified =
@@ -68,11 +67,26 @@ export default function AppHeader() {
             <PolycardsLogo className="hidden h-7 w-auto shrink-0 text-white min-[430px]:block lg:h-8" />
           </Link>
 
-          {/* Desktop nav — same seven destinations as the mobile tab bar. */}
+          {/* Desktop nav — all seven destinations, as equal columns of one
+              pill so the marker can step a column at a time. */}
           <nav
             aria-label="Primary"
-            className="hidden items-center gap-0.5 lg:flex"
+            className="relative hidden auto-cols-fr grid-flow-col rounded-full border border-white/10 bg-white/[0.04] p-1 shadow-[inset_0_1px_0_rgb(255_255_255/0.06)] lg:grid"
           >
+            {/* The page you are on: a raised pill with a glacier lamp on the
+                nav's top edge (4px padding and a 1px border each = the 6px it
+                rises by), its light falling onto the pill. The 7 is
+                TABS.length. */}
+            <TabMarker
+              tabs={TABS}
+              className="inset-y-1 left-1 w-[calc((100%-0.5rem)/7)] bg-white/[0.07] shadow-[inset_0_1px_0_rgb(255_255_255/0.1)]"
+            >
+              <span className="absolute -top-[6px] left-1/2 h-1 w-8 -translate-x-1/2 rounded-t-full bg-glacier">
+                <span className="absolute -top-2 -left-2 h-6 w-12 rounded-full bg-glacier/20 blur-md" />
+                <span className="absolute -top-1 h-6 w-8 rounded-full bg-glacier/20 blur-md" />
+                <span className="absolute top-0 left-2 h-4 w-4 rounded-full bg-glacier/20 blur-sm" />
+              </span>
+            </TabMarker>
             {TABS.map((tab) => (
               <TabLink key={tab.href} tab={tab} variant="pill" />
             ))}
@@ -80,20 +94,7 @@ export default function AppHeader() {
         </div>
 
         <div className="flex shrink-0 items-center gap-1 min-[375px]:gap-2">
-          <Pill
-            variant="ghost"
-            className="w-11 px-0"
-            aria-label={muted ? 'Unmute sound' : 'Mute sound'}
-            aria-pressed={muted}
-            title={muted ? 'Unmute sound' : 'Mute sound'}
-            onClick={toggleMuted}
-          >
-            {muted ? (
-              <VolumeX className="h-4 w-4" aria-hidden />
-            ) : (
-              <Volume2 className="h-4 w-4" aria-hidden />
-            )}
-          </Pill>
+          <SoundMenu />
           {customer ? (
             <>
               <NotificationBell />
@@ -146,7 +147,12 @@ export default function AppHeader() {
                 <LogIn className="h-4 w-4" aria-hidden />
                 Login
               </Pill>
-              <Pill size="md" onClick={() => openAuth('signup')}>
+              {/* A visitor's one main action, on every page. */}
+              <Pill
+                variant="glacier"
+                size="md"
+                onClick={() => openAuth('signup')}
+              >
                 Join
               </Pill>
             </>

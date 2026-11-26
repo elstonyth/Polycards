@@ -960,12 +960,12 @@ export function CoinFlipClient({
                       <div className="relative grid grid-cols-2 rounded-full border border-white/10 bg-neutral-950 p-1">
                         <span
                           aria-hidden
-                          className={`absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-full bg-neutral-50 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${call === 'tail' ? 'translate-x-full' : ''}`}
+                          className={`absolute inset-y-1 left-1 w-[calc(50%-0.25rem)] rounded-full bg-neutral-700 transition-transform duration-300 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${call === 'tail' ? 'translate-x-full' : ''}`}
                         />
                         {(['head', 'tail'] as const).map((side) => (
                           <label
                             key={side}
-                            className={`relative flex h-14 cursor-pointer items-center justify-center gap-2.5 rounded-full text-sm font-semibold transition-colors has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-white ${call === side ? 'text-neutral-950' : 'text-neutral-300 hover:text-white'}`}
+                            className={`relative flex h-14 cursor-pointer items-center justify-center gap-2.5 rounded-full text-sm font-semibold transition-colors has-focus-visible:outline-2 has-focus-visible:outline-offset-2 has-focus-visible:outline-white ${call === side ? 'text-white' : 'text-neutral-300 hover:text-white'}`}
                           >
                             <input
                               type="radio"

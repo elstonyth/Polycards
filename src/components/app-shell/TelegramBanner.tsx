@@ -73,7 +73,9 @@ export function TelegramBanner() {
     pathname === '/vault' ||
     pathname.startsWith('/vault/') ||
     pathname === '/leaderboard' ||
-    pathname === '/lucky-draw'
+    pathname === '/lucky-draw' ||
+    // one screen with its own dock and corners: the rail would sit on its shortcuts
+    pathname === '/me'
   ) {
     return null;
   }

@@ -45,7 +45,7 @@ function Figure({
 }) {
   return (
     <div className="min-w-0">
-      <dt className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
+      <dt className="text-[10px] font-semibold uppercase tracking-[0.08em] text-neutral-400">
         {label}
       </dt>
       <dd
@@ -80,11 +80,11 @@ export default async function PullHistoryPage({
       />
       <VaultTabs current="/vault/history" />
       {!res.ok ? (
-        <p className="rounded-xl border border-white/10 bg-white/[0.03] p-4 text-sm text-white/60">
+        <p className="rounded-3xl border border-white/10 bg-neutral-900 p-4 text-sm text-neutral-400">
           {res.error}
         </p>
       ) : res.items.length === 0 ? (
-        <div className="rounded-2xl border border-white/10 bg-neutral-900 px-6 py-12 text-center">
+        <div className="rounded-3xl border border-white/10 bg-neutral-900 px-6 py-12 text-center">
           <p className="text-sm font-semibold text-white">
             {res.page > 1 ? 'Nothing on this page.' : 'No pulls yet.'}
           </p>
@@ -102,7 +102,7 @@ export default async function PullHistoryPage({
             return (
               <li
                 key={p.pullId}
-                className="flex gap-3 rounded-2xl border border-white/10 bg-neutral-900 p-3"
+                className="flex gap-3 rounded-3xl border border-white/10 bg-neutral-900 p-3 sm:p-4"
               >
                 {p.card.handle ? (
                   <Link

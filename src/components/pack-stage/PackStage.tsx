@@ -371,34 +371,28 @@ export default function PackStage({
               Open packs. Pull real cards.
             </h1>
             {(tabs.length > 1 || (anyChips && !empty)) && (
-              // The pill and, hanging from it, the sorting control's own 24 px
-              // row (in the gap the pill always had above the packs, so the
-              // stage sits where it did before). Above the tiles: the control's
-              // panel draws over the stage and never moves it.
+              // One slim bar: the franchise tabs, then the sorting button.
+              // Above the tiles: the sorting's list drops from this box, draws
+              // over the stage and never moves it.
               <div
                 data-stage-head=""
-                className={cn(styles.pillWrap, 'relative z-30 w-full max-w-xl')}
+                className="relative z-30 flex w-full max-w-xl justify-center"
               >
-                {tabs.length > 1 && (
-                  <PackCategoryTabs
-                    categories={tabs}
-                    active={target}
-                    onChange={pickTab}
-                  />
-                )}
-                {anyChips && !empty && (
-                  <div className="flex h-6 justify-center">
-                    {chipCat && (
-                      <StageChips
-                        category={chipCat}
-                        filter={chipFilter}
-                        label={filterLabel(chipCat, chipFilter)}
-                        off={!chipsOn}
-                        onPick={pickRowFilter}
-                      />
-                    )}
-                  </div>
-                )}
+                <PackCategoryTabs
+                  categories={tabs}
+                  active={target}
+                  onChange={pickTab}
+                >
+                  {anyChips && !empty && chipCat && (
+                    <StageChips
+                      category={chipCat}
+                      filter={chipFilter}
+                      label={filterLabel(chipCat, chipFilter)}
+                      off={!chipsOn}
+                      onPick={pickRowFilter}
+                    />
+                  )}
+                </PackCategoryTabs>
               </div>
             )}
           </div>
@@ -410,12 +404,7 @@ export default function PackStage({
             </p>
           ) : (
             <>
-              <div
-                className={cn(
-                  'relative',
-                  anyChips ? 'lg:mt-1' : 'mt-6 lg:mt-8',
-                )}
-              >
+              <div className="relative mt-4 lg:mt-6">
                 {categories.map((c, ci) => {
                   const tabName = tabs.find((t) => t.id === c.id)?.tab ?? c.id;
                   const isVisible = c.id === visible;

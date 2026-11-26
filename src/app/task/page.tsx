@@ -2,6 +2,12 @@ import type { Metadata } from 'next';
 import { getTaskHub } from '@/lib/actions/tasks';
 import { getAuthToken, getCustomerSession } from '@/lib/data/customer';
 import { TaskHubClient } from './TaskHubClient';
+import {
+  REWARDS_SECTIONS,
+  SectionSwitch,
+} from '@/components/app-shell/SectionSwitch';
+import { PAGE_COLUMN } from '@/components/ui/page-frame';
+import { cn } from '@/lib/utils';
 
 export const metadata: Metadata = {
   title: 'Task',
@@ -26,5 +32,12 @@ export default async function TaskPage() {
     getAuthToken(),
   ]);
   const isLoggedIn = customer !== null || (Boolean(token) && !stale);
-  return <TaskHubClient taskHub={taskHub} isLoggedIn={isLoggedIn} />;
+  return (
+    <>
+      <div className={cn(PAGE_COLUMN, 'pt-4 lg:hidden')}>
+        <SectionSwitch label="Rewards" items={REWARDS_SECTIONS} />
+      </div>
+      <TaskHubClient taskHub={taskHub} isLoggedIn={isLoggedIn} />
+    </>
+  );
 }

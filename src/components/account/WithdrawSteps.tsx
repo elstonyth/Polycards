@@ -40,9 +40,13 @@ export function WithdrawSteps({
   available,
   bonus,
   remaining,
+  topUpButton = true,
   id,
   className,
 }: {
+  /** False where the page's own Top Up sits beside these steps (Me, Wallet):
+   *  the same action twice in two looks reads as two different things. */
+  topUpButton?: boolean;
   hasTopup: boolean;
   depositMinRm: number;
   available: number;
@@ -68,7 +72,7 @@ export function WithdrawSteps({
                   From{' '}
                   <span className="whitespace-nowrap">{rm0(depositMinRm)}</span>
                 </p>
-                <TopUpButton size="sm" className="mt-2" />
+                {topUpButton && <TopUpButton size="sm" className="mt-2" />}
               </>
             )}
           </div>

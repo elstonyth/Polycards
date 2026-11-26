@@ -414,7 +414,11 @@ function EditAddressModal({
           >
             Cancel
           </button>
-          <Pill disabled={busy || adding || !selectedAddr} onClick={submit}>
+          <Pill
+            variant="glacier"
+            disabled={busy || adding || !selectedAddr}
+            onClick={submit}
+          >
             {busy ? 'Saving…' : 'Save address'}
           </Pill>
         </div>

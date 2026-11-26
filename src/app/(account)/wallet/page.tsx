@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { unstable_rethrow } from 'next/navigation';
-import { AccountHeader, Panel } from '@/components/account/ui';
+import { AccountHeader } from '@/components/account/ui';
 import { WithdrawLink } from '@/components/account/WithdrawLink';
 import {
   MoneyRows,
@@ -15,6 +15,7 @@ import { pillVariants } from '@/components/ui/pill';
 import { sen, walletSplit } from '@/lib/wallet-split';
 import { rm } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { GlacierTopUpButton } from '../me/MeActions';
 
 export const metadata: Metadata = { title: 'Wallet' };
 
@@ -22,6 +23,9 @@ export const metadata: Metadata = { title: 'Wallet' };
 const Rm = ({ n }: { n: number }) => (
   <span className="whitespace-nowrap">{rm(n)}</span>
 );
+
+// The redesign's panel (the Me page's own).
+const PANEL = 'rounded-3xl border border-white/10 bg-neutral-900 p-4 sm:p-5';
 
 const QUIET_LINK =
   'inline-flex min-h-11 items-center text-[13px] font-semibold text-white/70 underline-offset-2 hover:text-white hover:underline';
@@ -73,26 +77,31 @@ export default async function WalletPage() {
       {/* 424 never-topped-up accounts held RM 22.4k on 2026-10-14 and found
           out only on the withdraw page. Say it here, before they try. */}
       {cantYet && (
-        <Panel className="mb-4">
+        <section className={cn(PANEL, 'mb-4')}>
           <h2 className="font-heading text-lg font-bold text-white">
             Unlock withdrawals
           </h2>
           <WithdrawSteps
             className="mt-4"
+            topUpButton={false}
             hasTopup={w.hasTopup}
             depositMinRm={limits.deposit.minRm}
             available={w.available}
             bonus={w.bonus}
             remaining={w.playthrough.remaining}
           />
-        </Panel>
+        </section>
       )}
 
       {/* ---- Money: Balance = Withdrawable + later + For packs ------------- */}
-      <Panel className="mb-4">
+      <section
+        className={cn(PANEL, 'relative mb-4 overflow-hidden pb-5 sm:pb-6')}
+      >
         <h2 className="sr-only">Your money</h2>
-        <p className="text-sm text-neutral-400">Balance</p>
-        <p className="mt-1 font-heading text-3xl font-bold tabular-nums whitespace-nowrap text-white sm:text-4xl">
+        <p className="text-[11px] font-semibold tracking-[0.08em] text-neutral-400 uppercase">
+          Balance
+        </p>
+        <p className="mt-1.5 font-heading text-[2.25rem] leading-none font-bold tabular-nums whitespace-nowrap text-white sm:text-[2.75rem]">
           {rm(w.balance)}
         </p>
         {/* Frozen reads available 0: a split of nothing under the real
@@ -107,22 +116,28 @@ export default async function WalletPage() {
             Held while your account is under review.
           </p>
         )}
-        <div className="mt-4 flex flex-wrap items-center gap-x-5">
-          {canWithdraw ? (
+        <div className="mt-5 flex gap-2">
+          <GlacierTopUpButton className="flex-1 px-4" />
+          {canWithdraw && (
             <WithdrawLink
-              className={cn(pillVariants({ variant: 'secondary', size: 'sm' }))}
+              className={cn(
+                pillVariants({ variant: 'secondary' }),
+                'flex-1 px-4',
+              )}
             >
               Withdraw
             </WithdrawLink>
-          ) : (
+          )}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-x-5">
+          {!canWithdraw &&
             // Payout status lives on the withdraw page, locked or not.
             w.hasTopup &&
             !w.isFrozen && (
               <Link href="/bank-withdrawal" className={QUIET_LINK}>
                 Withdrawals &amp; payout status&nbsp;<span aria-hidden>→</span>
               </Link>
-            )
-          )}
+            )}
           {!w.isFrozen && split.forPacks > 0 && (
             <Link href="/transactions" className={QUIET_LINK}>
               See where your for-packs money came from&nbsp;
@@ -130,10 +145,10 @@ export default async function WalletPage() {
             </Link>
           )}
         </div>
-      </Panel>
+      </section>
 
       {/* ---- How it works (explainer sits last — numbers first) ------------- */}
-      <Panel>
+      <section className={PANEL}>
         <h2 className="font-heading text-lg font-bold text-white">
           How withdrawals work
         </h2>
@@ -173,7 +188,7 @@ export default async function WalletPage() {
           withdrawable balance and a saved bank account; processing status
           appears on the withdrawal page.
         </p>
-      </Panel>
+      </section>
     </>
   );
 }

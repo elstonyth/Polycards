@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils';
 // title text exactly where the page puts it (same component, same wrappers,
 // not animated); only the blocks under it fade in, after 150ms.
 //
-// Sizes come from the pages themselves: VaultTabs, VaultClient's stat strip,
+// Sizes come from the pages themselves: VaultTabs, VaultClient's summary card,
 // tickets row, search and slab tile; vault/history's rows; LuckyDrawClient's
 // title row; MeHeader and me/page.tsx's cards; CoinFlipClient's header and
 // stage. Optional blocks (the Vault gifts row, Me's showcase, a draw's event
@@ -83,36 +83,31 @@ export function VaultSkeleton() {
       <HeaderSkeleton title="Vault" />
       <SkeletonReveal>
         <div className={BONE.pulse}>
-          <div className={VAULT_TABS} />
-
-          {/* Stat strip: py-4, an 11px label over a 13/16/18px value. */}
-          <div className="grid h-[72px] grid-cols-3 divide-x divide-white/10 rounded-2xl border border-white/10 bg-neutral-900 sm:h-[77px] lg:h-[81px]">
-            {Array.from({ length: 3 }, (_, i) => (
-              <div
-                key={i}
-                className="flex flex-col items-center justify-center gap-1.5 px-2"
-              >
-                <div className={cn(BONE.line, 'h-3 w-14')} />
-                <div className={cn(BONE.bar, 'h-4 w-16')} />
-              </div>
-            ))}
+          {/* VaultClient's summary card: label, big value, cards line. */}
+          <div className="flex h-[116px] flex-col justify-center gap-2 rounded-3xl border border-white/10 bg-neutral-900 p-4 sm:h-[146px] sm:p-6">
+            <div className={cn(BONE.line, 'h-3 w-20')} />
+            <div className={cn(BONE.bar, 'h-8 w-32 sm:h-10')} />
+            <div className={cn(BONE.line, 'h-3 w-36')} />
           </div>
 
-          {/* Lucky Draw tickets row: buttons wrap under the art on a phone. */}
-          <div className={cn(BONE.panel, 'mt-4 h-[123px] sm:h-[71px]')} />
+          {/* VaultTabs under the summary, its mb-4 dropped there. */}
+          <div className={cn(VAULT_TABS, 'mt-4 mb-0')} />
+
+          {/* Slim Lucky Draw tickets row: buttons wrap under on a phone. */}
+          <div className={cn(BONE.panel, 'mt-3 h-[111px] sm:h-[62px]')} />
 
           {/* Search field */}
-          <div className="mt-4 h-11 rounded-xl bg-neutral-800" />
+          <div className="mt-3 h-12 rounded-2xl border border-white/10 bg-neutral-800" />
 
-          {/* Slab grid: 3-up, 4-up from lg; tile = slab + two text rows. */}
-          <div className="mt-5 grid grid-cols-3 gap-2 sm:gap-3 lg:grid-cols-4">
+          {/* Slab grid: 2-up, 3-up from sm, 4-up from lg. */}
+          <div className="mt-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4">
             {Array.from({ length: 6 }, (_, i) => (
               <div
                 key={i}
-                className="rounded-2xl border border-white/10 bg-neutral-900 p-2 sm:p-3"
+                className="rounded-3xl border border-white/10 bg-neutral-900 p-2.5 sm:p-3"
               >
                 <div className="aspect-[16/27] rounded-lg bg-white/[0.04]" />
-                <div className="mt-1.5 flex h-[1.9rem] items-start sm:mt-2 sm:h-[2.1rem]">
+                <div className="mt-2 flex h-[2.1rem] items-start sm:h-[2.3rem]">
                   <div className={cn(BONE.line, 'mt-1 h-3 w-4/5')} />
                 </div>
                 <div className={cn(BONE.line, 'mt-1 h-3 w-1/2')} />
@@ -215,48 +210,37 @@ export function LuckyDrawSkeleton() {
 
 export function MeSkeleton() {
   return (
-    <div className="flex flex-col gap-4">
-      <PageTitle as="p">Me</PageTitle>
+    // The Me page's own grid (me/page.tsx), the layout's column dropped
+    // through `data-screen`: the tier card, the balance card and the numbers
+    // land where the page puts them; from lg the first row's three panels.
+    <div
+      data-screen
+      className="mx-auto grid w-full max-w-2xl gap-3 px-fluid pb-[calc(6rem+env(safe-area-inset-bottom))] pt-3 flat:max-w-none flat:grid-cols-2 lg:max-w-[1440px] lg:grid-cols-3 lg:gap-5 lg:pb-10 lg:pt-8"
+    >
+      {/* Each grid item fades in on its own (a `contents` wrapper has no box
+          to animate). Tier card: 60px avatar, name, chips. */}
       <SkeletonReveal>
-        <div className={cn(BONE.pulse, 'flex flex-col gap-4')}>
-          {/* MeHeader: the 72px avatar beside the name (44px), pulls line
-              and the 44px handle chip. */}
-          <div className="flex items-center gap-4">
-            <div className="h-[72px] w-[72px] shrink-0 rounded-full bg-white/10" />
-            <div className="min-w-0">
-              <div className="flex h-11 items-center">
-                <div className={cn(BONE.bar, 'h-6 w-40')} />
-              </div>
-              <div className="mt-1 flex h-5 items-center">
-                <div className={cn(BONE.line, 'h-3 w-16')} />
-              </div>
-              <div className="mt-1.5 h-11 w-28 rounded-full border border-white/10 bg-white/5" />
-            </div>
-          </div>
-
-          {/* Level card: LV, the bar, its two labels, the next-level line. */}
-          <div className={cn(BONE.panel, 'h-[105px]')} />
-
-          {/* Balance bar */}
-          <div className={cn(BONE.panel, 'h-[86px]')} />
-
-          {/* Quick access: label, then 3x3 tiles. */}
-          <div className="rounded-2xl border border-white/10 bg-neutral-900 p-5">
-            <div className="flex h-[18px] items-center">
-              <div className={cn(BONE.line, 'h-3 w-24')} />
-            </div>
-            <div className="mt-4 grid grid-cols-3 gap-y-5">
-              {Array.from({ length: 9 }, (_, i) => (
-                <div key={i} className="flex flex-col items-center gap-1.5">
-                  <div className="h-11 w-11 rounded-2xl bg-neutral-800" />
-                  <div className="flex h-[16.5px] items-center">
-                    <div className={cn(BONE.line, 'h-2.5 w-12')} />
-                  </div>
-                </div>
-              ))}
-            </div>
+        <div
+          className={cn(
+            BONE.pulse,
+            BONE.panel,
+            'flex min-h-[184px] items-start gap-3 rounded-3xl p-4 squat:min-h-[168px] sm:p-5 lg:min-h-[260px]',
+          )}
+        >
+          <div className="h-[60px] w-[60px] shrink-0 rounded-full bg-white/10" />
+          <div className="min-w-0 flex-1 pt-1.5">
+            <div className={cn(BONE.bar, 'h-[22px] w-36 max-w-full')} />
+            <div className="mt-2 h-7 w-28 rounded-full bg-white/5" />
           </div>
         </div>
+      </SkeletonReveal>
+      {/* Balance card */}
+      <SkeletonReveal>
+        <div className={cn(BONE.pulse, BONE.panel, 'h-[196px] rounded-3xl')} />
+      </SkeletonReveal>
+      {/* Key numbers */}
+      <SkeletonReveal className="lg:col-start-1 lg:row-start-2">
+        <div className={cn(BONE.pulse, BONE.panel, 'h-[68px] rounded-3xl')} />
       </SkeletonReveal>
     </div>
   );

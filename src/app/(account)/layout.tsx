@@ -63,7 +63,9 @@ export default async function AccountLayout({
     realName === null && !(await getAccountInfo()).policy.verificationExempt;
 
   return (
-    <div className="mx-auto w-full max-w-2xl px-fluid py-6 lg:max-w-4xl">
+    // A page that is one whole screen (Me: `data-screen` on its root) takes the
+    // full width and lays out its own edges.
+    <div className="mx-auto w-full max-w-2xl px-fluid py-6 has-[[data-screen]]:max-w-none has-[[data-screen]]:p-0 lg:max-w-4xl">
       {children}
       {gatePhone && <PhoneOnboardingModal />}
       {gateRealName && (

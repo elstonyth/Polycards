@@ -146,7 +146,7 @@ function SharePanel({ code }: { code: string }) {
           />
         </div>
       </div>
-      <Pill className="mt-3 w-full" onClick={share}>
+      <Pill variant="glacier" className="mt-3 w-full" onClick={share}>
         <Share2 className="h-4 w-4" aria-hidden />
         Share
       </Pill>

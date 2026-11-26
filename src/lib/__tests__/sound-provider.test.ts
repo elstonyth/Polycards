@@ -49,6 +49,7 @@ const audio = vi.hoisted(() => {
 
 vi.mock('@/lib/slot-sfx', () => ({
   sharedAudioContext: () => audio.context,
+  outputBus: () => audio.context.destination,
   playSfx: audio.sfx,
   setSfxMuted: audio.setMuted,
 }));
@@ -123,7 +124,13 @@ it('shares balanced public music, preserves complete reveal cues across navigati
   await gesture();
   const music = audio.sources.filter((source) => source.loop);
   expect(music).toHaveLength(1); // StrictMode cannot create duplicate loops.
-  expect(audio.gains[0]?.gain.value).toBe(0.25);
+  // the music eases in from silence to a level well under the effects'
+  expect(audio.gains[0]?.gain.value).toBe(0);
+  expect(audio.gains[0]?.gain.setTargetAtTime).toHaveBeenLastCalledWith(
+    0.08,
+    0,
+    0.7,
+  );
   expect(revealSound(['Common', 'Legendary', 'Rare'])).toBe('Legendary');
   expect(revealSound(['unknown'])).toBe('Common');
   await act(async () => sound.playReveal(['Legendary']));
@@ -135,7 +142,7 @@ it('shares balanced public music, preserves complete reveal cues across navigati
   ).toBe(true);
   expect(audio.gains.at(-1)?.gain.value).toBeLessThanOrEqual(0.22);
   expect(audio.gains[0]?.gain.setTargetAtTime).toHaveBeenLastCalledWith(
-    expect.closeTo(0.0875),
+    expect.closeTo(0.028),
     0,
     0.15,
   );
@@ -149,6 +156,76 @@ it('shares balanced public music, preserves complete reveal cues across navigati
   expect(music[0]?.stop).toHaveBeenCalledOnce();
   expect(audio.setMuted).toHaveBeenLastCalledWith(true);
   expect(localStorage.getItem('polycards.slot.muted')).toBe('1');
+  expect(localStorage.getItem('polycards.music.off')).toBe('1');
+  expect(sound.muted).toBe(true);
+});
+
+it('switches the music and the sounds apart', async () => {
+  await render();
+  await gesture();
+  const music = audio.sources.find((source) => source.loop)!;
+  await act(async () => sound.playReveal(['Rare']));
+  const fanfare = audio.sources.at(-1)!;
+  // music off: the fanfare plays on, and sounds still start
+  await act(async () => sound.toggleMusic());
+  expect(music.stop).toHaveBeenCalledOnce();
+  expect(fanfare.stop).not.toHaveBeenCalled();
+  expect(sound.muted).toBe(false);
+  await act(async () => sound.toggleMusic());
+  const again = audio.sources.filter((source) => source.loop).at(-1)!;
+  expect(again).not.toBe(music);
+  // sounds off: the fanfare is cut, the music plays on and gets its level back
+  await act(async () => sound.toggleSounds());
+  expect(fanfare.stop).toHaveBeenCalledOnce();
+  expect(again.stop).not.toHaveBeenCalled();
+  expect(audio.setMuted).toHaveBeenLastCalledWith(true);
+  const before = audio.sources.length;
+  await act(async () => sound.play('tap'));
+  expect(audio.sources).toHaveLength(before);
+  expect(localStorage.getItem('polycards.slot.muted')).toBe('1');
+  expect(localStorage.getItem('polycards.music.off')).toBe('0');
+});
+
+it('keeps the music on at the next visit when only Sounds was switched off', async () => {
+  await render();
+  await gesture();
+  await act(async () => sound.toggleSounds());
+  act(() => root.unmount()); // the next page load
+  audio.sources.length = 0;
+  root = createRoot(container);
+  await render();
+  await gesture();
+  expect(sound.soundsOff).toBe(true);
+  expect(sound.musicOff).toBe(false);
+  expect(audio.sources.filter((source) => source.loop)).toHaveLength(1);
+});
+
+it('gives back the mix it found when the one mute button is pressed twice', async () => {
+  await render();
+  await gesture();
+  await act(async () => sound.toggleSounds()); // music on, sounds off
+  await act(async () => sound.toggleMuted());
+  expect(sound.muted).toBe(true);
+  await act(async () => sound.toggleMuted());
+  expect(sound.musicOff).toBe(false);
+  expect(sound.soundsOff).toBe(true);
+  // from all off (a visitor muted before the two switches): everything comes on
+  await act(async () => sound.toggleMusic());
+  expect(sound.muted).toBe(true);
+  await act(async () => sound.toggleMuted());
+  expect(sound.musicOff).toBe(false);
+  expect(sound.soundsOff).toBe(false);
+});
+
+it('evens the fanfares out', async () => {
+  await render();
+  await gesture();
+  // the Common file is mastered loudest: its trim keeps it under an Immortal
+  await act(async () => sound.playReveal(['Common']));
+  const common = audio.gains.at(-1)!.gain.value;
+  await act(async () => sound.playReveal(['Immortal']));
+  expect(common).toBeCloseTo(0.22 * 0.5 * 0.74);
+  expect(audio.gains.at(-1)!.gain.value).toBeCloseTo(0.22 * 0.76);
 });
 
 it('honors saved mute before loading music and cancels a reveal that finishes loading after mute', async () => {

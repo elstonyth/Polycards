@@ -15,7 +15,14 @@ const CUES = {
 };
 
 export function AudioPreview() {
-  const { muted, toggleMuted, playReveal, sfx, play } = useSound();
+  const {
+    muted: allOff,
+    soundsOff: muted,
+    toggleMuted,
+    playReveal,
+    sfx,
+    play,
+  } = useSound();
   return (
     <section className="px-fluid mx-auto max-w-2xl py-10">
       <p className="mb-3 text-sm text-neutral-400">Local audio preview</p>
@@ -29,7 +36,7 @@ export function AudioPreview() {
       </p>
       <div className="my-6 flex flex-wrap gap-3">
         <Pill variant="secondary" onClick={toggleMuted}>
-          {muted ? 'Enable audio' : 'Mute audio'}
+          {allOff ? 'Enable audio' : 'Mute audio'}
         </Pill>
         <Pill variant="ghost" onClick={() => sfx('reelTick')} disabled={muted}>
           Reel tick

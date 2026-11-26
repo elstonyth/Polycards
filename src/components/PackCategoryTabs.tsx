@@ -1,87 +1,99 @@
+import type { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 import CategoryIcon, { isPolyIcon } from '@/components/CategoryIcon';
 import type { PackTab } from '@/lib/packs-data';
 
 /**
- * The franchise switch over a pack list (home shelf, /slots): the leaderboard's
- * segmented pill (DESIGN.md "Tier tabs", selected = Paper White on Ink), sized
- * up because the franchise is the first choice a player makes. A few tabs
- * stretch to share the row; more than fit scroll sideways. A `soon` tab shows
- * "Coming soon" and can't be picked (packTabs).
+ * The franchise switch over a pack list (home stage and shelf, /slots, the
+ * pack page): expanding tabs (owner, 2026-11-26; it was a full-width segmented
+ * pill, "too bulky"). Every franchise is its icon in a slim bar; the picked
+ * one opens into a grey pill with its name. A `soon` tab is dimmed, says
+ * "soon" and can't be picked (packTabs). The bar is as wide as its tabs; more
+ * than fit scroll sideways.
  *
- * `compact` is the pack page's panel: the same switch at 44px, where it is one
- * step of a configurator and not the head of a page.
+ * `children` sit in the same bar after the tabs (the home stage's sorting).
  */
 export default function PackCategoryTabs({
   categories,
   active,
   onChange,
-  compact = false,
+  children,
 }: {
   categories: PackTab[];
   active: string;
   onChange: (id: string) => void;
-  compact?: boolean;
+  children?: ReactNode;
 }) {
   return (
-    <div
-      role="group"
-      aria-label="Pack categories"
-      className="flex gap-1 overflow-x-auto rounded-full border border-white/10 bg-neutral-900 p-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-    >
-      {categories.map((c) => {
-        const on = c.id === active;
-        return (
-          <button
-            key={c.id}
-            type="button"
-            disabled={c.soon}
-            onClick={() => onChange(c.id)}
-            aria-pressed={on}
-            className={cn(
-              'flex flex-1 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-full px-2 text-sm font-semibold transition-colors sm:gap-2',
-              compact
-                ? 'min-h-11 sm:px-3'
-                : 'min-h-12 sm:px-5 lg:min-h-14 lg:text-base',
-              'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
-              on
-                ? 'bg-neutral-50 text-neutral-950'
-                : c.soon
-                  ? 'cursor-not-allowed text-neutral-500'
-                  : 'text-neutral-400 hover:text-white',
-            )}
-          >
-            <CategoryIcon
-              src={c.icon}
-              size={28}
-              className={cn(
-                'h-5 w-5 shrink-0',
-                !compact && 'sm:h-6 sm:w-6 lg:h-7 lg:w-7',
-                // The narrowest phones can't fit three icons and "Coming soon".
-                c.soon && 'hidden opacity-50 grayscale-[0.4] min-[360px]:block',
-                // Our mark takes the text colour: idle grey would read as
-                // "Coming soon" beside the full-colour franchise icons.
-                isPolyIcon(c.icon) && !on && !c.soon && 'text-white',
-              )}
-            />
-            {c.soon ? (
-              <span className="flex flex-col items-start leading-tight">
-                {c.tab}
-                <span
+    <div className="flex w-fit max-w-full items-center overflow-x-auto rounded-full border border-white/10 bg-neutral-900 p-1 shadow-[inset_0_1px_0_rgb(255_255_255/0.06)] [-ms-overflow-style:none] [scrollbar-width:none] empty:hidden [&::-webkit-scrollbar]:hidden">
+      {categories.length > 1 && (
+        <div
+          role="group"
+          aria-label="Pack categories"
+          className="flex items-center gap-0.5"
+        >
+          {categories.map((c) => {
+            const on = c.id === active;
+            return (
+              <button
+                key={c.id}
+                type="button"
+                disabled={c.soon}
+                onClick={() => onChange(c.id)}
+                aria-pressed={on}
+                className={cn(
+                  'relative flex h-9 shrink-0 items-center rounded-full px-2 text-sm font-semibold whitespace-nowrap transition-colors duration-200 motion-reduce:transition-none',
+                  // 36 px tall: the tap target reaches the bar's edges (44 px).
+                  "before:absolute before:inset-x-0 before:-inset-y-1 before:content-['']",
+                  'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
+                  on
+                    ? 'bg-neutral-700 text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.12)]'
+                    : c.soon
+                      ? 'cursor-not-allowed text-neutral-500'
+                      : 'text-neutral-400 hover:bg-white/[0.06] hover:text-white',
+                )}
+              >
+                <CategoryIcon
+                  src={c.icon}
+                  size={20}
                   className={cn(
-                    'text-[10px] font-medium',
-                    !compact && 'lg:text-[11px]',
+                    'h-5 w-5 shrink-0',
+                    c.soon && 'opacity-50 grayscale-[0.4]',
+                    // Our mark takes the text colour: idle grey would read as
+                    // "soon" beside the full-colour franchise icons.
+                    isPolyIcon(c.icon) && !on && !c.soon && 'text-white',
                   )}
-                >
-                  Coming soon
-                </span>
-              </span>
-            ) : (
-              c.tab
-            )}
-          </button>
-        );
-      })}
+                />
+                {c.soon ? (
+                  <>
+                    <span className="sr-only">{c.tab}</span>
+                    {/* The narrowest phones keep only the dimmed icon. */}
+                    <span className="pr-1 pl-1.5 text-[10px] font-medium tracking-wide uppercase max-[359px]:sr-only">
+                      <span className="sr-only">Coming </span>soon
+                    </span>
+                  </>
+                ) : (
+                  // The name unfolds: a grid column from 0fr to 1fr animates
+                  // to the text's own width.
+                  <span
+                    className={cn(
+                      'grid transition-[grid-template-columns,opacity] duration-300 ease-(--ease-out-quart) motion-reduce:transition-none',
+                      on
+                        ? 'grid-cols-[1fr] opacity-100'
+                        : 'grid-cols-[0fr] opacity-0',
+                    )}
+                  >
+                    <span className="min-w-0 overflow-hidden">
+                      <span className="block px-1.5">{c.tab}</span>
+                    </span>
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {children}
     </div>
   );
 }

@@ -27,7 +27,7 @@ export function VaultTabs({
             'flex min-h-11 items-center justify-center rounded-full px-2 text-[13px] font-semibold transition-colors sm:text-sm',
             'outline-none focus-visible:ring-2 focus-visible:ring-white/40',
             t.href === current
-              ? 'bg-neutral-50 text-neutral-950'
+              ? 'bg-neutral-700 text-white'
               : 'text-neutral-400 hover:text-white',
           )}
         >

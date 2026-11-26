@@ -51,68 +51,80 @@ export function VaultActionBar({
   // that the tap registered. Snaps under reduced motion.
   const { value: countedSellTotal } = useCountedValue(sellTotal);
   return (
-    <div className="fixed inset-x-4 bottom-24 z-40 mx-auto max-w-md rounded-2xl border border-white/10 bg-neutral-900 p-4 shadow-[0_8px_32px_rgba(0,0,0,0.6)] lg:bottom-8">
-      <button
-        type="button"
-        onClick={onToggleSelectAll}
-        disabled={visibleCount === 0}
-        aria-pressed={allVisibleSelected}
-        className="flex items-center gap-2 text-[13px] font-semibold text-white disabled:opacity-50"
-      >
-        <span
-          aria-hidden
-          className={cn(
-            'flex h-5 w-5 items-center justify-center rounded-full border text-[11px] font-bold',
-            allVisibleSelected
-              ? 'border-white bg-neutral-50 text-neutral-950'
-              : 'border-white/40 text-transparent',
-          )}
+    // Floats above the phone tab bar: its 56px pill + max(safe area, 8px)
+    // below it, and the centre Home button rising 10px over the pill, plus a
+    // 12px gap = 78px over the inset.
+    <div
+      // globals.css: a focused card scrolls clear of this bar.
+      data-vault-bar
+      className="fixed inset-x-3 bottom-[calc(max(env(safe-area-inset-bottom),0.5rem)+4.875rem)] z-40 mx-auto max-w-md rounded-3xl border border-white/10 bg-neutral-900 p-3 shadow-[0_12px_32px_-12px_rgb(0_0_0/0.9)] sm:p-4 lg:bottom-8"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[13px] font-semibold text-white">
+          {selectedCount} selected
+        </p>
+        <button
+          type="button"
+          onClick={onToggleSelectAll}
+          disabled={visibleCount === 0}
+          aria-pressed={allVisibleSelected}
+          className="-my-2 flex min-h-11 items-center gap-2 rounded-full px-1 text-[12px] font-semibold text-neutral-400 outline-none hover:text-white focus-visible:ring-2 focus-visible:ring-white/40 disabled:opacity-50"
         >
-          ✓
-        </span>
-        Select All
-        <span className="font-normal text-neutral-400">
-          · {selectedCount} selected
-        </span>
-      </button>
-      <div className="mt-2 flex items-end justify-between gap-3">
+          <span
+            aria-hidden
+            className={cn(
+              'flex h-5 w-5 items-center justify-center rounded-full border text-[11px] font-bold',
+              allVisibleSelected
+                ? 'border-glacier bg-glacier text-glacier-ink'
+                : 'border-white/40 text-transparent',
+            )}
+          >
+            ✓
+          </span>
+          Select All
+        </button>
+      </div>
+      <div className="mt-2 flex flex-wrap items-end justify-between gap-x-3 gap-y-2">
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400">
             {/* Idle (0 selected) shows real zeroes like the Show Go reference;
                 the dash is reserved for a selection whose MYR price is unknown. */}
             FMV {none ? rm(0) : fmv > 0 ? rm(fmv) : '—'}
           </p>
-          <p className="text-[15px] font-bold tabular-nums text-buyback-fg">
+          <p className="font-heading whitespace-nowrap text-lg leading-tight tabular-nums text-neutral-50">
             {/* Always the counted figure. An earlier version rendered a hard 0
                 while nothing was selected, which desynced the hook: the count
                 kept running toward zero behind a static 0, so picking a card
                 mid-animation jumped the display to whatever intermediate the
                 hook had reached. Deselecting now counts down to RM 0.00 in the
                 same beat the Sell pill greys out. */}
-            Sell for {rm(countedSellTotal ?? sellTotal)}
+            <span className="text-[12px] font-semibold text-neutral-400">
+              Sell for{' '}
+            </span>
+            {rm(countedSellTotal ?? sellTotal)}
           </p>
         </div>
-        <div className="flex shrink-0 gap-2">
+        <div className="ml-auto flex shrink-0 gap-2">
           <Pill
             variant="secondary"
             size="sm"
             onClick={onDeliver}
             disabled={none || busy}
           >
-            {withCount('Deliver')}
+            {withCount('Ship')}
           </Pill>
           <Pill
+            variant="glacier"
             size="sm"
             onClick={onSell}
             disabled={noneSellable || busy || !quotesFirm}
-            className="bg-buyback text-white hover:bg-buyback/90 disabled:opacity-50"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
             {busy
               ? 'Selling…'
               : noneSellable
-                ? 'Sell'
-                : `Sell ${sellableCount}`}
+                ? 'Sell back'
+                : `Sell back ${sellableCount}`}
           </Pill>
         </div>
       </div>

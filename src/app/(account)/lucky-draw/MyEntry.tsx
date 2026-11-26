@@ -66,8 +66,8 @@ export function MyEntry({ held }: { held: ReadonlySet<string> }) {
   if (mine === null) {
     return (
       <div aria-hidden className="space-y-2">
-        <div className="h-24 animate-pulse rounded-2xl bg-neutral-900 motion-reduce:animate-none" />
-        <div className="h-16 animate-pulse rounded-2xl bg-neutral-900 motion-reduce:animate-none" />
+        <div className="h-24 animate-pulse rounded-3xl bg-neutral-900 motion-reduce:animate-none" />
+        <div className="h-16 animate-pulse rounded-3xl bg-neutral-900 motion-reduce:animate-none" />
       </div>
     );
   }
@@ -91,7 +91,7 @@ export function MyEntry({ held }: { held: ReadonlySet<string> }) {
             return (
               <li
                 key={e.prize_id}
-                className="flex items-center gap-3 rounded-2xl border border-white/10 bg-neutral-900 p-3"
+                className="flex items-center gap-3 rounded-3xl border border-white/10 bg-neutral-900 p-3"
               >
                 <span className="relative aspect-[5/7] w-10 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] p-0.5">
                   <span className="relative block h-full w-full">
@@ -136,7 +136,7 @@ export function MyEntry({ held }: { held: ReadonlySet<string> }) {
           No tickets yet — tasks pay them out when you claim.
         </p>
       ) : (
-        <ul className="overflow-hidden rounded-2xl border border-white/10 bg-neutral-900">
+        <ul className="overflow-hidden rounded-3xl border border-white/10 bg-neutral-900">
           {mine.history.map((h, i) => (
             <li
               key={i}

@@ -48,10 +48,11 @@ function RankNumeral({ rank }: { rank: (typeof RANKS)[number] }) {
 // progress) falls to the muted locked surface. Icon/badge rendering below stays
 // inline — each state renders a structurally different element, so a map there
 // would obscure more than it collapses.
+// The stage the pool is climbing toward is the current item: glacier outline.
 const STAGE_SURFACE: Record<ChallengeStageState, string> = {
-  active: 'border-chase/60 bg-chase/[0.06]',
-  complete: 'border-white/15 bg-white/[0.04]',
-  locked: 'border-white/5 bg-white/[0.02]',
+  active: 'border-glacier bg-neutral-900',
+  complete: 'border-white/15 bg-neutral-900',
+  locked: 'border-white/10 bg-neutral-900/60',
 };
 
 function StageCard({
@@ -79,7 +80,7 @@ function StageCard({
       className={cn(
         // Width comes from the rail item (--slab-w on the wrapper below) so
         // the prize grid scales with the phone instead of clamping at 300px.
-        'mx-auto flex w-full flex-col rounded-2xl border p-4 sm:p-5',
+        'mx-auto flex w-full flex-col rounded-3xl border p-4 sm:p-5',
         STAGE_SURFACE[stage.state ?? 'locked'],
       )}
     >
@@ -121,7 +122,7 @@ function StageCard({
         {podium.map((r) => (
           <div
             key={r.rank}
-            className="flex flex-col rounded-xl border border-white/5 bg-white/[0.04] p-2.5"
+            className="flex flex-col rounded-2xl border border-white/5 bg-neutral-800 p-2.5"
           >
             <RankNumeral rank={RANKS[r.rank - 1]!} />
             {/* Halo scaled right down — at this size the full 44px glow is
@@ -143,7 +144,7 @@ function StageCard({
           type="button"
           onClick={() => setSheetOpen(true)}
           aria-label={`View rewards for ranks 4 to 10 of stage ${stage.stageNumber}`}
-          className="flex flex-col rounded-xl border border-white/5 bg-white/[0.04] p-2.5 text-left transition-colors hover:border-white/15 hover:bg-white/[0.07] focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:outline-none"
+          className="flex flex-col rounded-2xl border border-white/5 bg-neutral-800 p-2.5 text-left transition-colors hover:border-white/15 hover:bg-neutral-700 focus-visible:ring-2 focus-visible:ring-white/40 focus-visible:outline-none"
         >
           {/* Solid chase gold, matching RankNumeral. */}
           <span className="font-heading text-2xl italic leading-none text-chase">
@@ -180,7 +181,7 @@ function StageCard({
         <div className="mt-4">
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
             <div
-              className="bg-chase h-full rounded-full"
+              className="bg-glacier-grad h-full rounded-full"
               style={{ width: `${pct}%` }}
             />
           </div>
@@ -253,8 +254,9 @@ export function StageCarousel({
             onClick={() => setIndex(i)}
             className={cn(
               'flex min-h-11 min-w-11 items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-bold transition-colors',
+              // The selected segment is the house grey pill.
               i === index
-                ? 'bg-chase text-neutral-950'
+                ? 'bg-neutral-700 text-white'
                 : s.state === 'complete'
                   ? 'text-chase bg-neutral-800 hover:bg-neutral-700'
                   : 'bg-neutral-900 text-white/60 hover:text-white/80',

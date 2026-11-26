@@ -52,7 +52,7 @@ export function ResultsList({
         {[0, 1, 2].map((i) => (
           <li
             key={i}
-            className="h-20 animate-pulse rounded-2xl bg-neutral-900 motion-reduce:animate-none"
+            className="h-20 animate-pulse rounded-3xl bg-neutral-900 motion-reduce:animate-none"
           />
         ))}
       </ul>
@@ -60,7 +60,7 @@ export function ResultsList({
   }
   if (loaded.rows.length === 0) {
     return (
-      <p className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-6 text-center text-sm text-neutral-400">
+      <p className="rounded-3xl border border-white/10 bg-neutral-900 px-4 py-6 text-center text-sm text-neutral-400">
         No draws yet — results show here after each draw.
       </p>
     );
@@ -96,7 +96,7 @@ export function ResultsList({
                       ? onOpenEvent(eventId, title)
                       : onOpen(r.prize_id)
                 }
-                className="flex w-full items-center gap-3 rounded-2xl border border-white/10 bg-neutral-900 p-3 text-left transition-colors outline-none hover:bg-neutral-800 focus-visible:ring-2 focus-visible:ring-white/40"
+                className="flex w-full items-center gap-3 rounded-3xl border border-white/10 bg-neutral-900 p-3 text-left transition-colors outline-none hover:bg-neutral-800 focus-visible:ring-2 focus-visible:ring-white/40"
               >
                 <span className="relative aspect-[5/7] w-11 shrink-0 overflow-hidden rounded-lg border border-white/10 bg-white/[0.04] p-0.5">
                   <span className="relative block h-full w-full">

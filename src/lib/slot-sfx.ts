@@ -56,12 +56,38 @@ function audio(): AudioContext | null {
   }
 }
 
+let output: AudioNode | null = null;
+/**
+ * Where everything ends up, music and sounds alike: a limiter in front of the
+ * speakers. It leaves single sounds alone and only holds down a pile-up (a
+ * fanfare, a roar and the music at once) that would otherwise jump out.
+ */
+export function outputBus(ac: AudioContext): AudioNode {
+  if (!output) {
+    const limiter = ac.createDynamicsCompressor();
+    limiter.threshold.value = -10;
+    limiter.knee.value = 6;
+    limiter.ratio.value = 12;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.25;
+    // A compressor adds make-up gain of its own for its settings: x1.647
+    // (+4.3 dB) for these, measured in Chromium with a quiet tone. Taken back
+    // out here, or every sound on the site would leave louder than it came in.
+    // shortcut: one engine's figure, re-measure if the settings above change
+    const unity = ac.createGain();
+    unity.gain.value = 1 / 1.647;
+    limiter.connect(unity).connect(ac.destination);
+    output = limiter;
+  }
+  return output;
+}
+
 /** The shared effects bus every cue plays through (muted by setSfxMuted). */
 function bus(ac: AudioContext): GainNode {
   if (!effectsGain) {
     effectsGain = ac.createGain();
-    effectsGain.gain.value = 0.22;
-    effectsGain.connect(ac.destination);
+    effectsGain.gain.value = effectsMuted ? 0 : 0.22;
+    effectsGain.connect(outputBus(ac));
   }
   return effectsGain;
 }

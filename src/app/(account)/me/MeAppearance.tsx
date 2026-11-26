@@ -1,42 +1,45 @@
 'use client';
 
 import { useState } from 'react';
+import Image from 'next/image';
 import { Check, Copy, Pencil } from 'lucide-react';
 import { FramedAvatar } from '@/components/FramedAvatar';
-import { num } from '@/lib/format';
 import { EditProfileModal } from './EditProfileModal';
 import { useEquippedFrame } from './equipped-frame';
 
+const CHIP =
+  'relative inline-flex h-8 max-w-full items-center gap-1.5 rounded-full border border-white/10 bg-neutral-800 px-2 text-[12px] font-medium text-neutral-300 transition-colors after:absolute after:-inset-y-1.5 after:inset-x-0 hover:text-white';
+
 /**
- * Me-page header: framed avatar, name, pull stats, and a copyable @handle chip
- * — the Show "Me" header adapted to Polycards data.
+ * The Me page's profile row (top of the tier card): the framed avatar, the
+ * name, a copyable @handle chip and an Edit chip.
  *
- * Tapping the avatar OR the name opens the Edit Profile modal, which owns the
- * photo (crop → upload), catalog avatar, username and frame controls. Photo and
- * frames used to
- * be a photo-only shortcut here plus a separate frames card lower on the page;
- * the operator asked for the Show layout where both live behind the name
- * (2026-07-19), and the username joined them on 2026-10-03.
+ * Tapping the avatar, the name OR Edit opens the Edit Profile modal, which
+ * owns the photo (crop → upload), catalog avatar, username and frame controls.
+ * Photo and frames used to be a photo-only shortcut here plus a separate
+ * frames card lower on the page; the operator asked for the Show layout where
+ * both live behind the name (2026-07-19), and the username joined them on
+ * 2026-10-03. The Edit chip says the avatar and name can be tapped.
  */
 export function MeHeader({
   displayName,
   username,
   handle,
-  pulls,
   avatarUrl,
   frames,
   highestLevel,
+  vipBadge,
 }: {
   displayName: string;
   /** first_name alone — the editable part of displayName. */
   username: string;
   handle: string | null;
-  /** null = profile read unavailable — the stats row is hidden. */
-  pulls: number | null;
   avatarUrl: string | null;
   frames: Record<string, string>;
   /** null = the VIP read failed — the modal shows "couldn't load". */
   highestLevel: number | null;
+  /** The VIP badge beside the name (off when the VIP read failed). */
+  vipBadge: boolean;
 }) {
   const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -59,52 +62,56 @@ export function MeHeader({
   }
 
   return (
-    <section className="flex flex-col gap-3">
-      <div className="flex items-center gap-4">
-        <button
-          type="button"
-          onClick={() => setEditing(true)}
-          aria-label="Edit profile photo and frame"
-          className="group relative shrink-0 rounded-full outline-offset-4"
-        >
-          <FramedAvatar
-            src={shownAvatar}
-            initial={initial}
-            frameSrc={equippedFrameUrl}
-            animateLevel={equipped}
-            size={72}
-            priority
-          />
-          <span className="absolute -bottom-0.5 -right-0.5 flex h-6 w-6 items-center justify-center rounded-full border border-white/20 bg-neutral-800 text-white transition-colors group-hover:bg-neutral-700">
-            <Pencil className="h-3 w-3" aria-hidden />
-          </span>
-        </button>
-        <div className="min-w-0">
-          {/* Still the page's h1 — the name became a button, not a heading. */}
+    <div className="flex min-w-0 items-center gap-3">
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        aria-label="Edit profile photo and frame"
+        className="me-pop shrink-0 rounded-full outline-offset-4"
+      >
+        <FramedAvatar
+          src={shownAvatar}
+          initial={initial}
+          frameSrc={equippedFrameUrl}
+          animateLevel={equipped}
+          size={60}
+          priority
+          className={
+            equippedFrameUrl ? undefined : 'rounded-full ring-1 ring-white/10'
+          }
+        />
+      </button>
+
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2">
+          {/* The page's h1 — the name is a button inside it. */}
           <h1 className="min-w-0">
             <button
               type="button"
               onClick={() => setEditing(true)}
-              className="font-heading flex min-h-11 max-w-full items-center gap-1.5 truncate text-2xl text-white transition-colors hover:text-white/80"
+              // 44px to tap, pulled back in so the line keeps its height
+              className="-my-2 flex min-h-11 max-w-full items-center font-heading text-[1.375rem] leading-tight text-white transition-colors hover:text-white/80 lg:text-[1.625rem]"
             >
               <span className="truncate">{displayName}</span>
-              <Pencil
-                className="h-3.5 w-3.5 shrink-0 text-neutral-500"
-                aria-hidden
-              />
             </button>
           </h1>
-          {pulls !== null && (
-            <p className="mt-1 text-[13px] text-neutral-400">
-              <span className="font-semibold text-white">{num(pulls)}</span>{' '}
-              Pulls
-            </p>
+          {vipBadge && (
+            <Image
+              src="/images/app/vip-badge.webp"
+              alt=""
+              aria-hidden
+              width={761}
+              height={360}
+              className="h-5 w-auto shrink-0"
+            />
           )}
+        </div>
+        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-2">
           {handle && (
             <button
               type="button"
               onClick={() => void copyHandle()}
-              className="mt-1.5 inline-flex min-h-11 max-w-full items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[12px] font-semibold text-neutral-300 transition-colors hover:text-white"
+              className={CHIP}
             >
               <span className="truncate">@{handle}</span>
               {copied ? (
@@ -120,6 +127,14 @@ export function MeHeader({
               </span>
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className={CHIP}
+          >
+            <Pencil className="h-3 w-3" aria-hidden />
+            Edit
+          </button>
         </div>
       </div>
 
@@ -134,6 +149,6 @@ export function MeHeader({
         frames={frames}
         highestLevel={highestLevel}
       />
-    </section>
+    </div>
   );
 }
