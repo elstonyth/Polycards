@@ -89,7 +89,7 @@ const PANEL_STEP =
   'flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/[0.06] text-neutral-300 outline-none ring-1 ring-white/10 focus-visible:ring-2 focus-visible:ring-white/40 transition-[background-color,color,transform] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-white/10 hover:text-white active:scale-[0.96] disabled:pointer-events-none disabled:opacity-40 motion-reduce:transition-[background-color,color] motion-reduce:active:scale-100';
 
 const DOCK_STEP =
-  'flex h-11 w-11 items-center justify-center rounded-full text-neutral-300 outline-none focus-visible:ring-2 focus-visible:ring-white/40 transition-[color,transform] hover:text-white active:scale-[0.92] disabled:pointer-events-none disabled:opacity-40 motion-reduce:transition-colors motion-reduce:active:scale-100';
+  'flex h-11 w-9 items-center justify-center rounded-full text-neutral-300 outline-none max-[359px]:w-8 focus-visible:ring-2 focus-visible:ring-white/40 transition-[color,transform] hover:text-white active:scale-[0.92] disabled:pointer-events-none disabled:opacity-40 motion-reduce:transition-colors motion-reduce:active:scale-100';
 
 function BuyPanel({ m }: { m: PackBuyModel }) {
   const { showExplainer, showDemo, showQty, qty, maxQty, setQ, Noun } = m;
@@ -291,7 +291,7 @@ function DockStepper({ m }: { m: PackBuyModel }) {
   return (
     <div
       className={cn(
-        'h-11 shrink-0 items-center rounded-full bg-neutral-900',
+        'h-11 shrink-0 items-center rounded-full bg-neutral-800',
         m.isFreePack || m.soldOut ? 'hidden' : 'flex',
       )}
     >
@@ -304,7 +304,7 @@ function DockStepper({ m }: { m: PackBuyModel }) {
       >
         <Minus className="h-4 w-4" aria-hidden />
       </button>
-      <span className="w-5 text-center text-sm font-semibold tabular-nums text-white">
+      <span className="w-4 text-center text-sm font-semibold tabular-nums text-white">
         {m.qty}
       </span>
       <button
@@ -342,33 +342,37 @@ function DockOpen({ m, className }: { m: PackBuyModel; className: string }) {
 }
 
 /**
- * The phone's buy dock: docked flush onto the tab bar as ONE bottom chrome
- * unit (same ink surface, a single hairline seam). Total in Nekst left, quiet
- * capsule stepper, and one single-purpose white pill (the panel's own
- * quantity and footer are lg-only, so there is exactly one CTA per zone).
+ * The phone's buy bar: one slim pill floating over the tab dock, as the
+ * vault's does. Total in Nekst over the terms, a quiet capsule stepper, and
+ * one single-purpose white pill (the panel's own quantity and footer are
+ * lg-only, so there is exactly one CTA per zone). (Owner 2026-11-26: the
+ * full-width strip stood too tall once its pill took a second row.)
  */
 function BuyDock({ m }: { m: PackBuyModel }) {
   return (
     <div
       data-testid="pack-buy-dock"
-      className="fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 border-t border-white/10 bg-neutral-950 px-fluid py-2.5 lg:hidden"
+      // globals.css: the site footer ends above this bar.
+      data-buy-bar
+      className="fixed inset-x-3 bottom-[calc(max(env(safe-area-inset-bottom),0.5rem)+4.25rem)] z-40 mx-auto max-w-88 rounded-[1.75rem] border border-white/10 bg-neutral-900 p-1.5 shadow-[0_12px_32px_-12px_rgb(0_0_0/0.9)] lg:hidden"
     >
       {/* A price is never cut short: when it can't fit beside the stepper and
           the pill, the pill takes its own row. The 999 hands the spare width
           of a single row to this block, so the pill only grows once alone. */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="min-w-min flex-[999_1_0%]">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+        <div className="min-w-min flex-[999_1_0%] pl-2.5">
           {/* Free mode states the gift where the total normally sits: the
               slot must not go empty, or the pill drifts left. */}
-          <p className="whitespace-nowrap font-heading text-xl font-bold leading-none tracking-tight text-white tabular-nums">
+          <p className="whitespace-nowrap font-heading text-[clamp(0.8125rem,4.2vw,1.125rem)] font-bold leading-none tracking-tight text-white tabular-nums">
             {totalLine(m)}
           </p>
-          <p className="mt-1 text-xs leading-none text-neutral-400">
+          {/* w-0 min-w-full: the terms never widen the block, they are cut. */}
+          <p className="mt-1 w-0 min-w-full truncate text-[11px] leading-none text-neutral-400">
             {termsLine(m)}
           </p>
         </div>
         <DockStepper m={m} />
-        <DockOpen m={m} className="shrink-0 grow px-4" />
+        <DockOpen m={m} className="shrink-0 grow px-4 max-[359px]:px-3" />
       </div>
       <OpenError m={m} />
     </div>

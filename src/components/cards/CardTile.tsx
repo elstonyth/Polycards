@@ -99,7 +99,8 @@ export function CardTile({
             est.
           </span>
         </span>
-        <span className="relative order-2 block w-full px-1.5">
+        {/* data-tile-art: the homepage flow sizes the slab to its room. */}
+        <span data-tile-art="" className="relative order-2 block w-full px-1.5">
           <span className="relative block w-full">
             <SlabImage
               card={card}

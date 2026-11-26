@@ -16,7 +16,7 @@
   margin: auto;
 }
 
-/* a part of the layer that takes taps (the phone's buy dock) */
+/* a part of the layer that takes taps (the phone's buy bar) */
 .live {
   pointer-events: auto;
 }
@@ -202,8 +202,14 @@
   right: 58px;
 }
 
+/* The phone's buy bar floats over the foot of every stop but Closing:
+   --bar is its top, measured up from the panel's foot. */
+.over {
+  --bar: 70px;
+}
+
 .over .block[data-kind='front'] {
-  bottom: 104px;
+  bottom: calc(var(--bar) + 34px);
   gap: 0.5rem;
 }
 
@@ -214,7 +220,7 @@
 .over .block[data-kind='tophits'],
 .over .block[data-kind='pulls'] {
   top: calc(var(--dock-bottom, 208px) + 12px);
-  bottom: 12px;
+  bottom: calc(var(--bar) + 10px);
   right: 68px;
   gap: 0.5rem;
 }
@@ -227,6 +233,29 @@
 .over .block[data-kind='tophits'] [data-focus-strip] > div {
   flex: 0 0 45%;
   max-width: 45%;
+}
+
+/* Phones: the slab in a tile is as wide as lets the tile stand whole in the
+   room over the buy bar (a tile is its slab, 1.67 times its width tall, plus
+   145 px of labels and padding; the strip adds 24 px; the slab's box has 12 px
+   of padding). Never under 4 rem, where the tile is cut as before. */
+@media (max-width: 1023px) {
+  .over .block[data-kind='tophits'] .strip {
+    flex: 1 1 0;
+    container-type: size;
+  }
+
+  .over .block[data-kind='tophits'] [data-tile-art] {
+    width: clamp(4rem, calc((100cqh - 169px) / 1.67 + 12px), 100%);
+    margin-inline: auto;
+  }
+}
+
+/* all but the tallest phones: the tiles take the line's room */
+@media (max-width: 1023px) and (max-height: 800px) {
+  .over .block[data-kind='tophits'] .lead {
+    display: none;
+  }
 }
 
 /* the list ends on a whole row: the rows the box would cut are hidden
@@ -255,7 +284,7 @@
 .over .block[data-kind='odds'],
 .over .block[data-kind='buyback'] {
   top: 42%;
-  bottom: 12px;
+  bottom: calc(var(--bar) + 10px);
   overflow: hidden;
 }
 
@@ -498,7 +527,8 @@
   display: flex;
   flex-direction: column;
   gap: 3.5rem;
-  padding-bottom: 7rem;
+  /* clears the phone's buy bar */
+  padding-bottom: 9rem;
 }
 
 .doc .block {
@@ -589,20 +619,30 @@
 
 /* ---- The phone's compact odds board: one row per tier ------------------ */
 
+.over .block[data-kind='odds'] .board:has(> .compact) {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+
 .compact {
   display: flex;
+  min-height: 0;
   flex-direction: column;
   border-radius: 1.25rem;
   background: rgb(255 255 255 / 0.04);
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1);
 }
 
+/* a row is 2.5 rem tall where there is room, and shares out what there is
+   (the board ends over the buy bar) down to 1.25 rem */
 .compact li {
   display: grid;
   grid-template-columns: auto 1fr auto auto;
   align-items: center;
   gap: 0.5rem;
-  min-height: 2.5rem;
+  flex: 0 1 2.5rem;
+  min-height: 1.25rem;
   padding: 0 0.875rem;
   font-size: 0.8125rem;
   color: #fff;
@@ -636,13 +676,9 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* phones under 700 px tall (an iPhone in Safari with its bars): the compact
-   odds rows and Closing fit above the tab bar */
+/* phones under 700 px tall (an iPhone in Safari with its bars): Closing fits
+   above the tab bar */
 @media (max-width: 1023px) and (max-height: 700px) {
-  .compact li {
-    min-height: 2rem;
-  }
-
   .over .block[data-kind='closing'] {
     top: auto;
     bottom: 12px;
@@ -651,8 +687,9 @@
 
 /* short phones: tighter still */
 @media (max-width: 1023px) and (max-height: 640px) {
-  .compact li {
-    min-height: 1.75rem;
+  /* the odds rows take the tag's room */
+  .over .block[data-kind='odds'] .tag {
+    display: none;
   }
 
   /* Front keeps its name, tag and buttons; the top hit is the next stop */

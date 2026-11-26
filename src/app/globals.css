@@ -138,6 +138,13 @@
 :root:has([data-vault-bar]) {
   scroll-padding-bottom: calc(12rem + env(safe-area-inset-bottom, 0px));
 }
+/* A pack's buy bar floats over the phone's tab dock: the site footer ends
+   above it. */
+@media (max-width: 1023px) {
+  :root:has([data-buy-bar]) footer[data-site-chrome] {
+    padding-bottom: calc(9.5rem + env(safe-area-inset-bottom, 0px));
+  }
+}
 
 /* The action fill. Flat since the blue gradient went; the name is from it. */
 @utility bg-glacier-grad {

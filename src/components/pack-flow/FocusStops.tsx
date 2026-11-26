@@ -497,8 +497,10 @@ export function FocusStops({
       <p aria-live="polite" aria-atomic="true" className="sr-only">
         {said}
       </p>
-      {!desktop && (!stage || activeKind === 'front') && (
-        // the overlay layer lets taps through; the dock takes them
+      {/* The phone's buy bar stays through every stop (owner 2026-11-26: the
+          pack can be opened from any of them); Closing has its own button. */}
+      {!desktop && (!stage || (block >= 1 && activeKind !== 'closing')) && (
+        // the overlay layer lets taps through; the bar takes them
         <div className={styles.live}>
           <PackBuyControls model={buy} variant="dock" />
         </div>

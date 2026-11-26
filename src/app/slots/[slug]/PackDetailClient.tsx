@@ -150,7 +150,8 @@ export default function PackDetailClient({
   const facts = packFacts(pack);
 
   return (
-    // pb clears the mobile sticky buy bar (fixed above the tab bar).
+    // The phone's buy bar floats over the tab dock; the site footer under this
+    // page ends above it (globals.css, data-buy-bar).
     // The look is the catalog's "soft" direction (DESIGN.md, Soft pack page):
     // the stage, the configurator, the top hit, the odds and the pull ledger
     // sit in double-bezel trays.
@@ -398,12 +399,11 @@ export default function PackDetailClient({
         />
       </div>
 
-      {/* ===== Mobile buy dock =====
-          Docked flush onto the tab bar as ONE bottom chrome unit — same ink
-          surface, a single hairline seam, no floating card. Total in Nekst
-          left (money is the content), quiet capsule stepper, and one
-          single-purpose white pill (the panel's own qty/footer are lg-only,
-          so there is exactly one CTA per zone). Max = two taps of +. */}
+      {/* ===== Phone buy bar =====
+          One slim pill floating over the tab dock: total in Nekst left (money
+          is the content), quiet capsule stepper, and one single-purpose white
+          pill (the panel's own qty/footer are lg-only, so there is exactly
+          one CTA per zone). Max = two taps of +. */}
       <PackBuyControls model={buy} variant="dock" />
 
       <PackCardOverlay pack={active} overlay={overlay} />
