@@ -16,36 +16,6 @@ import { HoloIcon } from '@/components/holo-3d/HoloIcon';
 const PERIODS = ['This Week', 'All Time'] as const;
 type Period = (typeof PERIODS)[number];
 
-/** One label/value column of the Sticky Stat Card — uppercase Label over a
- *  Nekst Black value (DESIGN.md §"Signature: Sticky Stat Card"). */
-function StatCell({
-  label,
-  value,
-  className,
-  valueClassName,
-}: {
-  label: string;
-  value: string;
-  className?: string;
-  valueClassName?: string;
-}) {
-  return (
-    <div className={className}>
-      <p className="text-[11px] font-semibold tracking-[0.08em] text-neutral-400 uppercase">
-        {label}
-      </p>
-      <p
-        className={cn(
-          'font-heading text-2xl text-white tabular-nums',
-          valueClassName,
-        )}
-      >
-        {value}
-      </p>
-    </div>
-  );
-}
-
 /** The CURRENT challenge prize for a rank — card thumbs and/or credits, from
  *  the unlocked stages' prize tables. EVERY prize card renders (operator
  *  rejected the +N collapse); the frame rule and the "View Details" link live
@@ -437,71 +407,53 @@ export default function LeaderboardClient({
         </>
       )}
 
-      {/* Your-rank card — floats above the floating tab bar: its 56px pill
-          sits max(safe area, 8px) up and the centre Home button rises 10px
-          above it, so 66px + a 10px gap. */}
+      {/* Your-rank bar: one slim pill floating above the tab bar (owner
+          2026-11-26: the card was too big). The climb rides in the eyebrow. */}
       {ownHandle != null && (
-        <div className="fixed inset-x-4 border-white/25 bottom-[calc(max(env(safe-area-inset-bottom),0.5rem)+4.75rem)] z-40 mx-auto max-w-md rounded-3xl border bg-neutral-900 p-4 shadow-[0_8px_32px_rgba(0,0,0,0.6)] lg:bottom-8">
+        <div className="fixed inset-x-4 bottom-[calc(max(env(safe-area-inset-bottom),0.5rem)+4.75rem)] z-40 mx-auto flex min-h-13 max-w-md items-center gap-3 rounded-full border border-white/20 bg-neutral-900/95 py-1.5 pr-1.5 pl-5 shadow-[0_8px_32px_rgba(0,0,0,0.6)] backdrop-blur lg:bottom-8">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[10px] font-semibold tracking-[0.08em] text-neutral-400 uppercase">
+              Your rank
+              {lockup && (
+                <>
+                  {' · '}
+                  {lockup.label}{' '}
+                  <span className="text-neutral-200 tabular-nums">
+                    {lockup.value}
+                  </span>
+                </>
+              )}
+            </p>
+            {/* Not ranked stays "Not on the board yet": the true answer to
+                the label; the distance is in the eyebrow. */}
+            <p className="truncate text-sm font-semibold text-white">
+              {own ? (
+                <span className="font-heading tabular-nums">#{own.rank}</span>
+              ) : (
+                'Not on the board yet'
+              )}
+            </p>
+          </div>
           {own ? (
-            <>
-              <div className="flex items-center justify-between gap-3">
-                <StatCell label="Your rank" value={`#${own.rank}`} />
-                <StatCell
-                  label="Pulled"
-                  value={own.volume}
-                  className="text-right"
-                  valueClassName="text-chase"
-                />
-              </div>
-              {/* The climb, as its own label/value row under both figures: it
-                  belongs to neither column, and the card is fixed above the tab
-                  bar with no width to spare. */}
-              {lockup && (
-                <StatCell
-                  label={lockup.label}
-                  value={lockup.value}
-                  className="mt-3 border-t border-white/5 pt-3"
-                />
-              )}
-            </>
+            <div className="shrink-0 pr-3.5 text-right">
+              <p className="text-[10px] font-semibold tracking-[0.08em] text-neutral-400 uppercase">
+                Pulled
+              </p>
+              <p className="font-heading text-chase text-sm tabular-nums">
+                {own.volume}
+              </p>
+            </div>
           ) : (
-            <>
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-[11px] font-semibold tracking-[0.08em] text-neutral-400 uppercase">
-                    Your rank
-                  </p>
-                  {/* Stays "Not on the board yet" — that is still the true
-                      answer to this label, and replacing it with a money figure
-                      made the eyebrow lie. The distance gets its own row
-                      below. */}
-                  <p className="text-sm font-semibold text-white">
-                    Not on the board yet
-                  </p>
-                </div>
-                {/* The screen's one glacier button. */}
-                <Link
-                  href="/"
-                  className={cn(
-                    pillVariants({ variant: 'glacier', size: 'md' }),
-                    'shrink-0 text-[13px]',
-                  )}
-                >
-                  Rip a pack
-                </Link>
-              </div>
-              {/* A player who has ripped this week gets the distance: the gap
-                  is the number that makes the next rip feel reachable. A cold
-                  start (no pulls yet) has no row here — quoting the whole #10
-                  figure at someone with nothing on the board reads as a wall. */}
-              {lockup && (
-                <StatCell
-                  label={lockup.label}
-                  value={lockup.value}
-                  className="mt-3 border-t border-white/5 pt-3"
-                />
+            // The screen's one main button.
+            <Link
+              href="/"
+              className={cn(
+                pillVariants({ variant: 'glacier', size: 'sm' }),
+                'shrink-0 text-[13px]',
               )}
-            </>
+            >
+              Rip a pack
+            </Link>
           )}
         </div>
       )}
