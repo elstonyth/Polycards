@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils';
 import { FramedAvatar } from '@/components/FramedAvatar';
 import { TierBadge } from '@/components/TierBadge';
 import { rarityRgb, TOP_RARITIES } from '@/lib/rarity';
-import { gapScale, gapPercent } from '@/lib/pull-gaps';
+import { axisLabels, gapScale, gapPercent } from '@/lib/pull-gaps';
 import { pullTime } from '@/lib/format';
 import type { Rarity } from '@/lib/packs-data';
 import type { PullGaps } from '@/lib/data/packs';
@@ -99,6 +99,7 @@ export function PullGapsChart({
       : null;
   const linePos =
     scale && scale.line != null ? (scale.line / scale.max) * 100 : null;
+  const labelled = new Set(scale ? axisLabels(scale.ticks) : []);
   const lineStyle: CSSProperties = { borderColor: `rgba(${rgb}, 0.75)` };
 
   return (
@@ -239,13 +240,15 @@ export function PullGapsChart({
             ))}
           </ol>
 
-          {/* Axis — ticks in multiples of the reference gap. The reference
-              tick carries the ▲ marker in the tier hue; the numeral itself
-              stays a text token. */}
+          {/* Axis — ticks in multiples of the reference gap, numbered where
+              the numbers stand clear of each other (axisLabels). The
+              reference tick carries the ▲ marker in the tier hue; the numeral
+              itself stays a text token. */}
           <div className="mt-2 grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-2 text-[12px] tabular-nums text-neutral-400">
             <span>Winners</span>
             <div className="relative h-5">
               {scale.ticks.map((t, i) => {
+                if (!labelled.has(t)) return null;
                 const last = i === scale.ticks.length - 1;
                 const isLine = scale.line != null && t === scale.ticks[1];
                 return (
@@ -335,9 +338,11 @@ function BarRow({
             } as CSSProperties
           }
         />
+        {/* On the surface's own ground, over the dashed line: the line
+            breaks at a number instead of striking through it. */}
         <span
           className={cn(
-            'ml-2 shrink-0 text-[13px] tabular-nums',
+            'relative ml-1 shrink-0 bg-neutral-900 px-1 text-[13px] tabular-nums',
             emphasis ? 'font-bold text-white' : 'text-neutral-200',
           )}
         >

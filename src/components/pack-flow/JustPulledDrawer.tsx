@@ -93,10 +93,12 @@ function StatsSheet({
         aria-labelledby="jp-stats-heading"
         tabIndex={-1}
         data-jp-stats=""
-        className="max-h-[85svh] w-full overflow-y-auto overscroll-contain rounded-t-3xl border-t border-white/10 bg-neutral-900 px-4 pt-2 pb-[max(env(safe-area-inset-bottom),1rem)] outline-none sm:max-w-xl sm:rounded-3xl sm:border"
+        className="max-h-[85svh] w-full overflow-y-auto overscroll-contain rounded-t-3xl border-t border-white/10 bg-neutral-900 px-4 pb-[max(env(safe-area-inset-bottom),1rem)] outline-none sm:max-w-xl sm:rounded-3xl sm:border"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 -mx-4 mb-1 flex items-center justify-between bg-neutral-900 px-4 py-1">
+        {/* The sheet has no top padding of its own: the rows would show
+            through it above this bar. */}
+        <div className="sticky top-0 z-10 -mx-4 mb-3 flex items-center justify-between border-b border-white/[0.08] bg-neutral-900 px-4 pt-2 pb-1">
           <h2 id="jp-stats-heading" className="font-heading text-lg text-white">
             Pull stats
           </h2>

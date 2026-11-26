@@ -40,6 +40,28 @@ export function gapScale(
   return { max: steps * unit, ticks, line };
 }
 
+/** The narrowest bar column the axis is laid out for (a 320 px phone). */
+const AXIS_PX = 176;
+
+/**
+ * The ticks that carry a printed number. Every tick is a multiple of the
+ * reference, and on a phone they stand closer than a number is wide. So: the
+ * reference and the last always; 0 until the reference's number would run
+ * into it; and between them each tick that stands 40 px from the one before
+ * and 50 px from the last, whose number is set inside the edge.
+ */
+export function axisLabels(ticks: readonly number[]): number[] {
+  const n = ticks.length - 1;
+  if (n < 2) return [...ticks];
+  const step = AXIS_PX / n;
+  const stride = Math.ceil(40 / step);
+  return ticks.filter((_, i) => {
+    if (i === 0) return step >= 30;
+    if (i === 1 || i === n) return true;
+    return (i - 1) % stride === 0 && (n - i) * step >= 50;
+  });
+}
+
 /** Bar width as a percentage of the column, clamped so a zero-gap row still
  *  paints a sliver and nothing overflows. */
 export function gapPercent(gap: number, max: number): number {

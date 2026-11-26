@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { gapScale, gapPercent } from '../pull-gaps';
+import { axisLabels, gapScale, gapPercent } from '../pull-gaps';
 
 describe('gapScale — the stats chart axis', () => {
   it('lays the axis out in multiples of the expected gap, three by default', () => {
@@ -46,6 +46,30 @@ describe('gapScale — the stats chart axis', () => {
       ticks: [0, 1],
       line: null,
     });
+  });
+});
+
+describe('axisLabels: the numbers the axis prints', () => {
+  const ticks = (steps: number) =>
+    Array.from({ length: steps + 1 }, (_, i) => i * 607);
+
+  it('prints every tick while they stand clear of each other', () => {
+    expect(axisLabels(ticks(3))).toEqual(ticks(3));
+    expect(axisLabels([0, 5, 9])).toEqual([0, 5, 9]);
+  });
+
+  it('drops a tick that stands beside the last, whose number is set inside the edge', () => {
+    expect(axisLabels(ticks(4))).toEqual([0, 607, 1214, 2428]);
+    // the owner's screenshot (2026-11-26): "2428 3035" ran together
+    expect(axisLabels(ticks(5))).toEqual([0, 607, 1821, 3035]);
+  });
+
+  it('thins a long axis, and keeps the reference and the last', () => {
+    expect(axisLabels(ticks(8))).toEqual([607, 1821, 3035, 4856]);
+    const long = axisLabels(ticks(12));
+    expect(long).toContain(607);
+    expect(long).toContain(12 * 607);
+    expect(long.length).toBeLessThanOrEqual(5);
   });
 });
 
