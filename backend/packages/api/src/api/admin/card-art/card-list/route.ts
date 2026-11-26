@@ -44,10 +44,8 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   await db.transaction(async (trx) => {
     await trx.raw(`delete from card_list`);
     for (let i = 0; i < list.length; i += 500) {
-      const batch = list.slice(i, i + 500);
-      await trx.raw(
-        `insert into card_list (code, name) values ${batch.map(() => '(?, ?)').join(', ')}`,
-        batch.flatMap((e) => [e.code, e.name]),
+      await trx('card_list').insert(
+        list.slice(i, i + 500).map((e) => ({ code: e.code, name: e.name })),
       );
     }
   });

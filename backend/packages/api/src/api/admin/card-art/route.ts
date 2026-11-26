@@ -61,11 +61,9 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   if (!parsed.ok)
     throw new MedusaError(MedusaError.Types.INVALID_DATA, parsed.message);
   const db = req.scope.resolve<Knex>(ContainerRegistrationKeys.PG_CONNECTION);
-  const values = parsed.value.flatMap((i) => [i.code, i.image_url]);
-  await db.raw(
-    `insert into card_art (code, image_url) values ${parsed.value.map(() => '(?, ?)').join(', ')}
-     on conflict (code) do update set image_url = excluded.image_url, updated_at = now()`,
-    values,
-  );
+  await db('card_art')
+    .insert(parsed.value.map((i) => ({ code: i.code, image_url: i.image_url })))
+    .onConflict('code')
+    .merge({ image_url: db.raw('excluded.image_url'), updated_at: db.fn.now() });
   res.json({ saved: parsed.value.length });
 }
