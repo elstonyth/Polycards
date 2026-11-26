@@ -114,6 +114,28 @@ describe('One Piece promo / event labels match the real PSA 10 slabs', () => {
   });
 });
 
+describe('One Piece promo / event labels need no typed year or note', () => {
+  // Staff leave both boxes empty: the year and PSA's wording come out by themselves.
+  it.each(PROMO_CASES)('cert %s: %s (%s)', (_cert, name, set, _year, _note, left, number) => {
+    expect(labelLines({ name, set, grade: '10' })).toEqual({
+      left,
+      right: [number, 'GEM MT', '10'],
+    });
+  });
+
+  it('a release event winner takes the year of the set it names (rule extended from 172653222)', () => {
+    expect(
+      labelLines({ name: 'Monkey.D.Luffy [OP15 Release Event Winner] P-120', set: 'One Piece Promo', grade: '10' }).left,
+    ).toEqual(['2026 ONE PIECE EN', 'MONKEY D. LUFFY', 'OP15 RELEASE EVENT-WINNER']);
+  });
+
+  it('a promo that names no set and has no checked slab still prints no year', () => {
+    expect(
+      labelLines({ name: 'Nami [Flagship Battle Top Prize] P-099', set: 'One Piece Promo', grade: '10' }).left,
+    ).toEqual(['ONE PIECE EN', 'NAMI', 'FLAGSHIP BATTLE TOP PRIZE']);
+  });
+});
+
 describe('One Piece label rules', () => {
   it("the card's own label year / note win over the derived ones", () => {
     expect(
