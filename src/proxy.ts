@@ -73,7 +73,7 @@ function implausibleCardPath(pathname: string): boolean {
 // walks src/app and fails when a route is missing from this list).
 const KNOWN_ROUTE = [
   /^\/$/,
-  /^\/(about|addresses|audio-preview|bank|bank-withdrawal|contact|download|healthz|holo-preview|home-preview|how-it-works|leaderboard|loader-preview|lucky-draw|me|notifications|orders|privacy|referral|reset-password|rules|settings|slots|task|transactions|vault|wallet)\/?$/,
+  /^\/(about|addresses|audio-preview|bank|bank-withdrawal|contact|download|healthz|holo-preview|home-preview|how-it-works|leaderboard|loader-preview|lucky-draw|me|notifications|orders|privacy|reel-preview|referral|reset-password|rules|settings|slots|task|transactions|vault|wallet)\/?$/,
   /^\/vault\/(history|coin-flip)\/?$/,
   /^\/auth\/google\/(callback|failed)\/?$/,
   /^\/(card|profile|r)\/[^/]+\/?$/,

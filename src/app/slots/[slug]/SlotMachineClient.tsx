@@ -65,7 +65,8 @@ import { rarityRgb, RARITY_ORDER } from '@/lib/rarity';
 import { columnDurationMs, SETTLE_MS, CRAWL_MS } from '@/lib/vault-reel';
 import { isPokemonPack, resolveCardPokemon } from '@/lib/resolve-card-pokemon';
 import { spriteGif } from '@/lib/mock/pokedex';
-import { SlotReelStack, type ColumnWinner } from './SlotReelStack';
+import type { ColumnWinner } from './SlotReelStack';
+import { Reel3dStack } from '@/components/reel-3d/Reel3dStack';
 import {
   buildDecoyPool,
   buildIdlePool,
@@ -804,7 +805,9 @@ export default function SlotMachineClient({
                   machineHidden && 'pointer-events-none',
                 )}
               >
-                <SlotReelStack
+                {/* The 3D curved strip where the device allows it; the DOM
+                    reel (SlotReelStack) everywhere else, same contract. */}
+                <Reel3dStack
                   count={reels}
                   cellSize={cellSize}
                   spinKey={spinNonce ?? 'idle'}
