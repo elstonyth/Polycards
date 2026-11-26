@@ -342,13 +342,18 @@ export default async function MePage() {
             2026-11-26). Hidden when the profile read fails. */}
         {profile && (
           <section
-            className={cn(PANEL, 'pb-3 sm:pb-4 lg:col-start-1 lg:row-start-3')}
+            // Slim (owner 2026-11-26): a small label like Balance's, and the
+            // Manage link's 44px tap area overlaps the padding, not the row.
+            className={cn(
+              PANEL,
+              'py-3.5 sm:py-4 lg:col-start-1 lg:row-start-3',
+            )}
           >
             <div className="flex items-center justify-between">
-              <h2 className="font-heading text-lg text-white">Showcase</h2>
+              <h2 className={LABEL}>Showcase</h2>
               <Link
                 href="/vault"
-                className="inline-flex min-h-11 items-center gap-0.5 text-[13px] font-semibold text-glacier underline-offset-2 hover:underline"
+                className="-my-3 inline-flex min-h-11 items-center gap-0.5 text-[13px] font-semibold text-glacier underline-offset-2 hover:underline"
               >
                 Manage
                 <ChevronRight className="h-3.5 w-3.5" aria-hidden />
@@ -402,7 +407,7 @@ export default async function MePage() {
                 )}
               </div>
             ) : (
-              <p className="pb-2 text-[13px] text-neutral-400">
+              <p className="mt-1.5 text-[13px] text-neutral-400">
                 Nothing showcased yet —{' '}
                 <Link
                   href="/vault"
