@@ -19,6 +19,7 @@ describe('factoryVideo', () => {
       'lucky',
       'delta',
       'prismatic',
+      'warriors',
       'capsulebronze',
       'capsulesilver',
       'capsulegold',
