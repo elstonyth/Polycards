@@ -9,8 +9,9 @@ import { POLY_CATEGORY } from '@/lib/packs-data';
 // the first render reads the server feed's scope (the whole store), the
 // shelf's category applies after mount.
 
-const shelf = vi.hoisted(() => ({ active: '' }));
+const shelf = vi.hoisted(() => ({ active: '', pack: null as string | null }));
 const feedCalls = vi.hoisted(() => [] as (string | undefined)[]);
+const packCalls = vi.hoisted(() => [] as (string | undefined)[]);
 const pausedCalls = vi.hoisted(() => [] as (boolean | undefined)[]);
 /** What the drawer last handed its view. */
 const view = vi.hoisted(() => ({
@@ -18,17 +19,18 @@ const view = vi.hoisted(() => ({
 }));
 
 vi.mock('@/components/home/ShelfCategory', () => ({
-  useShelfCategory: () => ({ active: shelf.active }),
+  useShelfCategory: () => ({ active: shelf.active, pack: shelf.pack }),
 }));
 vi.mock('@/lib/use-recent-pulls', () => ({
   useLiveRecentPulls: (
     initial: RecentFeed,
-    _a: unknown,
+    packSlug: string | undefined,
     _b: unknown,
     category: string | undefined,
     opts?: { paused?: boolean },
   ) => {
     feedCalls.push(category);
+    packCalls.push(packSlug);
     pausedCalls.push(opts?.paused);
     return {
       pulls: initial.pulls,
@@ -58,6 +60,8 @@ let host: HTMLDivElement;
 
 beforeEach(() => {
   feedCalls.length = 0;
+  packCalls.length = 0;
+  shelf.pack = null;
   pausedCalls.length = 0;
   frames = [];
   vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => {
@@ -114,6 +118,24 @@ describe('JustPulledDrawer follows the shelf tab', () => {
     nextFrame();
     expect(feedCalls.length).toBeGreaterThan(1);
     expect(feedCalls.every((c) => c === undefined)).toBe(true);
+  });
+});
+
+describe('JustPulledDrawer follows the centred pack', () => {
+  it('reads the whole store first, then the centred pack after mount', () => {
+    shelf.active = 'pokemon';
+    shelf.pack = 'sv-151';
+    mount();
+    expect(packCalls[0]).toBeUndefined();
+    nextFrame();
+    expect(packCalls.at(-1)).toBe('sv-151');
+  });
+
+  it('stays on the whole store while the stage has no centred pack', () => {
+    shelf.active = 'pokemon';
+    mount();
+    nextFrame();
+    expect(packCalls.every((p) => p === undefined)).toBe(true);
   });
 });
 

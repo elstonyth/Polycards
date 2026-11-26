@@ -72,10 +72,12 @@ function subscribeSize(onChange: () => void) {
  */
 function StatsSheet({
   onClose,
+  packSlug,
   category,
   refreshKey,
 }: {
   onClose: () => void;
+  packSlug?: string;
   category?: string;
   refreshKey: string;
 }) {
@@ -112,7 +114,12 @@ function StatsSheet({
           </button>
         </div>
         {/* Opens on Immortal; refetches when a counter moves (a new pull). */}
-        <PullGapsChart category={category} refreshKey={refreshKey} bare />
+        <PullGapsChart
+          packSlug={packSlug}
+          category={category}
+          refreshKey={refreshKey}
+          bare
+        />
       </div>
     </div>,
     document.body,
@@ -135,7 +142,7 @@ export function JustPulledDrawer({
   /** A tab pressed before this code arrived (JustPulledShell). */
   initialTab?: string;
 }) {
-  const { active } = useShelfCategory();
+  const { active, pack: centred } = useShelfCategory();
   const [tab, setTab] = useState<DrawerTab>('All');
   const [statsOpen, setStatsOpen] = useState(false);
   // The first render reads the scope the server's feed belongs to (All, the
@@ -165,10 +172,13 @@ export function JustPulledDrawer({
     focusHolds,
     () => false,
   );
+  // The carousel's centred pack (after mount, like the category: the server's
+  // feed is the whole store's).
+  const packSlug = (mounted && centred) || undefined;
   const { pulls, drought, pending, shownScope, shownCategory } =
     useLiveRecentPulls(
       initial,
-      undefined,
+      packSlug,
       feedRarity(tab),
       mounted && active === POLY_CATEGORY ? POLY_CATEGORY : undefined,
       { paused: held },
@@ -213,6 +223,7 @@ export function JustPulledDrawer({
       {statsOpen && (
         <StatsSheet
           onClose={() => setStatsOpen(false)}
+          packSlug={packSlug}
           category={shownCategory}
           refreshKey={JSON.stringify(drought)}
         />

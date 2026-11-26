@@ -72,7 +72,7 @@ export default function PackStage({
    */
   children?: ReactNode;
 }) {
-  const { active, pick } = useShelfCategory();
+  const { active, pick, centre } = useShelfCategory();
   const stage3d = useStage3d();
   const reduced = usePrefersReducedMotion();
   const hostRef = useRef<HTMLElement>(null);
@@ -297,6 +297,9 @@ export default function PackStage({
   const row = category ? rowOf(category) : [];
   const at = category ? selectedIn(category) : 0;
   const pack = row[at] ?? null;
+  // Just Pulled follows the centred pack.
+  const packId = pack?.id ?? null;
+  useEffect(() => centre?.(packId), [centre, packId]);
 
   const select = useCallback((id: string, index: number) => {
     setSelected((prev) =>
