@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
-import { Eye, Lock, Package, Search, Star } from 'lucide-react';
+import { Eye, Lock, Package, Plus, Search, Star } from 'lucide-react';
 import { SlabImage } from '@/components/SlabImage';
 import { prizeFrameVariant } from '@/lib/prize-frame';
 import { TicketArt } from '@/components/TicketArt';
@@ -53,6 +53,14 @@ import { HoloIcon } from '@/components/holo-3d/HoloIcon';
 /** An action on the slim tickets row. */
 const ticketPill = (lead: boolean) =>
   pillVariants({ variant: lead ? 'primary' : 'secondary', size: 'sm' });
+// The tickets row's Get tickets: a round +, its words for screen readers.
+const GET_TICKETS = 'h-9 w-9 px-0';
+const getTicketsFace = (
+  <>
+    <Plus className="h-4 w-4" strokeWidth={2.5} aria-hidden />
+    <span className="sr-only">Get tickets</span>
+  </>
+);
 
 export default function VaultClient({
   initial,
@@ -408,13 +416,15 @@ export default function VaultClient({
       {tickets !== null && (
         <section aria-label="Lucky Draw tickets" className="mt-3">
           <div className="rounded-2xl border border-white/10 bg-neutral-900 px-3 py-2.5">
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-2.5">
-              <TicketArt width={44} className="shrink-0" />
-              <div className="min-w-0 flex-1 basis-40">
-                <p className="truncate text-sm font-semibold text-white">
+            {/* One slim row (owner 2026-11-26): Get tickets is a small +, Use
+                a small pill, so the words keep the rest of the line. */}
+            <div className="flex items-center gap-3">
+              <TicketArt width={36} className="shrink-0" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm leading-tight font-semibold text-white max-[379px]:text-[13px]">
                   {num(tickets)} Lucky Draw ticket{tickets === 1 ? '' : 's'}
                 </p>
-                <p className="mt-0.5 text-[12px] text-neutral-400">
+                <p className="mt-0.5 text-[12px] leading-snug text-neutral-400">
                   {tickets > 0 ? (
                     COIN_FLIP_OPEN ? (
                       <>
@@ -436,25 +446,30 @@ export default function VaultClient({
                   )}
                 </p>
               </div>
-              <div className="ml-auto flex gap-2">
+              <div className="flex shrink-0 gap-2">
                 {spinHref ? (
                   <button
                     type="button"
                     aria-expanded={gettingTickets}
+                    title="Get tickets"
                     onClick={() => setGettingTickets((open) => !open)}
-                    className={ticketPill(tickets === 0)}
+                    className={cn(ticketPill(tickets === 0), GET_TICKETS)}
                   >
-                    Get tickets
+                    {getTicketsFace}
                   </button>
                 ) : (
-                  <Link href="/task" className={ticketPill(tickets === 0)}>
-                    Get tickets
+                  <Link
+                    href="/task"
+                    title="Get tickets"
+                    className={cn(ticketPill(tickets === 0), GET_TICKETS)}
+                  >
+                    {getTicketsFace}
                   </Link>
                 )}
                 <Link
                   href={tickets > 0 ? '/lucky-draw?open=1' : '/lucky-draw'}
                   aria-label="Use tickets in Lucky Draw"
-                  className={ticketPill(tickets > 0)}
+                  className={cn(ticketPill(tickets > 0), 'h-9 px-4')}
                 >
                   Use
                 </Link>

@@ -93,8 +93,8 @@ export function VaultSkeleton() {
           {/* VaultTabs under the summary, its mb-4 dropped there. */}
           <div className={cn(VAULT_TABS, 'mt-4 mb-0')} />
 
-          {/* Slim Lucky Draw tickets row: buttons wrap under on a phone. */}
-          <div className={cn(BONE.panel, 'mt-3 h-[111px] sm:h-[62px]')} />
+          {/* Slim Lucky Draw tickets row: one line, its hint two on a phone. */}
+          <div className={cn(BONE.panel, 'mt-3 h-[75px] sm:h-[58px]')} />
 
           {/* Search field */}
           <div className="mt-3 h-12 rounded-2xl border border-white/10 bg-neutral-800" />
