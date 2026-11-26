@@ -417,6 +417,8 @@ const CardArtPage = () => {
                     size="small"
                     variant="transparent"
                     aria-label={`Delete ${a.code}`}
+                    // an upload still running could save the code again after the delete
+                    disabled={run?.running}
                     onClick={() => void remove(a.code)}
                   >
                     ×
