@@ -58,11 +58,56 @@ const CASES: Case[] = [
   ['(masked)', 'Monkey.D.Luffy [Alternate Art] OP10-118', 'One Piece Japanese Royal Blood', ['2024 ONE PIECE OP10 JP', 'MONKEY D. LUFFY', 'ALTERNATE ART'], '#118'],
   ['(masked)', 'Nami [Alternate Art] OP11-041', 'One Piece Japanese Fist of Divine Speed', ['2025 ONE PIECE OP11 JP', 'NAMI', 'ALTERNATE ART'], '#041'],
   ['167949328', 'Monkey.D.Luffy [PRB01] OP05-119', 'One Piece Japanese Awakening of the New Era', ['2024 ONE PIECE PRB01 JP', 'MONKEY D. LUFFY', ''], '#119'],
+  // --- Japanese boxes whose year was missing (read 2026-11-26, label photos)
+  ['109725416', 'Nami [Alternate Art] OP03-040', 'One Piece Japanese Pillars of Strength', ['2023 ONE PIECE OP03 JP', 'NAMI', 'ALTERNATE ART'], '#040'],
+  ['132209275', 'Jewelry Bonney [Manga] OP12-118', 'One Piece Japanese Legacy of the Master', ['2025 ONE PIECE OP12 JP', 'JEWELRY BONNEY', 'MANGA ALTERNATE ART'], '#118'],
+  ['153851894', 'Boa Hancock [Alternate Art] OP12-014', 'One Piece Japanese Legacy of the Master', ['2025 ONE PIECE OP12 JP', 'BOA HANCOCK', 'ALTERNATE ART'], '#014'],
+  ['(masked)', 'Portgas.D.Ace [SP] EB02-028', 'One Piece Japanese Carrying on His Will', ['2025 ONE PIECE OP13 JP', 'PORTGAS D. ACE', 'SPECIAL ALTERNATE ART'], '#028'],
+  ['143857026', 'Boa Hancock [SP] OP14-112', "One Piece Japanese Azure Sea's Seven", ['2025 ONE PIECE OP14 JP', 'BOA HANCOCK', 'SPECIAL ALTERNATE ART'], '#112'],
+  ['(masked)', 'Enel [Manga] OP15-118', "One Piece Japanese Adventure on Kami's Island", ['2026 ONE PIECE OP15 JP', 'ENEL', 'MANGA ALTERNATE ART'], '#118'],
+  ['163557203', 'Monkey.D.Luffy [Alternate Art] OP16-022', 'One Piece Japanese The Time of Battle', ['2026 ONE PIECE OP16 JP', 'MONKEY D. LUFFY', 'ALTERNATE ART'], '#022'],
+  ['(masked)', 'Shanks [Manga] OP17-022', "One Piece Japanese World's Strongest Warriors", ['2026 ONE PIECE OP17 JP', 'SHANKS', 'MANGA ALTERNATE ART'], '#022'],
+  ['153608459', 'Mr.2.Bon.Kurei(Bentham) [Alternate Art] EB01-061', 'One Piece Japanese Extra Booster Memorial Collection', ['2024 ONE PIECE EB01 JP', 'MR. 2 BON CLAY', 'ALTERNATE ART'], '#061'],
+  ['115536799', 'Brook [Alternate Art] EB02-048', 'One Piece Japanese Extra Booster Anime 25th Collection', ['2025 ONE PIECE EB02 JP', 'BROOK', 'ALTERNATE ART'], '#048'],
+  ['(masked)', 'Boa Hancock [SP] OP07-038', 'One Piece Japanese Extra Booster Anime 25th Collection', ['2025 ONE PIECE EB02 JP', 'BOA HANCOCK', 'SPECIAL'], '#038'],
+  ['167127573', 'Kikunojo [Alternate Art] EB04-012', 'One Piece Japanese Extra Booster Egghead Crisis', ['2026 ONE PIECE EB04 JP', 'KIKUNOJO', 'ALTERNATE ART'], '#012'],
+  ['(masked)', 'Monkey.D.Luffy [3rd Anniversary Gold] OP11-119', 'One Piece Japanese Fist of Divine Speed', ['2025 ONE PIECE OP11 JP', 'MONKEY D. LUFFY', '3RD ANNIVERSARY-GOLD'], '#119'],
+  // --- English boxes and names added 2026-11-26
+  ['179988487', 'Monkey.D.Luffy [SP] ST31-004', "One Piece World's Strongest Warriors", ['2026 ONE PIECE OP17 EN', 'MONKEY D. LUFFY', 'SPECIAL ALTERNATE ART'], '#004'],
+  ['109463159', 'Edward.Newgate ST15-001', 'One Piece Starter Deck 15: Edward Newgate', ['2024 ONE PIECE ST15 EN', 'EDWARD NEWGATE', ''], '#001'],
+  ['148140147', 'Mr.2.Bon.Kurei(Bentham) [Alternate Art] EB01-061', 'One Piece Extra Booster Memorial Collection', ['2024 ONE PIECE EB01 EN', 'MR. 2 BON CLAY', 'ALTERNATE ART'], '#061'],
+];
+
+// Promo / event prints (read 2026-11-26): PSA prints "<year> ONE PIECE EN|JP"
+// and the event as the variety. The event year is not derivable, so it comes
+// from the card's label year; PSA's own event wording (its hyphens and
+// abbreviations) comes from the label note when it differs from PriceCharting's.
+type PromoCase = [cert: string, pcName: string, pcSet: string, year: string, note: string | null, left: string[], number: string];
+
+const PROMO_CASES: PromoCase[] = [
+  ['172653222', 'Monkey.D.Luffy [OP16 Release Event Winner] P-135', 'One Piece Promo', '2026', 'OP16 RELEASE EVENT-WINNER', ['2026 ONE PIECE EN', 'MONKEY D. LUFFY', 'OP16 RELEASE EVENT-WINNER'], '#135'],
+  ['148696172', 'Trafalgar Law [Championship Event Pack] ST03-008', 'One Piece Promo', '2024', null, ['2024 ONE PIECE EN', 'TRAFALGAR LAW', 'CHAMPIONSHIP EVENT PACK'], '#008'],
+  ['156604108', 'Monkey.D.Luffy [Illustration Box Vol.3] OP07-109', 'One Piece Promo', '2025', null, ['2025 ONE PIECE EN', 'MONKEY D. LUFFY', 'ILLUSTRATION BOX VOL.3'], '#109'],
+  ['144054482', 'Roronoa Zoro [Treasure Cup Top Prize] ST12-008', 'One Piece Promo', '2024', 'TREASURE CUP-TOP PRIZE', ['2024 ONE PIECE EN', 'RORONOA ZORO', 'TREASURE CUP-TOP PRIZE'], '#008'],
+  ['156101387', 'Monkey.D.Luffy [2nd Anniversary Set] ST13-015', 'One Piece Japanese Promo', '2024', null, ['2024 ONE PIECE JP', 'MONKEY D. LUFFY', '2ND ANNIVERSARY SET'], '#015'],
+  ['134661995', 'Monkey.D.Luffy [One Piece Magazine Vol.20] ST21-014', 'One Piece Japanese Promo', '2025', null, ['2025 ONE PIECE JP', 'MONKEY D. LUFFY', 'ONE PIECE MAGAZINE VOL.20'], '#014'],
+  ['(masked)', 'Monkey.D.Luffy [Official Event Top Prize] ST21-014', 'One Piece Japanese Promo', '2025', null, ['2025 ONE PIECE JP', 'MONKEY D. LUFFY', 'OFFICIAL EVENT TOP PRIZE'], '#014'],
+  ['(masked)', 'Roronoa Zoro [Official Event Prize] ST21-015', 'One Piece Japanese Promo', '2025', null, ['2025 ONE PIECE JP', 'RORONOA ZORO', 'OFFICIAL EVENT PRIZE'], '#015'],
+  ['152236762', 'Monkey.D.Luffy [Weekly Shonen Jump Jan] ST01-001', 'One Piece Japanese Promo', '2023', 'WEEKLY SHONEN JUMP-JAN', ['2023 ONE PIECE JP', 'MONKEY D. LUFFY', 'WEEKLY SHONEN JUMP-JAN'], '#001'],
 ];
 
 describe('One Piece labels match the real PSA 10 slabs', () => {
   it.each(CASES)('cert %s: %s (%s)', (_cert, name, set, left, number) => {
     expect(labelLines({ name, set, grade: '10' })).toEqual({
+      left,
+      right: [number, 'GEM MT', '10'],
+    });
+  });
+});
+
+describe('One Piece promo / event labels match the real PSA 10 slabs', () => {
+  it.each(PROMO_CASES)('cert %s: %s (%s)', (_cert, name, set, year, note, left, number) => {
+    expect(labelLines({ name, set, grade: '10', year, note })).toEqual({
       left,
       right: [number, 'GEM MT', '10'],
     });
@@ -101,11 +146,11 @@ describe('One Piece label rules', () => {
     });
   });
 
-  it('an event / prize print keeps the plain fallback (PSA names the event, not a box)', () => {
+  it('an event / prize print names the language, not a box, and invents no year (172653222, 156101387)', () => {
     expect(
       onePieceLabel({ name: 'Monkey.D.Luffy [Serial Prize] ST01-001', set: 'One Piece Starter Deck 1: Straw Hat Crew' }),
     ).toEqual({
-      setLine: 'ONE PIECE STARTER DECK 1: STRAW HAT CREW',
+      setLine: 'ONE PIECE EN',
       year: '',
       name: 'MONKEY D. LUFFY',
       number: '#001',
@@ -115,8 +160,8 @@ describe('One Piece label rules', () => {
 
   it("a box without a verified year prints no year (the card's label year fills it)", () => {
     expect(
-      labelLines({ name: 'Monkey.D.Luffy [Alternate Art] OP03-122', set: 'One Piece Japanese Pillars of Strength', grade: '10' }).left[0],
-    ).toBe('ONE PIECE OP03 JP');
+      labelLines({ name: 'Monkey.D.Luffy [Alternate Art] OP07-119', set: 'One Piece Japanese 500 Years in the Future', grade: '10' }).left[0],
+    ).toBe('ONE PIECE OP07 JP');
   });
 
   it('Japanese EB04 stays its own box (only English bundles it into OP14/OP15)', () => {
@@ -126,6 +171,31 @@ describe('One Piece label rules', () => {
     expect(
       onePieceLabel({ name: 'Roronoa Zoro [Alternate Art] EB04-007', set: 'One Piece Extra Booster EB04' })?.setLine,
     ).toBe('ONE PIECE OP15-EB04 EN');
+  });
+
+  it('a promo P-code prints as the number, never in the name (172653222)', () => {
+    expect(onePieceLabel({ name: 'Monkey.D.Luffy P-135', set: 'One Piece Promo' })).toMatchObject({
+      name: 'MONKEY D. LUFFY',
+      number: '#135',
+    });
+    expect(labelLines({ name: 'Monkey.D.Luffy #P-135', set: 'One Piece Promo', grade: '10' }).right[0]).toBe('#135');
+  });
+
+  it('ST21 EN has its verified year (147492294)', () => {
+    expect(onePieceLabel({ name: 'Monkey.D.Luffy ST21-001', set: 'One Piece Starter Deck EX 21: Gear 5' })).toMatchObject({
+      setLine: 'ONE PIECE ST21 EN',
+      year: '2025',
+    });
+  });
+
+  it('names PSA spells its own way: MR. 2 BON CLAY (148140147), KOZUKI (photo 080)', () => {
+    expect(onePieceLabel({ name: 'Mr.2.Bon.Kurei [Alternate Art] EB01-061', set: 'One Piece Extra Booster Memorial Collection' })?.name).toBe('MR. 2 BON CLAY');
+    expect(onePieceLabel({ name: 'Kouzuki Oden [Alternate Art] EB02-001', set: 'One Piece Japanese Extra Booster Anime 25th Collection' })?.name).toBe('KOZUKI ODEN');
+  });
+
+  it('a dotted name with a one-character part keeps every space, and MR. keeps its period (rule, no cert)', () => {
+    expect(onePieceLabel({ name: 'Mr.3.Galdino OP01-001', set: 'One Piece Romance Dawn' })?.name).toBe('MR. 3 GALDINO');
+    expect(onePieceLabel({ name: 'Ms. All Sunday OP14-084', set: 'One Piece The Time of Battle' })?.name).toBe('MS. ALL SUNDAY');
   });
 
   it('leaves every other franchise alone', () => {

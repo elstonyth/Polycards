@@ -1,7 +1,9 @@
 // One Piece slab label wording, derived from the PriceCharting product name +
 // console-name the way PSA prints it. Pure — no I/O. Verified 2026-10-25
 // against ~70 real PSA 10 One Piece labels (eBay cert photos; the cert numbers
-// are in one-piece-label.unit.spec.ts). Current PSA format (certs ~100M+):
+// are in one-piece-label.unit.spec.ts). Current PSA format, from certs between
+// ~101.7M and ~108M on (100013247-101705096 still print the old "2024 ONE PIECE
+// JPN." / "OP07-ALTERNATE ART" style; 107989941 is the earliest new one seen):
 //
 //   2024 ONE PIECE OP08 EN          #007
 //   JEWELRY BONNEY                 GEM MT
@@ -13,9 +15,10 @@
 //         a plain card
 // #       the card number without its set code (OP05-119 → #119)
 //
-// Anything PSA wording can't be derived for with confidence — promo / event /
-// prize prints, an unknown box — keeps the plain fallback (the uppercased
-// PriceCharting set, the bracket text as-is) rather than invented wording.
+// Promo / event / prize prints have no box: PSA prints "<year> ONE PIECE EN|JP"
+// and the event as the variety (172653222, 156101387). An unknown box keeps the
+// plain fallback (the uppercased PriceCharting set, the bracket text as-is)
+// rather than invented wording.
 import {
   ONE_PIECE_REPRINTS,
   type ReprintKind,
@@ -85,6 +88,10 @@ const YEAR: Record<string, string> = {
   'PRB01 EN': '2024', // 165559351
   'PRB02 EN': '2025', // 162705703
   'ST01 EN': '2022', // 165922168
+  'ST15 EN': '2024', // 109463159
+  'ST21 EN': '2025', // 147492294
+  'OP17 EN': '2026', // 179988487
+  'OP03 JP': '2023', // 109725416
   'OP02 JP': '2022', // OP02 JP Sanji #026 (cert masked)
   'OP05 JP': '2023', // 165587545
   'OP06 JP': '2023', // OP06 JP Buggy #008 (cert masked)
@@ -92,6 +99,15 @@ const YEAR: Record<string, string> = {
   'OP09 JP': '2024', // 165922172
   'OP10 JP': '2024', // OP10 JP Luffy #118 (cert masked)
   'OP11 JP': '2025', // OP11 JP Luffy #118 / Nami #041 (cert masked)
+  'OP12 JP': '2025', // 132209275, 153851894
+  'OP13 JP': '2025', // OP13 JP Ace #028 / Luffy #119 (cert masked)
+  'OP14 JP': '2025', // 143857026, 150053399
+  'OP15 JP': '2026', // OP15 JP Enel #118 (cert masked)
+  'OP16 JP': '2026', // 163557203
+  'OP17 JP': '2026', // OP17 JP Shanks #022 (cert masked)
+  'EB01 JP': '2024', // 153608459
+  'EB02 JP': '2025', // 115536799
+  'EB04 JP': '2026', // 167127573
   'PRB01 JP': '2024', // 167949328
   'PRB02 JP': '2025', // 171270048
   'EB03 JP': '2025', // 173416523
@@ -103,8 +119,9 @@ const boxLabel = (box: string, lang: string): string =>
   lang === 'EN' && (box === 'OP14' || box === 'OP15') ? `${box}-EB04` : box;
 
 // Event / prize / promo prints: PSA labels them by event ("OFFICIAL EVENT
-// PRIZE", "WELCOME PACK VOL.1", "CHAMPIONSHIP SET 2023"…) with no box code —
-// too varied to derive, so they keep the plain fallback.
+// PRIZE", "ILLUSTRATION BOX VOL.3", "CHAMPIONSHIP EVENT PACK"…) with no box
+// code. The bracket text is printed as the variety; PSA's own hyphens and
+// abbreviations ("TREASURE CUP-TOP PRIZE") come from the card's label note.
 const PRIZE_RE =
   /serial|judge|winner|top prize|top 8|treasure cup|championship|flagship|promo|welcome pack|campaign|one piece day|illustration box|lecafig|dash pack|finalist|tournament|event|celebration|prize|gift collection|storage box|learn together|treasure chest|weekly shonen/i;
 
@@ -140,19 +157,28 @@ function varietyOf(bracket: string, box: string | null, reprint: boolean): strin
   if (b === 'errata') return 'ERRATA'; // 162553499
   if (b === 'super pre-release') return 'SUPER PRE-RELEASE'; // 155704783
   if (b === '1st anniversary') return '1ST ANNIVERSARY'; // 160877854
+  if (/^3rd anniversary[ -]gold$/.test(b)) return '3RD ANNIVERSARY-GOLD'; // OP11 JP Luffy #119 (cert masked)
   return bracket.trim().toUpperCase(); // unverified wording: as written
 }
 
 // "Monkey.D.Luffy" -> "MONKEY D. LUFFY", "Edward.Newgate" -> "EDWARD NEWGATE".
+// A lookahead, so a one-character part ("Mr.3.Galdino") loses every dot; "Mr."
+// keeps its period. PSA's own spellings: MR. 2 BON CLAY (148140147), KOZUKI
+// (EB02 JP Kozuki Oden #001, cert masked).
 const psaName = (name: string): string =>
-  name
-    .replace(/\.D\./g, ' D. ')
-    .replace(/(\w)\.(\w)/g, '$1 $2')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toUpperCase();
+  /^\s*mr\.?\s*2\.?\s*bon\.?\s*kurei\b/i.test(name)
+    ? 'MR. 2 BON CLAY'
+    : name
+        .replace(/\bkouzuki\b/gi, 'Kozuki')
+        .replace(/\.D\./g, ' D. ')
+        .replace(/^(\s*M(?:r|s))\.(?=\S)/i, '$1. ')
+        .replace(/(\w)\.(?=\w)/g, '$1 ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toUpperCase();
 
 const CODE_RE = /\b((?:OP|ST|EB|PRB)\d{2})-(\d{3})\b/i;
+const PROMO_CODE_RE = /\bP-(\d{3})\b/i; // "P-135" -> "#135" (172653222)
 
 /** PSA wording for a One Piece card, or null for any other franchise. */
 export function onePieceLabel(f: {
@@ -179,12 +205,13 @@ export function onePieceLabel(f: {
     name = name.slice(0, hash.index);
     const c = hash[1].match(CODE_RE);
     if (c) cardCode = `${c[1].toUpperCase()}-${c[2]}`;
-    number = `#${c ? c[2] : hash[1]}`; // "#OP01-120" typed -> "#120"
+    const promo = c ? null : hash[1].match(PROMO_CODE_RE);
+    number = `#${c ? c[2] : promo ? promo[1] : hash[1]}`; // "#OP01-120" typed -> "#120"
   } else {
-    const c = name.match(CODE_RE);
+    const c = name.match(CODE_RE) ?? name.match(PROMO_CODE_RE);
     if (c) {
-      cardCode = `${c[1].toUpperCase()}-${c[2]}`;
-      number = `#${c[2]}`;
+      if (c.length === 3) cardCode = `${c[1].toUpperCase()}-${c[2]}`;
+      number = `#${c[c.length - 1]}`;
       name = name.replace(c[0], ' ');
     }
   }
@@ -202,7 +229,9 @@ export function onePieceLabel(f: {
     number,
     variety: bracket.trim().toUpperCase(),
   });
-  if (PRIZE_RE.test(bracket)) return plain();
+  if (PRIZE_RE.test(bracket) || /\bpromo\b/.test(rest)) {
+    return { setLine: `ONE PIECE ${lang}`, year: '', name, number, variety: bracket.trim().toUpperCase() };
+  }
 
   // Which box the card came out of.
   const own = cardCode?.split('-')[0] ?? null; // the card's own set, "OP05"
