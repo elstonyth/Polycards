@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
-import Image from 'next/image';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { pillVariants } from '@/components/ui/pill';
@@ -12,6 +11,7 @@ import { PrizeCard } from './PrizeCard';
 import { findOwnRow, gapLockup, rankGap } from '@/lib/leaderboard-gap';
 import type { LeaderboardEntry, OwnWeekly } from '@/lib/data/leaderboard';
 import type { ChallengeRankPrize } from '@/lib/data/challenge';
+import { HoloIcon } from '@/components/holo-3d/HoloIcon';
 
 const PERIODS = ['This Week', 'All Time'] as const;
 type Period = (typeof PERIODS)[number];
@@ -186,14 +186,7 @@ function Podium({
             )}
           >
             {first && (
-              <Image
-                src="/images/ice/crown.webp"
-                alt=""
-                width={128}
-                height={128}
-                priority
-                className="pointer-events-none relative z-10 -mb-5 h-16 w-16 select-none sm:h-20 sm:w-20"
-              />
+              <HoloIcon kind="crown" className="z-10 -mb-5 w-16 sm:w-20" />
             )}
             <span className={cn('rounded-full p-1 ring-2', place.ring)}>
               <FramedAvatar

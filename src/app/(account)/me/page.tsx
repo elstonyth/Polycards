@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import Image from 'next/image';
 import Link from 'next/link';
 import { unstable_rethrow } from 'next/navigation';
 import {
@@ -38,6 +37,7 @@ import { WithdrawLink } from '@/components/account/WithdrawLink';
 import { MeHeader } from './MeAppearance';
 import { EquippedFrameProvider } from './equipped-frame';
 import { FAN_MAX, fanPose, joinedLabel } from './showcase-fan';
+import { HoloIcon } from '@/components/holo-3d/HoloIcon';
 
 export const metadata: Metadata = {
   title: 'Me',
@@ -537,12 +537,10 @@ export default async function MePage() {
             'relative hidden lg:col-start-3 lg:row-span-2 lg:row-start-2 lg:block lg:self-start lg:p-6',
           )}
         >
-          <Image
-            src="/images/ice/gift.webp"
-            alt=""
-            width={512}
-            height={512}
-            className="pointer-events-none absolute right-3 top-1/2 h-36 w-36 -translate-y-1/2"
+          <HoloIcon
+            kind="gift"
+            cage
+            className="absolute top-1/2 right-1 w-44 -translate-y-1/2"
           />
           <h2 className="max-w-[55%] font-heading text-xl text-white">
             Invite friends

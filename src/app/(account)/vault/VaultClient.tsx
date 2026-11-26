@@ -45,6 +45,7 @@ import {
 } from '@/lib/vault-selection';
 import { VaultActionBar } from '@/components/account/VaultActionBar';
 import { useConsent } from '@/lib/use-consent';
+import { HoloIcon } from '@/components/holo-3d/HoloIcon';
 
 // The customer's vault: every pulled card still held, each with a sell-back
 // offer (current FMV × the flat buyback rate — the server quotes the percent).
@@ -391,13 +392,10 @@ export default function VaultClient({
             </span>
           </p>
         </div>
-        <Image
-          src="/images/ice/vault-door.webp"
-          alt=""
-          aria-hidden
-          width={512}
-          height={512}
-          className="pointer-events-none absolute right-1 -top-3 h-32 w-32 object-contain sm:right-3 sm:-top-8 sm:h-44 sm:w-44"
+        <HoloIcon
+          kind="vault"
+          cage
+          className="absolute -top-5 right-0 w-36 sm:-top-10 sm:right-2 sm:w-52"
         />
       </section>
 

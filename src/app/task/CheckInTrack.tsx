@@ -1,6 +1,5 @@
 'use client';
 
-import Image from 'next/image';
 import { Check, Lock } from 'lucide-react';
 import { Pill } from '@/components/ui/pill';
 import { HelpTip } from '@/components/ui/help-tip';
@@ -16,6 +15,7 @@ import {
   topUpAsk,
   type CheckinUnlock,
 } from './task-hub';
+import { HoloIcon } from '@/components/holo-3d/HoloIcon';
 
 const DAYS = [1, 2, 3, 4, 5, 6, 7] as const;
 
@@ -195,12 +195,10 @@ export function CheckInTrack({
               {/* Painted first, so the day's art, tick and ticket count sit
                   over it. */}
               {big && (
-                <Image
-                  src="/images/ice/gift.webp"
-                  alt=""
-                  width={128}
-                  height={128}
-                  className="pointer-events-none absolute -right-3 -bottom-6 h-auto w-[78%] max-w-24 select-none sm:-right-4"
+                <HoloIcon
+                  kind="gift"
+                  interactive={false}
+                  className="absolute -right-3 -bottom-6 w-[78%] max-w-24 sm:-right-4"
                 />
               )}
               {(lead || done) && (
