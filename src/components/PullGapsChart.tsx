@@ -38,7 +38,10 @@ export function PullGapsChart({
   packSlug,
   category,
   refreshKey,
+  bare = false,
 }: {
+  /** No card around the chart: its host (a sheet) is the surface. */
+  bare?: boolean;
   packSlug?: string;
   /** Read this category's capsule spins instead of the global ledger. */
   category?: string;
@@ -99,7 +102,11 @@ export function PullGapsChart({
   const lineStyle: CSSProperties = { borderColor: `rgba(${rgb}, 0.75)` };
 
   return (
-    <div className="rounded-2xl border border-white/10 bg-neutral-900 p-4">
+    <div
+      className={cn(
+        !bare && 'rounded-2xl border border-white/10 bg-neutral-900 p-4',
+      )}
+    >
       {/* Header — rate | expected gap, last-20 mean, and the tier toggle */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>

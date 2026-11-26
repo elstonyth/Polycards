@@ -1,6 +1,6 @@
 import Image from 'next/image';
 import Link from 'next/link';
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties } from 'react';
 import { ChartNoAxesColumn } from 'lucide-react';
 import { FramedAvatar } from '@/components/FramedAvatar';
 import { TicketArt } from '@/components/TicketArt';
@@ -134,7 +134,7 @@ function DrawerCard({
 /**
  * The Just Pulled section's own part:
  * the heading with LIVE, the "packs without" counters, the tier filter, and
- * the drawer of pulls (or the Stats chart in its place). No hooks: the server
+ * the drawer of pulls (Stats opens its chart in a sheet). No hooks: the server
  * renders it once from the page's feed (the drawer at rest, and the plain
  * list without JavaScript or under reduced motion), and the lazily loaded
  * JustPulledDrawer renders it again live.
@@ -147,7 +147,6 @@ export function JustPulledView({
   tab,
   onTab,
   pending = false,
-  chart = null,
   moved,
   listForm,
 }: {
@@ -161,8 +160,6 @@ export function JustPulledView({
   onTab?: (tab: DrawerTab) => void;
   /** A tab's pulls are on their way: the drawer dims, as today's list does. */
   pending?: boolean;
-  /** The Stats chart, shown in the drawer's place. */
-  chart?: ReactNode;
   /** Counters whose number changed since the page loaded: they re-land. */
   moved?: ReadonlySet<Rarity>;
   /** Reduced motion: the plain list (true), or the drawer (false). Unknown
@@ -258,7 +255,9 @@ export function JustPulledView({
             <button
               key={t}
               type="button"
-              aria-pressed={tab === t}
+              // Stats is not a filter: it opens the chart's sheet.
+              aria-pressed={t === 'Stats' ? undefined : tab === t}
+              aria-haspopup={t === 'Stats' ? 'dialog' : undefined}
               aria-label={t === 'Stats' ? 'Stats' : undefined}
               onClick={onTab ? () => onTab(t) : undefined}
               className={cn(
@@ -299,23 +298,19 @@ export function JustPulledView({
           styles.drawerWrap,
         )}
       >
-        {chart ? (
-          <div data-jp-stats="">{chart}</div>
-        ) : (
-          <div data-jp-drawer="" aria-busy={pending} className={styles.box}>
-            {cards.length === 0 ? (
-              <p data-jp-empty="" className={styles.empty}>
-                {emptyLine(tab, noun)}
-              </p>
-            ) : (
-              <ol key={stackKey} className={styles.stack}>
-                {cards.map((c) => (
-                  <DrawerCard key={c.item.id} card={c} listForm={listForm} />
-                ))}
-              </ol>
-            )}
-          </div>
-        )}
+        <div data-jp-drawer="" aria-busy={pending} className={styles.box}>
+          {cards.length === 0 ? (
+            <p data-jp-empty="" className={styles.empty}>
+              {emptyLine(tab, noun)}
+            </p>
+          ) : (
+            <ol key={stackKey} className={styles.stack}>
+              {cards.map((c) => (
+                <DrawerCard key={c.item.id} card={c} listForm={listForm} />
+              ))}
+            </ol>
+          )}
+        </div>
       </div>
     </section>
   );

@@ -12,6 +12,10 @@ import { POLY_CATEGORY } from '@/lib/packs-data';
 const shelf = vi.hoisted(() => ({ active: '' }));
 const feedCalls = vi.hoisted(() => [] as (string | undefined)[]);
 const pausedCalls = vi.hoisted(() => [] as (boolean | undefined)[]);
+/** What the drawer last handed its view. */
+const view = vi.hoisted(() => ({
+  props: null as null | { tab: string; onTab?: (tab: string) => void },
+}));
 
 vi.mock('@/components/home/ShelfCategory', () => ({
   useShelfCategory: () => ({ active: shelf.active }),
@@ -37,7 +41,12 @@ vi.mock('@/lib/use-recent-pulls', () => ({
 }));
 vi.mock('@/lib/use-reveal', () => ({ usePrefersReducedMotion: () => false }));
 vi.mock('@/components/PullGapsChart', () => ({ PullGapsChart: () => null }));
-vi.mock('../JustPulledView', () => ({ JustPulledView: () => null }));
+vi.mock('../JustPulledView', () => ({
+  JustPulledView: (props: NonNullable<typeof view.props>) => {
+    view.props = props;
+    return null;
+  },
+}));
 
 const { JustPulledDrawer } = await import('../JustPulledDrawer');
 
@@ -105,6 +114,25 @@ describe('JustPulledDrawer follows the shelf tab', () => {
     nextFrame();
     expect(feedCalls.length).toBeGreaterThan(1);
     expect(feedCalls.every((c) => c === undefined)).toBe(true);
+  });
+});
+
+// The section's height is what the flow's scroll is measured by, so the
+// chart (several screens tall) never stands in the drawer's place.
+describe('JustPulledDrawer opens Stats in a sheet', () => {
+  it('keeps the filter and the drawer under a dialog, and closes it', () => {
+    shelf.active = 'pokemon';
+    mount();
+    nextFrame();
+    act(() => view.props?.onTab?.('Stats'));
+    expect(view.props?.tab).toBe('All');
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    act(() =>
+      document
+        .querySelector<HTMLElement>('[aria-label="Close stats"]')
+        ?.click(),
+    );
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 });
 
