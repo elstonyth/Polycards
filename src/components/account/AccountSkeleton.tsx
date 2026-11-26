@@ -240,7 +240,7 @@ export function MeSkeleton() {
       </SkeletonReveal>
       {/* Key numbers */}
       <SkeletonReveal className="lg:col-start-1 lg:row-start-2">
-        <div className={cn(BONE.pulse, BONE.panel, 'h-[68px] rounded-3xl')} />
+        <div className={cn(BONE.pulse, BONE.panel, 'h-[57px] rounded-3xl')} />
       </SkeletonReveal>
     </div>
   );

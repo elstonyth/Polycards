@@ -420,7 +420,8 @@ export default async function MePage() {
           <dl
             className={cn(
               PANEL,
-              'grid auto-cols-fr grid-flow-col divide-x divide-white/10 px-0 py-3.5 sm:px-0 lg:col-start-1 lg:row-start-2',
+              // Slim (owner 2026-11-26): the name and balance's lighter face.
+              'grid auto-cols-fr grid-flow-col divide-x divide-white/10 px-0 py-2.5 sm:px-0 sm:py-3 lg:col-start-1 lg:row-start-2',
             )}
           >
             {numbers.map((n) => (
@@ -428,12 +429,12 @@ export default async function MePage() {
                 key={n.label}
                 // justify-center: on desktop the row is as tall as its
                 // neighbour, and the numbers sat on the panel's floor.
-                className="flex min-w-0 flex-col-reverse items-center justify-center gap-1 px-1 text-center"
+                className="flex min-w-0 flex-col-reverse items-center justify-center gap-0.5 px-1 text-center"
               >
-                <dt className="truncate text-[12px] text-neutral-400">
+                <dt className="truncate text-[11px] text-neutral-400">
                   {n.label}
                 </dt>
-                <dd className="font-heading text-lg leading-none text-white tabular-nums lg:text-xl">
+                <dd className="text-base leading-none font-semibold tracking-tight text-white tabular-nums lg:text-lg">
                   {n.value}
                 </dd>
               </div>
