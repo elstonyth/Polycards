@@ -1,5 +1,5 @@
-// PROTOTYPE: where each cell sits in the 3D reel on /reel-preview (the curved
-// strip, look A; the drum and linked wheels were dropped 26 Nov 2026). A cell is
+// Where each cell sits in the 3D reel (the curved strip, look A; the drum and
+// linked wheels were dropped 26 Nov 2026). A cell is
 // addressed by its offset `u` from the winning marker, in cells (u > 0 = still
 // arriving; cells stream right to left). Everything here is pure geometry.
 import * as THREE from 'three';
@@ -24,9 +24,7 @@ export type View = {
   /** Canvas size in CSS px. */
   w: number;
   h: number;
-  /** Height of the area the reel is centred in (canvas minus the controls). */
-  stageH: number;
-  /** Today's cell height for this viewport and reel count. */
+  /** The DOM reel's cell height (the spin page's cellSize). */
   cardPx: number;
   phone: boolean;
 };
@@ -49,7 +47,8 @@ const TAN = Math.tan(((FOV / 2) * Math.PI) / 180);
 /** Camera distance that makes 1 world unit = `unitPx` CSS px at depth 0. */
 const distFor = (h: number, unitPx: number) => h / unitPx / (2 * TAN);
 
-const A_ROW = 1.45;
+/** Row pitch in card heights: the DOM stack's strip frame (+16 px) and gap. */
+let aRow = 1.45;
 const rowY = (reel: number, count: number, gap: number) =>
   ((count - 1) / 2 - reel) * gap;
 /** Arc radius and fog reach; a phone sees ±3 cells, so it curves tighter. */
@@ -62,7 +61,7 @@ export const CURVED: LookLayout = {
     const th = (u * PITCH_W) / aR;
     const au = Math.abs(u) / aFog;
     o.x = Math.sin(th) * aR;
-    o.y = rowY(reel, count, A_ROW);
+    o.y = rowY(reel, count, aRow);
     o.z = Math.cos(th) * aR - aR;
     o.rx = 0;
     o.ry = th;
@@ -73,6 +72,7 @@ export const CURVED: LookLayout = {
   camera(view, count, cam) {
     aR = view.phone ? 3.6 : 6.2;
     aFog = view.phone ? 0.62 : 1;
+    aRow = (view.cardPx + 16 + (view.phone ? 12 : 16)) / view.cardPx;
     cam.fov = FOV;
     const d = distFor(view.h, view.cardPx);
     cam.position.set(0, 0, d);
@@ -81,8 +81,8 @@ export const CURVED: LookLayout = {
     void count;
   },
   marker(count) {
-    const top = rowY(0, count, A_ROW) + 0.64;
-    const bot = rowY(count - 1, count, A_ROW) - 0.64;
+    const top = rowY(0, count, aRow) + 0.64;
+    const bot = rowY(count - 1, count, aRow) - 0.64;
     return [new THREE.Vector3(0, top, 0.02), new THREE.Vector3(0, bot, 0.02)];
   },
 };

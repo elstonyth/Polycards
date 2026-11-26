@@ -1,9 +1,10 @@
-// PROTOTYPE: the cell and halo materials for the 3D reel on /reel-preview.
-// Each cell is today's CardTile drawn in one fragment shader: dark translucent
-// rounded box, a thin rarity border and one crisp sprite. Only the landed winner
-// glows (inner glow plus a second, additive instanced quad, the halo); decoys
-// stay quiet to fit the black-and-white redesign. No post passes. Per instance: instanceMatrix, instanceColor (rarity, linear),
-// aSprite (atlas u0, v0, figure scale) and aState (lit, landed, fade, speed).
+// The cell and halo materials for the 3D reel. Each cell is today's CardTile
+// drawn in one fragment shader: dark translucent rounded box, a thin rarity
+// border and one crisp sprite. Only the landed winner glows (inner glow plus a
+// second, additive instanced quad, the halo); decoys stay quiet to fit the
+// black-and-white redesign. No post passes. Per instance: instanceMatrix,
+// instanceColor (rarity, linear), aSprite (atlas u0, v0, figure scale, 1 =
+// art not loaded) and aState (lit, landed, fade, speed).
 import * as THREE from 'three';
 import { CARD_ASPECT } from '@/lib/vault-reel';
 
@@ -88,10 +89,11 @@ void main() {
   float len = speed * 0.16;
   float jit = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
   vec4 s = vec4(0.0);
+  // aSprite.w = 1: the cell's art is still loading, draw the empty card.
   for (int i = 0; i < 8; i++) {
     float o = ((float(i) + jit * step(0.001, len)) / 7.0 - 0.5) * len;
     vec2 q = sp + vec2(o, 0.0);
-    if (q.x > 0.0 && q.x < 1.0 && q.y > 0.0 && q.y < 1.0) {
+    if (vSprite.w < 0.5 && q.x > 0.0 && q.x < 1.0 && q.y > 0.0 && q.y < 1.0) {
       vec4 t = texture2D(uAtlas, vSprite.xy + vec2(q.x, 1.0 - q.y) * uTileUv);
       s += vec4(t.rgb * t.a, t.a);
     }

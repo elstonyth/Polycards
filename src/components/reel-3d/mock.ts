@@ -1,5 +1,4 @@
-// PROTOTYPE, throwaway: mock pool and winner picks for /reel-preview.
-// No React, no Next: the static harness loads this file too.
+// Mock pool and winner picks for /reel-preview.
 import type { Rarity } from '@/lib/packs-data';
 import { RARITY_ORDER } from '@/lib/rarity';
 
@@ -37,17 +36,6 @@ const WEIGHT: Record<Rarity, number> = {
 
 export const TOP_RARITY: Rarity = RARITY_ORDER[0]!;
 
-/** Deterministic 32-bit PRNG (mulberry32), same as src/lib/hreel.ts. */
-export function mulberry32(seed: number): () => number {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
 export function pickRarity(rand: () => number): Rarity {
   const total = RARITY_ORDER.reduce((s, r) => s + WEIGHT[r], 0);
   let x = rand() * total;
@@ -79,14 +67,4 @@ export function bestRarity(cells: readonly { rarity: Rarity }[]): Rarity {
   return (
     RARITY_ORDER.find((r) => cells.some((c) => c.rarity === r)) ?? 'Common'
   );
-}
-
-/** Near-miss tease tier, copied from hreel.ts teaseRarity (hreel imports
- *  modules the static harness cannot serve). */
-export function teaseRarity(winner: Rarity): Rarity | null {
-  if (winner === 'Immortal' || winner === 'Legendary' || winner === 'Mythical')
-    return winner;
-  if (winner === 'Common') return null;
-  const up = RARITY_ORDER.indexOf(winner) - 1;
-  return RARITY_ORDER[Math.max(0, up)]!;
 }
