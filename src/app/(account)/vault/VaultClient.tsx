@@ -897,7 +897,7 @@ export default function VaultClient({
       </p>
 
       {items.length > 0 && consent !== null && (
-        <div aria-hidden className="h-52" />
+        <div aria-hidden className="h-36" />
       )}
 
       {items.length > 0 && consent !== null && (

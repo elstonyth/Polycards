@@ -136,7 +136,7 @@
 }
 /* The Vault's action bar floats over the grid at every width. */
 :root:has([data-vault-bar]) {
-  scroll-padding-bottom: calc(16rem + env(safe-area-inset-bottom, 0px));
+  scroll-padding-bottom: calc(12rem + env(safe-area-inset-bottom, 0px));
 }
 
 /* The action fill. Flat since the blue gradient went; the name is from it. */

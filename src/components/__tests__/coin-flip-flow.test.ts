@@ -436,7 +436,11 @@ describe('coin flip confirmation and recovery', () => {
         createElement(VaultActionBar, { ...props, selectedCount: 21 }),
       ),
     );
-    expect(button('Select up to 20 cards to coin flip').disabled).toBe(true);
+    // Over 20 the button is off and a line under the actions says why.
+    expect(button('Coin flip').disabled).toBe(true);
+    expect(document.body.textContent).toContain(
+      'Select up to 20 cards to coin flip',
+    );
     act(() =>
       root.render(
         createElement(VaultActionBar, { ...props, selectedCount: 1 }),
