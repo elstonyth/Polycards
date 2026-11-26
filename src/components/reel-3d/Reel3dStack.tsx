@@ -10,6 +10,7 @@ import { useEffect, useRef, useState, type ComponentProps } from 'react';
 import { SlotReelStack } from '@/app/slots/[slug]/SlotReelStack';
 import { browserGateEnv, gateStage } from '@/components/pack-stage/stage-gate';
 import { readCrashFlag } from '@/components/pack-stage/crash-guard';
+import { spriteGif } from '@/lib/mock/pokedex';
 import type { ReelEngine } from './engine';
 
 type Props = ComponentProps<typeof SlotReelStack>;
@@ -32,6 +33,8 @@ export function Reel3dStack(props: Props) {
   const [ready, setReady] = useState(false);
   const [lost, setLost] = useState(false);
   const [show3d, setShow3d] = useState(false);
+  /** The spin whose every reel the canvas landed. */
+  const [landedKey, setLandedKey] = useState<number | 'idle'>('idle');
   const live = useRef(props);
   const settledRef = useRef(0);
   const spunRef = useRef<number | 'idle'>('idle');
@@ -57,8 +60,15 @@ export function Reel3dStack(props: Props) {
           onReelSettled: (reel, rect) => {
             live.current.onWinnerRect?.(reel, rect);
             settledRef.current += 1;
-            if (settledRef.current === live.current.count)
+            // A partial batch (a failed mapping) lands only the reels it has.
+            const landing = Math.min(
+              live.current.count,
+              live.current.winners?.length ?? 0,
+            );
+            if (settledRef.current === landing) {
+              setLandedKey(spunRef.current);
               live.current.onAllSettled?.();
+            }
           },
           onReady: () => setReady(true),
           onLost: () => setLost(true),
@@ -74,6 +84,8 @@ export function Reel3dStack(props: Props) {
       made?.dispose();
       setEngine(null);
       setReady(false);
+      // A new engine takes over again only once ready and idle.
+      setShow3d(false);
     };
   }, [reduced]);
 
@@ -90,6 +102,9 @@ export function Reel3dStack(props: Props) {
   // Adjusted while rendering (same pattern as the spin page's cellSize).
   if (ready && idle && !lost && !show3d) setShow3d(true);
   const on3d = show3d && !lost && engine !== null;
+  // The GPU died after the canvas landed this spin: the DOM reel would replay
+  // the spin under the reveal, so it waits for the next idle instead.
+  const holdDom = lost && winners !== null && landedKey === spinKey;
 
   // Spin when the winners arrive (as the DOM reel does); idle when they clear.
   useEffect(() => {
@@ -104,6 +119,12 @@ export function Reel3dStack(props: Props) {
     }
   }, [engine, on3d, winners, spinKey]);
 
+  // Warm the reveal's sprite while the canvas spins, as ReelStrip does.
+  useEffect(() => {
+    if (!on3d || !winners) return;
+    for (const w of winners) new Image().src = w.image ?? spriteGif(w.dex ?? 1);
+  }, [on3d, winners]);
+
   useEffect(() => {
     engine?.setHideWinners(hideWinners);
     // The reveal covers the machine from transform on: stop drawing it.
@@ -117,7 +138,7 @@ export function Reel3dStack(props: Props) {
         height: `calc(${count} * ${cellSize + 16}px + ${count - 1} * var(--reel-gap))`,
       }}
     >
-      {!on3d && <SlotReelStack {...props} />}
+      {!on3d && !holdDom && <SlotReelStack {...props} />}
       <div
         ref={hostRef}
         aria-hidden

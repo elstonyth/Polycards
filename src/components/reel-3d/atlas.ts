@@ -24,12 +24,17 @@ export type AtlasSlot = {
 const srcOf = (c: HReelCell) =>
   c.image ?? (c.dex > 0 ? spritePng(c.dex) : NEUTRAL_CARD_SPRITE);
 export const atlasKey = (c: HReelCell) => `${srcOf(c)}|${c.label ?? ''}`;
+/** The neutral card back: always in the atlas, drawn while art loads. */
+const NEUTRAL_CELL: HReelCell = { dex: 0, rarity: 'Common' };
+const NEUTRAL_KEY = atlasKey(NEUTRAL_CELL);
 
 function loadImage(src: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
-    const timer = setTimeout(() => resolve(null), 8000);
+    // Short: a winner's art has about 3 s of spin to arrive, and each
+    // fallback step waits again.
+    const timer = setTimeout(() => resolve(null), 4000);
     img.onload = () => {
       clearTimeout(timer);
       resolve(img);
@@ -73,8 +78,13 @@ export class Atlas {
     return this.slots.get(atlasKey(c));
   }
 
+  placeholder(): AtlasSlot | undefined {
+    return this.slots.get(NEUTRAL_KEY);
+  }
+
   /** Load every cell not in the atlas yet; one texture upload per call. */
-  async ensure(cells: readonly HReelCell[]): Promise<void> {
+  async ensure(wanted: readonly HReelCell[]): Promise<void> {
+    const cells = [NEUTRAL_CELL, ...wanted];
     const missing = () => {
       const m = new Map<string, HReelCell>();
       for (const c of cells) {
@@ -98,7 +108,7 @@ export class Atlas {
       .filter((p): p is Promise<void> => p !== undefined);
     if (want.size > 0) {
       const gen = this.gen;
-      const batch = Promise.all(
+      const batch: Promise<void> = Promise.all(
         [...want].map(async ([k, c]) => {
           // A custom sprite whose host refuses CORS (the media bucket allows
           // only the live site's origins) falls back to the species sprite,
@@ -111,7 +121,9 @@ export class Atlas {
           this.draw(k, c, img);
         }),
       ).then(() => {
-        for (const k of want.keys()) this.pending.delete(k);
+        // A reset may have handed these keys to a newer batch: leave those.
+        for (const k of want.keys())
+          if (this.pending.get(k) === batch) this.pending.delete(k);
         if (gen === this.gen) this.texture.needsUpdate = true;
       });
       for (const k of want.keys()) this.pending.set(k, batch);

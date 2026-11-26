@@ -123,6 +123,8 @@ export class ReelEngine {
   private meshes: ReelMeshes[] = [];
   private count = 1;
   private cellPx = 96;
+  /** The last configure() call, applied once no spin is held. */
+  private want = { count: 1, cellPx: 96 };
   private reels: Reel[] = [];
   private spin: Spin | null = null;
   private hideWinners = false;
@@ -154,6 +156,8 @@ export class ReelEngine {
   static create(opts: EngineOptions): ReelEngine | null {
     const canvas = document.createElement('canvas');
     // A 'boot' flag that outlives this load means the GPU took the tab down.
+    // The flag is the pack stage's on purpose: one GPU, one session, so a
+    // crash on either page keeps both flat.
     const guard = armBootGuard();
     let renderer: THREE.WebGLRenderer;
     try {
@@ -223,26 +227,33 @@ export class ReelEngine {
 
   // ------------------------------------------------------------ public API
 
-  /** Reel count and the DOM reel's cell size. Ignored mid-spin. */
+  /** Reel count and the DOM reel's cell size; held until a spin releases. */
   configure(count: number, cellPx: number) {
-    if (this.spin) return;
-    const n = Math.min(3, Math.max(1, count));
-    const rebuild = n !== this.count;
-    this.count = n;
+    this.want = { count: Math.min(3, Math.max(1, count)), cellPx };
+    if (!this.spin) this.applyConfig();
+  }
+
+  private applyConfig() {
+    const { count, cellPx } = this.want;
+    if (count === this.count && cellPx === this.cellPx) return;
+    const rebuild = count !== this.count;
+    this.count = count;
     this.cellPx = cellPx;
     if (rebuild) this.rebuild();
     else this.layout();
   }
 
+  private poolCells(): HReelCell[] {
+    return this.reels.flatMap((reel) => reel.pool);
+  }
+
   /** Idle content per reel (the page's per-idle-cycle shuffles). */
   setPools(pools: readonly (readonly HReelCell[])[]) {
-    const cells: HReelCell[] = [];
     this.reels.forEach((reel, r) => {
       const p = pools[r] ?? pools[0];
       reel.pool = p && p.length > 0 ? [...p] : FALLBACK_POOL;
-      cells.push(...reel.pool);
     });
-    void this.atlas.ensure(cells).then(() => {
+    void this.atlas.ensure(this.poolCells()).then(() => {
       if (this.disposed) return;
       this.renderNow();
       if (!this.ready) {
@@ -252,9 +263,13 @@ export class ReelEngine {
     });
   }
 
-  /** Start a spin from wherever the reels are drifting. */
+  /**
+   * Start a spin from wherever the reels are drifting. Reel r lands on
+   * winners[r]; a reel with no winner (a partial batch after a failed mapping)
+   * stops where it is and lands on nothing, as the DOM reel leaves it idle.
+   */
   spinNow(winners: readonly ReelWinner[], seed: number) {
-    if (this.spin) return;
+    if (this.spin || winners.length === 0) return;
     const now = performance.now();
     const n = this.count;
     const spin: Spin = {
@@ -271,8 +286,17 @@ export class ReelEngine {
     const wanted: HReelCell[] = [];
     for (let r = 0; r < n; r++) {
       const reel = this.reels[r]!;
-      const w = winners[r] ?? winners[0]!;
+      const w = winners[r];
       const start = reel.px;
+      if (!w) {
+        spin.start.push(start);
+        spin.target.push(start);
+        spin.idx.push(Number.NaN);
+        spin.dur.push(0);
+        spin.remaining.push(0);
+        spin.settled.push(true);
+        continue;
+      }
       const idx = Math.round((start + pressTravelPx(r, n, PITCH)) / PITCH);
       // Everything on screen at press time keeps its idle content.
       const keep = Math.min(Math.floor(start / PITCH) + LIVE / 2 + 1, idx - 1);
@@ -304,7 +328,11 @@ export class ReelEngine {
     if (this.reduced) spin.at = now - spin.end;
     this.spin = spin;
     // The winners may be cards the pool never showed (a seeded card's art).
-    void this.atlas.ensure(wanted).then(() => this.renderNow());
+    // Winners first, then the pools: a full atlas resets and must get the
+    // cells on screen back, not only the winners.
+    void this.atlas
+      .ensure([...wanted, ...this.poolCells()])
+      .then(() => this.renderNow());
     this.ensureLoop();
   }
 
@@ -316,6 +344,7 @@ export class ReelEngine {
       this.reels[r]!.overrides.clear();
     });
     this.spin = null;
+    this.applyConfig();
     this.ensureLoop();
   }
 
@@ -578,7 +607,8 @@ export class ReelEngine {
           RARITY_COLOR.get(cell.rarity) ?? RARITY_COLOR.get('Common')!;
         mesh.cells.setColorAt(slot, col);
         mesh.halos.setColorAt(slot, col);
-        const sl = this.atlas.slot(cell);
+        // Art still loading: the neutral card back, never an empty frame.
+        const sl = this.atlas.slot(cell) ?? this.atlas.placeholder();
         mesh.sprite.setXYZW(
           slot,
           sl?.u0 ?? 0,
