@@ -5,7 +5,6 @@ import { RARITY_ORDER } from '@/lib/rarity';
 import ReelPreview, {
   type SeekProps,
 } from '@/components/reel-3d-prototype/ReelPreview';
-import { VARIANTS, type Variant } from '@/components/reel-3d-prototype/layouts';
 
 export const metadata: Metadata = {
   title: 'Reel preview',
@@ -13,12 +12,11 @@ export const metadata: Metadata = {
 };
 
 /**
- * PROTOTYPE, throwaway: four looks for the reel, switched with ?variant=
- * (today|a|b|c, default a). 404 unless `next dev` or the server runs with
+ * PROTOTYPE: the 3D reel (curved strip). 404 unless `next dev` or the server runs with
  * REEL_PREVIEW=1. Reads no backend and no customer data.
  *
  * `?debug=1` shows a readout. `?t=<ms>&seed=<n>&win=<Rarity>&reels=<1-3>`
- * freezes a 3D look at t ms after a press, with a deterministic strip.
+ * freezes the reel at t ms after a press, with a deterministic strip.
  */
 export default async function ReelPreviewPage({
   searchParams,
@@ -36,7 +34,6 @@ export default async function ReelPreviewPage({
   }
   const one = (key: string) =>
     typeof query[key] === 'string' ? (query[key] as string) : '';
-  const variant: Variant = VARIANTS.find((v) => v === one('variant')) ?? 'a';
   const reels = Math.min(3, Math.max(1, Number(one('reels')) || 1));
   const win = RARITY_ORDER.find((r) => r === one('win')) ?? null;
   const seek: SeekProps | null =
@@ -50,7 +47,6 @@ export default async function ReelPreviewPage({
       : null;
   return (
     <ReelPreview
-      initialVariant={variant}
       debug={one('debug') === '1'}
       seek={seek}
       initialReels={reels}

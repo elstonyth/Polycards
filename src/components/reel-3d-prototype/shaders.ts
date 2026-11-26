@@ -1,8 +1,8 @@
-// PROTOTYPE, throwaway: the cell and halo materials for the 3D reels on
-// /reel-preview. Each cell is today's CardTile drawn in one fragment shader:
-// dark translucent rounded box, rarity border, inner glow and one crisp sprite.
-// The outer bloom is a second, additive instanced quad (the halo). No post
-// passes. Per instance: instanceMatrix, instanceColor (rarity, linear),
+// PROTOTYPE: the cell and halo materials for the 3D reel on /reel-preview.
+// Each cell is today's CardTile drawn in one fragment shader: dark translucent
+// rounded box, a thin rarity border and one crisp sprite. Only the landed winner
+// glows (inner glow plus a second, additive instanced quad, the halo); decoys
+// stay quiet to fit the black-and-white redesign. No post passes. Per instance: instanceMatrix, instanceColor (rarity, linear),
 // aSprite (atlas u0, v0, figure scale) and aState (lit, landed, fade, speed).
 import * as THREE from 'three';
 import { CARD_ASPECT } from '@/lib/vault-reel';
@@ -63,7 +63,7 @@ void main() {
   float speed = vState.w;
   vec2 p = vP;
   bool back = !gl_FrontFacing;
-  // Seen from behind (the drum's far side): un-mirror so sprites still read.
+  // Seen from behind: un-mirror so sprites still read.
   if (back) p.x = -p.x;
   float d = sdRound(p, uCard * 0.5, uRadius);
   float aa = max(fwidth(d), 1e-4);
@@ -73,9 +73,8 @@ void main() {
   // bg: rgba(10,10,12,0.55) (linear)
   vec4 acc = vec4(vec3(0.0030, 0.0030, 0.0037) * uBgAlpha, uBgAlpha);
   float inD = max(-d, 0.0);
-  if (lit > 0.001) {
-    float k = mix(0.07, 0.1, landed);
-    float g = lit * mix(0.32, 0.5, landed) * exp(-inD / k);
+  if (landed > 0.001) {
+    float g = lit * landed * 0.45 * exp(-inD / 0.1);
     acc = over(vec4(vColor * g, g), acc);
   }
   // unlit inset shadow: inset 0 0 8px rgba(0,0,0,0.5)
@@ -104,7 +103,7 @@ void main() {
   float bw = aa * 1.3;
   float band = smoothstep(-bw - aa, -bw, d);
   vec4 bc = lit > 0.001
-    ? vec4(vColor, mix(0.7, 1.0, landed) * max(lit, 0.0))
+    ? vec4(vColor, mix(0.45, 1.0, landed) * max(lit, 0.0))
     : vec4(1.0, 1.0, 1.0, 0.1);
   if (lit > 0.001 && lit < 0.999) bc = mix(vec4(1.0, 1.0, 1.0, 0.1), bc, lit);
   acc = over(vec4(bc.rgb * bc.a * band, bc.a * band), acc);
@@ -130,12 +129,10 @@ void main() {
   float landed = vState.y;
   float fade = vState.z;
   float d = sdRound(vP, uCard * 0.5, uRadius);
-  // 0 0 16px 3px (decoy) -> 0 0 30px 7px (landed), on a ~152 px tile.
-  float spread = mix(0.02, 0.046, landed);
-  float sigma = mix(0.06, 0.11, landed);
-  float x = max(d - spread, 0.0);
-  float g = exp(-x * x / (2.0 * sigma * sigma)) * smoothstep(-0.02, 0.01, d);
-  float a = lit * mix(0.55, 0.9, landed) * g * (1.0 - fade) * uGain;
+  // Landed winner only: 0 0 30px 7px on a ~152 px tile.
+  float x = max(d - 0.046, 0.0);
+  float g = exp(-x * x / (2.0 * 0.11 * 0.11)) * smoothstep(-0.02, 0.01, d);
+  float a = lit * landed * 0.8 * g * (1.0 - fade) * uGain;
   if (a < 0.002) discard;
   gl_FragColor = vec4(vColor, a);
   #include <colorspace_fragment>

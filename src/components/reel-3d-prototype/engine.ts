@@ -1,4 +1,4 @@
-// PROTOTYPE, throwaway: the 3D reel engine behind /reel-preview (looks a, b, c).
+// PROTOTYPE: the 3D reel engine behind /reel-preview (the curved strip).
 // Plain three.js and DOM, no React or Next, so the static harness in
 // docs/research/home-3d/reel/prototype/harness loads it too.
 //
@@ -35,13 +35,7 @@ import {
   haloGeometry,
   haloMaterial,
 } from './shaders';
-import {
-  LOOKS,
-  type Look,
-  type LookLayout,
-  type Placement,
-  type View,
-} from './layouts';
+import { CURVED, type LookLayout, type Placement, type View } from './layouts';
 
 /** Virtual pitch (px) the physics runs at. */
 export const PITCH = 110;
@@ -70,7 +64,7 @@ export type SeekParams = {
 };
 
 export type EngineStats = {
-  look: Look | null;
+  active: boolean;
   phase: Phase;
   speed: number;
   calls: number;
@@ -167,15 +161,8 @@ export class ReelEngine {
   private haloMat: THREE.ShaderMaterial;
   private cellGeo = cellGeometry();
   private haloGeo = haloGeometry();
-  private lineMat = new THREE.LineBasicMaterial({
-    color: 0xffffff,
-    transparent: true,
-    opacity: 0.09,
-    depthWrite: false,
-  });
-  private guides: THREE.LineSegments | null = null;
   private meshes: ReelMeshes[] = [];
-  private look: Look | null = null;
+  private active = false;
   private count = 1;
   private reels: Reel[] = [];
   private spin: Spin | null = null;
@@ -204,7 +191,6 @@ export class ReelEngine {
   private e = new THREE.Euler();
   private v = new THREE.Vector3();
   private s = new THREE.Vector3();
-  private order: { z: number; j: number }[] = [];
   private spinSeed = 1;
 
   /** Returns null when WebGL cannot start. */
@@ -295,15 +281,15 @@ export class ReelEngine {
     this.layout();
   }
 
-  setLook(look: Look | null) {
-    if (!look && this.spin) {
+  setActive(on: boolean) {
+    if (!on && this.spin) {
       // Leaving 3D mid-spin: land every reel at once.
       this.spin.target.forEach((px, r) => (this.reels[r]!.px = px));
       this.spin = null;
       this.phase = 'idle';
       this.onPhase?.('idle');
     }
-    this.look = look;
+    this.active = on;
     this.rebuild();
   }
 
@@ -318,7 +304,7 @@ export class ReelEngine {
   }
 
   spinNow(winners: MockCell[]) {
-    if (this.spin || !this.look) return;
+    if (this.spin || !this.active) return;
     const now = performance.now();
     this.spinSeed = (this.spinSeed * 1103515245 + 12345) >>> 0;
     this.startSpin(now, winners, this.spinSeed);
@@ -349,7 +335,7 @@ export class ReelEngine {
 
   stats(): EngineStats {
     return {
-      look: this.look,
+      active: this.active,
       phase: this.phase,
       speed: this.speed,
       calls: this.renderer.info.render.calls,
@@ -368,7 +354,6 @@ export class ReelEngine {
     this.haloGeo.dispose();
     this.cellMat.dispose();
     this.haloMat.dispose();
-    this.lineMat.dispose();
     this.blank.dispose();
     this.atlas?.texture.dispose();
     this.renderer.dispose();
@@ -385,7 +370,8 @@ export class ReelEngine {
   };
 
   private ensureLoop() {
-    if (this.running || !this.look || this.seekState || document.hidden) return;
+    if (this.running || !this.active || this.seekState || document.hidden)
+      return;
     this.running = true;
     this.last = performance.now();
     this.renderer.setAnimationLoop((now) => this.frame(now));
@@ -405,15 +391,10 @@ export class ReelEngine {
       m.halos.dispose();
     }
     this.meshes = [];
-    if (this.guides) {
-      this.scene.remove(this.guides);
-      this.guides.geometry.dispose();
-      this.guides = null;
-    }
   }
 
   private layoutOf(): LookLayout | null {
-    return this.look ? LOOKS[this.look] : null;
+    return this.active ? CURVED : null;
   }
 
   private rebuild() {
@@ -426,9 +407,6 @@ export class ReelEngine {
       this.floodEl.style.opacity = '0';
       return;
     }
-    // The drum's near cards are a little more opaque so the far side reads
-    // as behind them, not mixed in.
-    this.cellMat.uniforms.uBgAlpha!.value = this.look === 'b' ? 0.75 : 0.55;
     for (let r = 0; r < this.count; r++) {
       const live = L.live(r, this.count);
       const sprite = new THREE.InstancedBufferAttribute(
@@ -461,12 +439,6 @@ export class ReelEngine {
       halos.renderOrder = 2;
       this.scene.add(cells, halos);
       this.meshes.push({ cells, halos, sprite, state, live });
-    }
-    const g = L.guides(this.count);
-    if (g) {
-      this.guides = new THREE.LineSegments(g, this.lineMat);
-      this.guides.renderOrder = 0;
-      this.scene.add(this.guides);
     }
     this.layout();
     if (this.seekState) this.renderNow();
@@ -566,7 +538,7 @@ export class ReelEngine {
       spin.idx.push(idx);
       spin.target.push(idx * PITCH);
     }
-    this.floodEl.style.background = `radial-gradient(85% 70% at 50% 46%, rgba(${spin.floodRgb}, 0.26) 0%, rgba(${spin.floodRgb}, 0.15) 28%, rgba(${spin.floodRgb}, 0.07) 48%, rgba(${spin.floodRgb}, 0.02) 64%, transparent 80%)`;
+    this.floodEl.style.background = `radial-gradient(85% 70% at 50% 46%, rgba(${spin.floodRgb}, 0.13) 0%, rgba(${spin.floodRgb}, 0.07) 28%, rgba(${spin.floodRgb}, 0.03) 48%, rgba(${spin.floodRgb}, 0.01) 64%, transparent 80%)`;
     this.spin = spin;
   }
 
@@ -609,7 +581,7 @@ export class ReelEngine {
   }
 
   private renderNow() {
-    if (!this.look) return;
+    if (!this.active) return;
     if (this.seekState) {
       const t = this.seekState.t;
       if (this.spin && t >= this.spin.end + IDLE_AFTER_MS) {
@@ -654,7 +626,6 @@ export class ReelEngine {
               : 1 - clamp01((age - 700) / (FLOOD_MS - 700));
       this.floodEl.style.opacity = f.toFixed(3);
     } else this.floodEl.style.opacity = '0';
-    const cam = this.camera;
     for (let r = 0; r < n; r++) {
       const mesh = this.meshes[r];
       if (!mesh) continue;
@@ -675,23 +646,8 @@ export class ReelEngine {
       const live = mesh.live;
       const base = px / PITCH;
       const first = Math.ceil(base - live / 2);
-      const order = this.order;
-      order.length = 0;
-      for (let j = 0; j < live; j++) {
-        const k = first + j;
-        L.place(r, n, k - base, this.tmp);
-        let z = 0;
-        if (L.sort) {
-          this.v
-            .set(this.tmp.x, this.tmp.y, this.tmp.z)
-            .applyMatrix4(cam.matrixWorldInverse);
-          z = this.v.z;
-        }
-        order.push({ z, j });
-      }
-      if (L.sort) order.sort((a, b) => a.z - b.z);
       for (let slot = 0; slot < live; slot++) {
-        const k = first + order[slot]!.j;
+        const k = first + slot;
         const p = this.tmp;
         L.place(r, n, k - base, p);
         const cell = this.cellAt(r, k);
@@ -726,7 +682,7 @@ export class ReelEngine {
       mesh.state.needsUpdate = true;
     }
     this.speed = maxSpeed;
-    this.renderer.render(this.scene, cam);
+    this.renderer.render(this.scene, this.camera);
     if (this.seekState) {
       this.host.dataset.reelCalls = String(this.renderer.info.render.calls);
     }
