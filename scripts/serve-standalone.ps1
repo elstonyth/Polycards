@@ -8,7 +8,10 @@
 # the server on the given port (default 4000, the verify port from CLAUDE.md).
 #
 #   npm run build              # first — emits .next/standalone
-#   pwsh scripts/serve-standalone.ps1 [-Port 4000]
+#   pwsh scripts/serve-standalone.ps1 [-Port 4000] [-Hostname 0.0.0.0]
+#
+# -Hostname: this PC only by default; 0.0.0.0 also answers on the local
+# network (phones on the same Wi-Fi), as far as Windows Firewall allows node.
 #
 # Reads NEXT_PUBLIC_* from .env.local at BUILD time (already baked in), so just
 # run after a build. Backend must be up on :9000 for card images to resolve.
@@ -26,9 +29,16 @@
 # .next, gitignored) and boot from the copy; builds then run freely while a
 # server is up. Restarting the server picks up the new build.
 
-param([int]$Port = 4000)
+param([int]$Port = 4000, [string]$Hostname = '127.0.0.1')
 
 $ErrorActionPreference = 'Stop'
+
+# The local passwordless sign-in (src/lib/local-sign-in.ts) signs in every
+# visitor, so with it on the server answers this PC only.
+if ($env:LOCAL_SIGN_IN -eq '1' -and $Hostname -notin '127.0.0.1', 'localhost', '::1') {
+    throw "LOCAL_SIGN_IN=1 signs every visitor in: serve on 127.0.0.1 only (drop -Hostname $Hostname), or unset LOCAL_SIGN_IN."
+}
+
 $ROOT = Split-Path -Parent $PSScriptRoot
 $STANDALONE = Join-Path $ROOT '.next\standalone'
 $SERVE = Join-Path $ROOT '.next-serve'
@@ -69,6 +79,6 @@ if (Test-Path (Join-Path $ROOT 'public')) {
 }
 
 $env:PORT = "$Port"
-$env:HOSTNAME = '127.0.0.1'
+$env:HOSTNAME = $Hostname
 Write-Host "[serve-standalone] $serverPath -> http://localhost:$Port (Ctrl+C to stop)"
 node $serverPath

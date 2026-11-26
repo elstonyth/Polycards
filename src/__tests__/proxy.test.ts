@@ -4,6 +4,7 @@ import { unstable_doesMiddlewareMatch } from 'next/experimental/testing/server';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { config, isKnownRoute, proxy } from '@/proxy';
+import { signLocalToken } from '@/lib/local-sign-in';
 
 const FORM = 'application/x-www-form-urlencoded';
 const matches = (url: string, headers: Record<string, string> = {}) =>
@@ -412,5 +413,89 @@ describe("a pack's own address under the home preview switch", () => {
     expect(get('/slots')).toBeUndefined();
     expect(get('/slots/%E0%A4%A')).toBeUndefined(); // undecodable
     expect(get('/slots/151', {}, 'POST')).toBeUndefined();
+  });
+});
+
+describe('the local preview signs you in by itself', () => {
+  const ACCOUNT = { customerId: 'cus_A', authIdentityId: 'authid_A' };
+  const local = () => {
+    vi.stubEnv('LOCAL_SIGN_IN', '1');
+    vi.stubEnv('LOCAL_SIGN_IN_SECRET', 's3cret');
+    vi.stubEnv('LOCAL_SIGN_IN_ACCOUNTS', 'cus_A:authid_A');
+    vi.stubEnv('NEXT_PUBLIC_MEDUSA_BACKEND_URL', 'http://localhost:9100');
+  };
+  const get = (url: string, headers: Record<string, string> = {}) =>
+    proxy(new NextRequest(url, { headers }));
+  const setCookie = (r: Response | undefined | null) =>
+    r?.headers.get('set-cookie') ?? '';
+  // what the page itself sees on this same request
+  const pageCookie = (r: Response | undefined | null) =>
+    r?.headers.get('x-middleware-request-cookie') ?? '';
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('signs a request with no session in before anything renders, for the page and the browser', () => {
+    local();
+    const res = get('http://192.168.50.203:4320/me');
+    expect(setCookie(res)).toMatch(/^_polycards_jwt=[\w-]+\.[\w-]+\.[\w-]+;/);
+    expect(setCookie(res)).toMatch(/HttpOnly/i);
+    expect(setCookie(res)).toMatch(/SameSite=lax/i);
+    expect(pageCookie(res)).toMatch(/_polycards_jwt=[\w-]+\.[\w-]+\.[\w-]+/);
+  });
+
+  it('keeps a session it signed while it has life left', () => {
+    local();
+    const token = signLocalToken('s3cret', ACCOUNT);
+    expect(
+      get('http://192.168.50.203:4320/me', {
+        cookie: `_polycards_jwt=${token}`,
+      }),
+    ).toBeUndefined();
+  });
+
+  it('replaces a session it cannot vouch for (expired, or signed elsewhere)', () => {
+    local();
+    const old = signLocalToken('s3cret', ACCOUNT, 1_000_000);
+    const foreign = signLocalToken('another-secret', ACCOUNT);
+    for (const t of [old, foreign, 'junk'])
+      expect(
+        setCookie(
+          get('http://localhost:4320/vault', { cookie: `_polycards_jwt=${t}` }),
+        ),
+      ).toMatch(/^_polycards_jwt=/);
+  });
+
+  it('carries the session into the home flow page "/" serves', () => {
+    local();
+    vi.stubEnv('HOME_PREVIEW', '1');
+    const res = get('http://100.123.197.93:4320/');
+    expect(res?.headers.get('x-middleware-rewrite')).toBe(
+      'http://100.123.197.93:4320/home-preview',
+    );
+    expect(pageCookie(res)).toMatch(/_polycards_jwt=/);
+    expect(setCookie(res)).toMatch(/^_polycards_jwt=/);
+  });
+
+  it('is never Secure on the plain-http preview, always on https', () => {
+    local();
+    vi.stubEnv('NODE_ENV', 'production');
+    expect(setCookie(get('http://192.168.50.203:4320/me'))).not.toMatch(
+      /Secure/i,
+    );
+    expect(
+      setCookie(
+        get('http://192.168.50.203:4320/me', { 'x-forwarded-proto': 'https' }),
+      ),
+    ).toMatch(/Secure/i);
+  });
+
+  it('never runs on the live site or against any backend that is not local', () => {
+    // the live site: no switch
+    expect(get('https://polycards.gg/me')).toBeUndefined();
+    local();
+    vi.stubEnv('NEXT_PUBLIC_MEDUSA_BACKEND_URL', 'https://admin.polycards.gg');
+    expect(get('https://polycards.gg/me')).toBeUndefined();
+    local();
+    vi.stubEnv('LOCAL_SIGN_IN_SECRET', '');
+    expect(get('http://localhost:4320/me')).toBeUndefined();
   });
 });

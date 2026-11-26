@@ -10,7 +10,8 @@
  */
 import 'server-only';
 import { cache } from 'react';
-import { cookies } from 'next/headers';
+import { cookies, headers } from 'next/headers';
+import { secureCookieFor } from '@/lib/private-host';
 import type { HttpTypes } from '@medusajs/types';
 import { sdk } from '@/lib/medusa';
 import { store } from '@/lib/store';
@@ -32,13 +33,23 @@ const REAL_NAME_REFUSED_COOKIE = '_polycards_name_refused';
 const OAUTH_STATE_COOKIE = '_polycards_oauth';
 const OAUTH_COOKIE_PATH = '/auth/google';
 
+/** Secure on the live site and on https; not on a local or tailnet preview over plain http (lib/private-host.ts). */
+async function cookieSecure(): Promise<boolean> {
+  const h = await headers();
+  return secureCookieFor({
+    prod: process.env.NODE_ENV === 'production',
+    proto: h.get('x-forwarded-proto'),
+    host: h.get('host') ?? '',
+  });
+}
+
 /** Persist the customer JWT (call only from a server action or route handler). */
 export async function setAuthToken(token: string): Promise<void> {
   const store = await cookies();
   store.set(AUTH_COOKIE, token, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    secure: await cookieSecure(),
     path: '/',
     maxAge: COOKIE_MAX_AGE,
   });
@@ -54,7 +65,7 @@ export async function markRealNameRefused(customerId: string): Promise<void> {
   store.set(REAL_NAME_REFUSED_COOKIE, customerId, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    secure: await cookieSecure(),
     path: '/',
     maxAge: 60 * 60,
   });
@@ -79,7 +90,7 @@ export async function markSignup(method: 'email' | 'google'): Promise<void> {
   if (store.get(CONSENT_KEY)?.value === 'rejected') return;
   store.set(SIGNUP_MARKER, method, {
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    secure: await cookieSecure(),
     path: '/',
     maxAge: 60 * 60 * 24 * 7,
   });
@@ -104,7 +115,7 @@ export async function setOauthState(state: string): Promise<void> {
   store.set(OAUTH_STATE_COOKIE, state, {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    secure: await cookieSecure(),
     path: OAUTH_COOKIE_PATH,
     maxAge: 600,
   });

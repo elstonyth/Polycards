@@ -17,6 +17,8 @@ vi.mock('next/headers', () => ({
       jar.has(name) ? { name, value: jar.get(name) } : undefined,
     set,
   }),
+  // the live site's request (the cookie's Secure flag reads it)
+  headers: async () => new Headers({ host: 'polycards.gg' }),
 }));
 // customer.ts holds the SDK for its sdk.store.customer.* calls; none run here.
 vi.mock('@/lib/medusa', () => ({ sdk: { store: { customer: {} } } }));

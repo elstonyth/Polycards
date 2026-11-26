@@ -1,6 +1,13 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { isPlausibleCardHandle } from '@/lib/card-handle';
+import {
+  localSignInConfig,
+  localTokenValid,
+  signLocalToken,
+} from '@/lib/local-sign-in';
 import { packFlowAddress, packFlowOn } from '@/lib/preview-switch';
+import { secureCookieFor } from '@/lib/private-host';
+import { AUTH_COOKIE } from '@/lib/store-port';
 
 // A form-encoded POST to / skips the home page's route cache: Next treats any
 // `application/x-www-form-urlencoded` POST as a possible server action and
@@ -133,15 +140,61 @@ function packFlowRedirect(request: NextRequest): NextResponse | null {
 // The home preview only: the address "/" serves the flow page, the address
 // bar keeping "/". RSC and prefetch requests too, so a move inside the site
 // to "/" gets the same page as a document load.
-function homeFlowRewrite(request: NextRequest): NextResponse | null {
+function homeFlowRewrite(
+  request: NextRequest,
+  init?: PassOn,
+): NextResponse | null {
   if (request.nextUrl.pathname !== '/') return null;
   if (request.method !== 'GET' && request.method !== 'HEAD') return null;
   const url = request.nextUrl.clone();
   url.pathname = '/home-preview';
-  return NextResponse.rewrite(url);
+  return NextResponse.rewrite(url, init);
 }
 
+// The local preview only (lib/local-sign-in.ts: off unless the local launch
+// switches it on against a local backend, so never on the live site): a
+// request without a session this machine signed, with life left, is signed in
+// as the first allowed account before anything renders. Signing out there
+// just signs you back in.
+function localSession(request: NextRequest): string | null {
+  // the live site leaves here: this runs on every request, ahead of the flood checks
+  if (process.env.LOCAL_SIGN_IN !== '1') return null;
+  const cfg = localSignInConfig({
+    ...process.env,
+    // written out so the build inlines it: the backend this build talks to
+    NEXT_PUBLIC_MEDUSA_BACKEND_URL: process.env.NEXT_PUBLIC_MEDUSA_BACKEND_URL,
+  });
+  const account = cfg?.accounts[0];
+  if (!cfg || !account) return null;
+  const have = request.cookies.get(AUTH_COOKIE)?.value;
+  if (have && localTokenValid(cfg.secret, have)) return null;
+  return signLocalToken(cfg.secret, account);
+}
+
+type PassOn = { request: { headers: Headers } };
+
 export function proxy(request: NextRequest) {
+  const token = localSession(request);
+  if (!token) return route(request);
+  // on this request (the page renders signed in) and in the browser (every request after)
+  request.cookies.set(AUTH_COOKIE, token);
+  const init: PassOn = { request: { headers: request.headers } };
+  const res = route(request, init) ?? NextResponse.next(init);
+  res.cookies.set(AUTH_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 86_400,
+    secure: secureCookieFor({
+      prod: process.env.NODE_ENV === 'production',
+      proto: request.headers.get('x-forwarded-proto'),
+      host: request.headers.get('host') ?? request.nextUrl.host,
+    }),
+  });
+  return res;
+}
+
+function route(request: NextRequest, init?: PassOn) {
   const { pathname } = request.nextUrl;
   if (bypassedEdge(request)) {
     return new NextResponse(null, {
@@ -160,7 +213,7 @@ export function proxy(request: NextRequest) {
   if (pathname.startsWith('/api/')) return;
   if (!isKnownRoute(pathname)) return notFound();
   if (packFlowOn()) {
-    const toFlow = packFlowRedirect(request) ?? homeFlowRewrite(request);
+    const toFlow = packFlowRedirect(request) ?? homeFlowRewrite(request, init);
     if (toFlow) return toFlow;
   }
   if (
