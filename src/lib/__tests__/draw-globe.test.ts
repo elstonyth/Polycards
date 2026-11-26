@@ -75,6 +75,18 @@ describe('draw globe', () => {
     expect(level).toBeCloseTo(0);
   });
 
+  it('flies level on the steep climb and descent', () => {
+    const [from, to] = ROUTES[0]!;
+    for (const s of [0.03, 0.97]) {
+      const p = flightPose(from, to, s, 0.17, 0.05);
+      const pitch =
+        p.forward[0] * p.up[0] +
+        p.forward[1] * p.up[1] +
+        p.forward[2] * p.up[2];
+      expect(pitch).toBeCloseTo(0);
+    }
+  });
+
   it('shortens the time left to two units', () => {
     expect(shortTimeLeft({ d: '03', h: '01', m: '13', s: '19' })).toBe(
       '3d 01h',

@@ -145,13 +145,15 @@ export function flightPose(
     );
   };
   const position = at(s);
-  // Parked, a plane sits level on the ground, pointing the way it came in.
+  // Parked, a plane points the way it came in.
   const ahead =
     s > 0.985
       ? add(greatCircle(a, b, 1), scale(greatCircle(a, b, 0.99), -1))
       : add(at(s + 0.004), scale(at(s - 0.004), -1));
   const up = norm(position);
-  const forward = norm(add(ahead, scale(up, s > 0.985 ? -dot(ahead, up) : 0)));
+  // Always level: the climb and descent are steep near either end, and a nose
+  // tipped along them reads as a dive.
+  const forward = norm(add(ahead, scale(up, -dot(ahead, up))));
   return { position, forward, up };
 }
 
