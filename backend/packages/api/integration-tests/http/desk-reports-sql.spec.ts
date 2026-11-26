@@ -303,8 +303,9 @@ medusaIntegrationTestRunner({
         await packs.saveCoinFlipSettings({
           settings: {
             enabled: true,
-            win_percent: 41.25,
-            win_percent_2: 32.75,
+            // Above 59 so no timestamp's seconds ("08:25:32.751") can match them.
+            win_percent: 67.25,
+            win_percent_2: 73.75,
             published_win_percent: 50,
           },
           revision: (await packs.coinFlipSettings()).revision,
@@ -329,7 +330,7 @@ medusaIntegrationTestRunner({
           const res = await query(sql);
           expect(res.status).toBe(200);
           expect(res.data.row_count).toBe(1);
-          expect(JSON.stringify(res.data)).not.toMatch(/41\.25|32\.75/);
+          expect(JSON.stringify(res.data)).not.toMatch(/67\.25|73\.75/);
         }
         const published = await query(`SELECT after ${audit}`);
         expect(published.data.rows[0].after.published_win_percent).toBe(50);
