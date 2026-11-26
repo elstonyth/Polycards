@@ -3,15 +3,13 @@
 // boundary: with none, a tap on the Ranks tab did nothing visible for over a
 // second.
 //
-// Shaped like the page with the Weekly Challenge on (redesign v3): the RANKS
-// title (real text, same place, not animated; lg up only, as on the page),
-// the challenge title and reset chip, the period pill and its note, the
-// podium, the community goal panel on the podium's blocks, three more rows,
-// then the weekly reward stages. The podium bones use the page's own sizes
-// (crown, ringed avatars, name, value, pulls, prize slot, stepped blocks), so
-// the goal panel lands where the page puts it. The stage card keeps the
-// measured rail height (492.5px, 500.5px from sm). The data-bone attributes
-// are hooks for the tab-flow measuring script.
+// Shaped like the page with the Weekly Challenge on (owner 2026-11-26 order):
+// the RANKS title (real text, same place, not animated; lg up only, as on the
+// page), the challenge title and reset chip, the reward stages (label, four
+// stage tabs, the prize podium card at its measured height: 394px, 502.5px
+// from sm), the community goal, then the player ranks heading, the period pill
+// and its note, the podium on its floor line and three more rows. The
+// data-bone attributes are hooks for the tab-flow measuring script.
 import { SkeletonExit } from '@/components/PageTransition';
 import {
   BONE,
@@ -54,12 +52,42 @@ export default function LeaderboardLoading() {
               <div className="flex h-7 items-center sm:h-8">
                 <div className={cn(BONE.bar, 'h-5 w-48')} />
               </div>
+
               <div className="h-[30px] w-[205px] rounded-full border border-white/10 bg-neutral-800" />
+            </div>
+
+            {/* Weekly reward stages: the label, the four stage tabs, the
+                prize podium card with its ranks 4-10 floor. */}
+            <div
+              data-bone="stages-heading"
+              className="mt-5 mb-3 flex h-[17px] items-center"
+            >
+              <div className={cn(BONE.line, 'h-3 w-40')} />
+            </div>
+            <div
+              data-bone="stage-tabs"
+              className={cn(BONE.track, 'h-[58px] rounded-2xl')}
+            />
+            <div
+              data-bone="stage-card"
+              className="mt-3 h-[394px] rounded-3xl sm:h-[502.5px] border border-white/10 bg-neutral-900"
+            />
+
+            {/* Community goal: label, readout, staged bar, the sm+ label row
+                and the next-stage line (two lines below 430px). */}
+            <div
+              data-bone="goal"
+              className="mt-4 h-[174px] rounded-3xl border border-white/10 bg-neutral-900 min-[430px]:h-[158px] sm:h-[186px]"
+            />
+
+            {/* Player ranks: the heading, then the period pill. */}
+            <div className="mt-8 flex h-7 items-center">
+              <div className={cn(BONE.bar, 'h-5 w-32')} />
             </div>
 
             {/* Period pill (44px buttons + p-1 + border) and its note, which
                 runs to three lines on a phone. */}
-            <div className={cn(BONE.track, 'mt-4 h-[54px]')} />
+            <div className={cn(BONE.track, 'mt-3 h-[54px]')} />
             <div className="mt-3 flex h-[54px] flex-col justify-center gap-2 sm:h-9 lg:h-[18px]">
               <div className={cn(BONE.line, 'h-3 w-full')} />
             </div>
@@ -96,12 +124,7 @@ export default function LeaderboardLoading() {
               ))}
             </div>
 
-            {/* Community goal: label, readout, staged bar, the sm+ label row
-                and the next-stage line (two lines below 430px). */}
-            <div
-              data-bone="goal"
-              className="h-[174px] rounded-3xl border border-white/10 bg-neutral-900 min-[430px]:h-[158px] sm:h-[186px]"
-            />
+            <div aria-hidden className="h-px bg-white/10" />
 
             {/* The column header and three more ranks. */}
             <div className="mt-4 h-4" />
@@ -122,46 +145,6 @@ export default function LeaderboardLoading() {
                   </div>
                 </div>
               ))}
-            </div>
-
-            {/* Weekly reward stages: the heading, the stage pills (flex-wrap,
-                so four of them wrap onto two rows on a narrow phone as the
-                real ones do), the stage card at the rail's height and width,
-                and the "n of N" line under it. */}
-            <div
-              data-bone="stages-heading"
-              className="mt-8 flex h-7 items-center"
-            >
-              <div className={cn(BONE.bar, 'h-5 w-52')} />
-            </div>
-            <div
-              data-bone="stage-pills"
-              className="mt-2 mb-3 flex flex-wrap items-center justify-center gap-2"
-            >
-              {/* Three passed stages carry an icon; the selected one does not. */}
-              {['w-[89px]', 'w-[89px]', 'w-[89px]', 'w-[71px]'].map((w, i) => (
-                <div
-                  key={i}
-                  className={cn('h-11 rounded-full bg-neutral-900', w)}
-                />
-              ))}
-            </div>
-            <div
-              data-bone="stage-card"
-              className="flex h-[492.5px] justify-center [--slab-w:min(82vw,360px)] sm:h-[500.5px]"
-            >
-              <div
-                className={cn(
-                  BONE.panel,
-                  'h-full w-[var(--slab-w)] max-w-full rounded-3xl',
-                )}
-              />
-            </div>
-            <div
-              data-bone="stage-counter"
-              className="mt-3 flex h-[18px] items-center justify-center"
-            >
-              <div className={cn(BONE.line, 'h-3 w-12')} />
             </div>
           </div>
         </SkeletonReveal>

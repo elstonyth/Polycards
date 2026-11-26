@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 import { pillVariants } from '@/components/ui/pill';
@@ -249,8 +249,7 @@ export default function LeaderboardClient({
   ownHandle,
   ownWeekly = null,
   weeklyPrizes = [],
-  head = null,
-  goal = null,
+  titled = false,
 }: {
   weekly: LeaderboardEntry[];
   alltime: LeaderboardEntry[];
@@ -262,10 +261,8 @@ export default function LeaderboardClient({
   /** Sparse per-rank CURRENT challenge prizes (unlocked stages, cumulative) —
    *  rendered on the This Week board only, since that IS the challenge board. */
   weeklyPrizes?: ChallengeRankPrize[];
-  /** The challenge's title and reset chip, above the period control. */
-  head?: ReactNode;
-  /** The community goal panel, between the podium and the other ranks. */
-  goal?: ReactNode;
+  /** The challenge sits above: the standings get their own visible heading. */
+  titled?: boolean;
 }) {
   const [period, setPeriod] = useState<Period>('This Week');
   const entries = period === 'All Time' ? alltime : weekly;
@@ -292,12 +289,16 @@ export default function LeaderboardClient({
   const rest = entries.slice(3);
 
   return (
-    <div className={cn(PAGE_COLUMN, 'pt-4')}>
-      {head}
-
-      {/* h2 for screen readers: the page's h1 is "Ranks", the challenge title
-          above is the other h2. */}
-      <h2 className="sr-only">Live standings</h2>
+    <div className={cn(PAGE_COLUMN, titled ? 'mt-8' : 'pt-4')}>
+      {/* Under the challenge the standings name themselves; alone, the page's
+          h1 already does. */}
+      <h2
+        className={cn(
+          titled ? 'text-lg font-semibold text-neutral-50' : 'sr-only',
+        )}
+      >
+        Player ranks
+      </h2>
 
       {/* Period toggle. Plain toggle buttons (aria-pressed), not ARIA tabs —
           there are no tab panels. */}
@@ -306,7 +307,7 @@ export default function LeaderboardClient({
         aria-label="Leaderboard timeframe"
         className={cn(
           'grid grid-cols-2 gap-1 rounded-full border border-white/10 bg-neutral-900 p-1',
-          head ? 'mt-4' : 'mt-0',
+          titled ? 'mt-3' : 'mt-0',
         )}
       >
         {PERIODS.map((p) => (
@@ -350,8 +351,8 @@ export default function LeaderboardClient({
         />
       )}
 
-      {/* The community goal sits on the podium's blocks. */}
-      {goal && <div className={cn(entries.length === 0 && 'mt-4')}>{goal}</div>}
+      {/* The floor the podium's blocks stand on. */}
+      {entries.length > 0 && <div aria-hidden className="h-px bg-white/10" />}
 
       {rest.length > 0 && (
         <>

@@ -393,6 +393,21 @@
   }
 }
 
+/* The reward stage's prizes rise onto their podium blocks (StageShowcase),
+   #1 first; re-keyed per stage, so picking another stage replays it. */
+@keyframes stageRise {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.96);
+  }
+}
+@layer utilities {
+  .stage-rise {
+    animation: stageRise 560ms var(--ease-out-expo) backwards;
+    animation-delay: calc(var(--i, 0) * 70ms);
+  }
+}
+
 /* Modal enter animations */
 @keyframes fadeIn {
   from {

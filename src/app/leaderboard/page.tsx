@@ -4,7 +4,8 @@ import {
   ChallengeHead,
   ChallengeRules,
   CommunityGoal,
-  WeeklyChallenge,
+  RewardStages,
+  RewardsSummary,
 } from './WeeklyChallenge';
 import { getLeaderboard, getOwnWeekly } from '@/lib/data/leaderboard';
 import { getChallenge } from '@/lib/data/challenge';
@@ -63,18 +64,29 @@ export default async function LeaderboardPage() {
         <PageTitle className="sr-only lg:not-sr-only">RANKS</PageTitle>
       </header>
       <PageBody>
-        {/* Challenge title, podium, community goal, then the other ranks;
-            the reward stages and summary follow the standings. */}
+        {/* The challenge first (owner 2026-11-26): its title and reset chip,
+            the reward stages, the community goal; then the player ranks, the
+            rewards summary and the rules. */}
+        {challenge && (
+          <div className={cn(PAGE_COLUMN, 'pt-4')}>
+            <ChallengeHead challenge={challenge} />
+            <RewardStages challenge={challenge} />
+            {challenge.pool && (
+              <div className="mt-4">
+                <CommunityGoal challenge={challenge} />
+              </div>
+            )}
+          </div>
+        )}
         <LeaderboardClient
           weekly={weekly}
           alltime={alltime}
           ownHandle={ownHandle}
           ownWeekly={ownWeekly}
           weeklyPrizes={challenge?.rankPrizes ?? []}
-          head={challenge && <ChallengeHead challenge={challenge} />}
-          goal={challenge?.pool && <CommunityGoal challenge={challenge} />}
+          titled={challenge != null}
         />
-        {challenge && <WeeklyChallenge challenge={challenge} />}
+        {challenge && <RewardsSummary challenge={challenge} />}
         {challenge && <ChallengeRules />}
       </PageBody>
       {/* Clearance so the fixed your-rank card never covers the last block. */}

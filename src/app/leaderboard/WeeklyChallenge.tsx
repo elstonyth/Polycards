@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils';
 import { PAGE_COLUMN } from '@/components/ui/page-frame';
 import type { Challenge } from '@/lib/data/challenge';
 import { PrizeCard } from './PrizeCard';
-import { StageCarousel } from './StageCarousel';
+import { StageShowcase } from './StageShowcase';
 import { ResetCountdown } from './ResetCountdown';
 
 // The standard's rules block (页面介绍) — rendered under the live content.
@@ -146,105 +146,104 @@ export function CommunityGoal({ challenge }: { challenge: Challenge }) {
   );
 }
 
-/**
- * The challenge's reward stages and the cumulative rewards summary, below the
- * standings on /leaderboard: the "This Week" board above IS the board this
- * challenge settles on, so the challenge's own top-10 list is not repeated.
- */
-export function WeeklyChallenge({ challenge }: { challenge: Challenge }) {
-  const { pool, summary } = challenge;
-
+/** The weekly reward stages: the top of the Ranks page (owner 2026-11-26:
+ *  the prizes first, then the community goal, then the player ranks). */
+export function RewardStages({ challenge }: { challenge: Challenge }) {
+  if (challenge.stages.length === 0) return null;
   return (
-    // Same width as the standings above — one column down the page. The stage
-    // rail sizes items from the viewport (--slab-w: min(82vw,360px)), which
-    // still fits this container at every breakpoint (measured).
-    <div className={PAGE_COLUMN}>
-      {/* Weekly Reward Stages — swipeable rail, same interaction as VIP. */}
-      <section className="mt-8">
-        <h2 className="text-lg font-semibold text-neutral-50">
-          Weekly reward stages
-        </h2>
-        <StageCarousel
-          stages={challenge.stages}
-          pooled={pool?.pooled ?? null}
-        />
-      </section>
+    <section className="mt-5" aria-labelledby="reward-stages-heading">
+      <h3
+        id="reward-stages-heading"
+        className="mb-3 text-[11px] font-semibold tracking-[0.08em] text-neutral-400 uppercase"
+      >
+        Weekly reward stages
+      </h3>
+      <StageShowcase stages={challenge.stages} />
+    </section>
+  );
+}
 
+/**
+ * The cumulative rewards summary, below the standings on /leaderboard.
+ */
+export function RewardsSummary({ challenge }: { challenge: Challenge }) {
+  const { summary } = challenge;
+  if (!summary) return null;
+  return (
+    <div className={PAGE_COLUMN}>
       {/* Rewards Summary — cumulative unlocked rewards for this week's top 10. */}
-      {summary && (
-        <section className="mt-8 rounded-3xl border border-white/10 bg-neutral-900 p-4 sm:p-5">
-          <h3 className="text-lg font-semibold text-neutral-50">
-            Rewards summary
-          </h3>
-          {summary.unlockedCount === 0 ? (
-            <p className="mt-2 text-sm text-neutral-400">
-              No stages unlocked yet — the pool is climbing toward Stage 1.
-              Every pack you pay for moves it.
+      <section className="mt-8 rounded-3xl border border-white/10 bg-neutral-900 p-4 sm:p-5">
+        <h3 className="text-lg font-semibold text-neutral-50">
+          Rewards summary
+        </h3>
+        {summary.unlockedCount === 0 ? (
+          <p className="mt-2 text-sm text-neutral-400">
+            No stages unlocked yet — the pool is climbing toward Stage 1. Every
+            pack you pay for moves it.
+          </p>
+        ) : (
+          <>
+            <p className="mt-1 text-sm text-neutral-400">
+              {`${summary.unlockedCount} of ${challenge.stages.length} stages unlocked. Rewards stack — reaching a stage unlocks its rewards on top of every stage before it, so the week's top 10 claim them all together, nothing replaced.`}
             </p>
-          ) : (
-            <>
-              <p className="mt-1 text-sm text-neutral-400">
-                {`${summary.unlockedCount} of ${challenge.stages.length} stages unlocked. Rewards stack — reaching a stage unlocks its rewards on top of every stage before it, so the week's top 10 claim them all together, nothing replaced.`}
-              </p>
-              {/* Full-width stacked tiles: the deduped card row gets room to
+            {/* Full-width stacked tiles: the deduped card row gets room to
                   breathe (gap, no overlap) instead of a cramped half column. */}
-              <div className="mt-4 space-y-4">
-                {/* Podium ranks can be configured credits-only — skip the
+            <div className="mt-4 space-y-4">
+              {/* Podium ranks can be configured credits-only — skip the
                     whole tile rather than show the heading over zero
                     thumbnails. */}
-                {summary.cards.length > 0 && (
-                  <div className="rounded-2xl bg-neutral-800/60 p-4 sm:p-5">
-                    <p className="flex items-center gap-2 text-xs font-semibold tracking-[0.08em] text-neutral-400 uppercase">
-                      <Trophy className="text-chase h-4 w-4" aria-hidden />
-                      Top 3 will receive
+              {summary.cards.length > 0 && (
+                <div className="rounded-2xl bg-neutral-800/60 p-4 sm:p-5">
+                  <p className="flex items-center gap-2 text-xs font-semibold tracking-[0.08em] text-neutral-400 uppercase">
+                    <Trophy className="text-chase h-4 w-4" aria-hidden />
+                    Top 3 will receive
+                  </p>
+                  <div className="mt-4 flex flex-wrap items-end justify-center gap-4 sm:justify-start">
+                    {summary.cards.map((c, i) => (
+                      <PrizeCard
+                        key={`${c.name}-${i}`}
+                        card={c}
+                        glowScale={0.4}
+                        sizes="384px"
+                        className="h-32"
+                      />
+                    ))}
+                  </div>
+                  <p className="mt-3 text-sm text-neutral-400">
+                    Podium prize cards (ranks 1–3) from stages 1–
+                    {summary.unlockedCount}
+                  </p>
+                </div>
+              )}
+              <div className="rounded-2xl bg-neutral-800/60 p-4 sm:p-5">
+                <p className="flex items-center gap-2 text-xs font-semibold tracking-[0.08em] text-neutral-400 uppercase">
+                  <Coins className="text-chase h-4 w-4" aria-hidden />
+                  Top 4–10 will receive
+                </p>
+                <div className="mt-2 flex items-center justify-between gap-4">
+                  <div>
+                    <p className="font-heading text-chase text-3xl">
+                      {summary.credits}
                     </p>
-                    <div className="mt-4 flex flex-wrap items-end justify-center gap-4 sm:justify-start">
-                      {summary.cards.map((c, i) => (
-                        <PrizeCard
-                          key={`${c.name}-${i}`}
-                          card={c}
-                          glowScale={0.4}
-                          sizes="384px"
-                          className="h-32"
-                        />
-                      ))}
-                    </div>
-                    <p className="mt-3 text-sm text-neutral-400">
-                      Podium prize cards (ranks 1–3) from stages 1–
+                    <p className="text-sm text-neutral-400">
+                      Total bonus credits across ranks 4–10, stages 1–
                       {summary.unlockedCount}
                     </p>
                   </div>
-                )}
-                <div className="rounded-2xl bg-neutral-800/60 p-4 sm:p-5">
-                  <p className="flex items-center gap-2 text-xs font-semibold tracking-[0.08em] text-neutral-400 uppercase">
-                    <Coins className="text-chase h-4 w-4" aria-hidden />
-                    Top 4–10 will receive
-                  </p>
-                  <div className="mt-2 flex items-center justify-between gap-4">
-                    <div>
-                      <p className="font-heading text-chase text-3xl">
-                        {summary.credits}
-                      </p>
-                      <p className="text-sm text-neutral-400">
-                        Total bonus credits across ranks 4–10, stages 1–
-                        {summary.unlockedCount}
-                      </p>
-                    </div>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src="/images/task/credits-coins.webp"
-                      alt=""
-                      loading="lazy"
-                      decoding="async"
-                      className="h-24 shrink-0 object-contain"
-                    />
-                  </div>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src="/images/task/credits-coins.webp"
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    className="h-24 shrink-0 object-contain"
+                  />
                 </div>
               </div>
-            </>
-          )}
-        </section>
-      )}
+            </div>
+          </>
+        )}
+      </section>
     </div>
   );
 }

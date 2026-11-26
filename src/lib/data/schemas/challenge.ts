@@ -34,7 +34,7 @@ export const ChallengeSchema = z.looseObject({
       thresholdMyr: finite,
       rankRewards: droppableArray(
         z.looseObject({
-          // Strict 1-10 integer: StageCarousel indexes RANKS[rank-1] with a
+          // Strict 1-10 integer: StageShowcase indexes RANKS[rank-1] with a
           // non-null assertion, so a 0 / negative / fractional rank would crash
           // the whole challenge tile. droppableArray drops the bad row instead.
           rank: z.number().int().min(1).max(10),
