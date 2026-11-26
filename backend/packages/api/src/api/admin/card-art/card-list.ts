@@ -9,13 +9,18 @@ export const CARD_LIST_ORIGIN = 'https://onepiece.limitlesstcg.com';
 
 export type CardListEntry = { code: string; name: string };
 
+const ENTITIES: Record<string, string> = {
+  amp: '&',
+  quot: '"',
+  '#39': "'",
+  '#039': "'",
+  apos: "'",
+  lt: '<',
+  gt: '>',
+};
+// One pass, so "&amp;lt;" stays "&lt;" (a chained replace would decode it twice).
 const unescape = (s: string) =>
-  s
-    .replace(/&amp;/g, '&')
-    .replace(/&quot;/g, '"')
-    .replace(/&#0?39;|&apos;/g, "'")
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>');
+  s.replace(/&(amp|quot|#0?39|apos|lt|gt);/g, (_, e: string) => ENTITIES[e]);
 
 /** The set pages linked from the card database index, in page order. */
 export function parseSetSlugs(html: string): string[] {

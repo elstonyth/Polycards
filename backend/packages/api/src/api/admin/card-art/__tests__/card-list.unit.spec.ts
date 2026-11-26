@@ -45,6 +45,12 @@ describe('parseSetPage', () => {
       { code: 'OP01-016', name: 'Nami & Robin' },
     ]);
   });
+
+  it('decodes each entity once: an escaped "&lt;" stays "&lt;"', () => {
+    expect(
+      parseSetPage(row('OP01-017', 'OP01-017', 'A &amp;lt;B&amp;gt; &#039;C&#39;')),
+    ).toEqual([{ code: 'OP01-017', name: "A &lt;B&gt; 'C'" }]);
+  });
 });
 
 describe('fetchCardList', () => {
