@@ -44,6 +44,9 @@ describe('validateImage — accepts valid art', () => {
   it('accepts a card within the aspect tolerance band', () => {
     // 1200x1670 → ratio 0.7186 vs target 0.7143 (~0.6% off, inside ±3%).
     expect(validateImage(card({ height: 1670 }), 'card').ok).toBe(true);
+    // Bandai's official One Piece card images (card art library)
+    expect(validateImage(card({ width: 600, height: 838 }), 'card').ok).toBe(true);
+    expect(validateImage(card({ width: 600, height: 836 }), 'card').ok).toBe(true);
   });
 
   it('accepts when sniff-only facts are absent (browser path)', () => {

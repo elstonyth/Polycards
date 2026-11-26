@@ -86,7 +86,8 @@ export const IMAGE_RULES = {
   profiles: {
     card: {
       minWidth: 600,
-      minHeight: 840,
+      // 830, not 840: Bandai's official card images are 600x838 (some 600x836)
+      minHeight: 830,
       targetRatio: 5 / 7,
       aspectTolerance: 0.03,
       // A card photo is the composeSlab input, decoded at 32 MP (bake-slab.ts

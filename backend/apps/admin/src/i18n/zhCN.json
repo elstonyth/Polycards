@@ -75,6 +75,7 @@
     "previous": "上一段 {{value}}"
   },
   "pcNav": {
+    "cardArt": "卡图",
     "coinFlip": "抛硬币",
     "luckyDraw": "幸运抽奖",
     "goodsReceiveNotes": "收货单",

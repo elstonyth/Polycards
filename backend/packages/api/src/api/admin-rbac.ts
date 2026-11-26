@@ -41,6 +41,7 @@ export const CUSTOM_ADMIN_RESOURCES = {
   'assistant-settings': 'assistant_setting',
   automation: 'automation',
   'avatar-frames': 'avatar_frame',
+  'card-art': 'card_art',
   cards: 'card',
   challenge: 'challenge',
   'coin-flips': 'coin_flip',
@@ -184,6 +185,8 @@ export const ADMIN_ROUTES: readonly AdminRoute[] = [
     method: 'POST',
     limits: ['admin-action', 'assistant-speak'],
   },
+  // Card art: re-reading the card list fetches ~150 pages from Limitless.
+  { matcher: '/admin/card-art/card-list', method: 'POST', limits: ACTION },
   // Saving a note or task the person tapped Save on (confirm.ts).
   { matcher: '/admin/assistant/confirm', method: 'POST', limits: ACTION },
   {

@@ -19,6 +19,8 @@ import {
   searchPriceCharting,
   getPriceChartingProduct,
   getTcgCardMeta,
+  getCardArtFamily,
+  type CardArtEntry,
   type PcMatch,
   type PcProduct,
 } from '../../../lib/admin-rest';
@@ -30,6 +32,8 @@ import {
 } from '../../../lib/queries';
 import { resolveImageUrl } from '../../../lib/image-url';
 import { validateImageFile } from '../../../lib/image-validation';
+import { pickCardArt, titleCardCode } from '../../../lib/card-art';
+import { franchiseFor } from '../../../lib/sprite-franchise';
 import {
   rm,
   usdToMyr,
@@ -131,6 +135,9 @@ const AddFromPriceChartingPage = () => {
   // backend re-fetches it through the media pipeline on save (never hotlinked).
   // Upload/replace stays available.
   const [image, setImage] = useState('');
+  // Every uploaded clean printing of the picked One Piece card (Card art page);
+  // the import attaches the matching one instead of PriceCharting's photo.
+  const [artChoices, setArtChoices] = useState<CardArtEntry[]>([]);
 
   // Step 5 — pixel Pokémon (staged on product.metadata; inherited when the
   // product is registered as a gacha card).
@@ -159,6 +166,7 @@ const AddFromPriceChartingPage = () => {
     setPcGrade(null);
     setMarketValue(null);
     setImage('');
+    setArtChoices([]);
     setLabelYear('');
     setLabelNote('');
     // Reset the staged Pokémon too — a pick from a PREVIOUS product must not
@@ -182,6 +190,7 @@ const AddFromPriceChartingPage = () => {
     setPcGrade(null);
     setMarketValue(null);
     setImage('');
+    setArtChoices([]);
     setLabelYear('');
     setLabelNote('');
     // Reset the staged Pokémon too — a pick from a PREVIOUS product must not
@@ -191,6 +200,28 @@ const AddFromPriceChartingPage = () => {
       const product = await getPriceChartingProduct(m.id);
       setPcProduct(product);
       if (product.image) setImage(product.image);
+      // One Piece: our clean (stamp-free) art for this printing wins over
+      // PriceCharting's photo. Best-effort: a failed lookup keeps the photo.
+      const code = titleCardCode(product.name);
+      if (code && franchiseFor(product.set, product.name) === 'one-piece') {
+        void getCardArtFamily(code)
+          .then((family) => {
+            if (seq !== pickSeq.current) return; // a newer pick/search won
+            const { auto, choices } = pickCardArt(
+              product.name,
+              product.set,
+              family,
+            );
+            setArtChoices(choices);
+            // only over PriceCharting's photo (or none), never an image the
+            // admin uploaded or pasted while the lookup ran
+            if (auto)
+              setImage((cur) =>
+                cur === '' || cur === product.image ? auto.image_url : cur,
+              );
+          })
+          .catch(() => {});
+      }
       // §7a prefill: year (set release) + note (rarity) from pokemontcg.io.
       // Fill-only — the fields stay editable and a lookup failure just leaves
       // them blank for the operator. The card number rides product-name
@@ -325,6 +356,7 @@ const AddFromPriceChartingPage = () => {
     setLabelNote('');
     setStock('0');
     setImage('');
+    setArtChoices([]);
     setPokemon({ pixel_pokemon_id: null });
   };
 
@@ -607,6 +639,56 @@ const AddFromPriceChartingPage = () => {
                 </Text>
               </div>
             </div>
+            {artChoices.length > 0 && (
+              <div className="flex flex-col gap-y-1">
+                <Text size="small" weight="plus">
+                  {t('pcAdd.image.cleanArt')}
+                </Text>
+                {!artChoices.some((a) => a.image_url === image) && (
+                  <Text size="small" className="text-ui-fg-subtle">
+                    {t('pcAdd.image.cleanArtPick')}
+                  </Text>
+                )}
+                <div
+                  className="flex flex-wrap gap-2"
+                  role="group"
+                  aria-label={t('pcAdd.image.cleanArt')}
+                >
+                  {artChoices.map((a) => (
+                    <button
+                      key={a.code}
+                      type="button"
+                      aria-pressed={a.image_url === image}
+                      onClick={() => setImage(a.image_url)}
+                      className={`flex flex-col items-center gap-0.5 rounded border p-1 ${
+                        a.image_url === image
+                          ? 'border-ui-fg-interactive'
+                          : 'border-ui-border-base'
+                      }`}
+                    >
+                      <img
+                        src={resolveImageUrl(a.image_url)}
+                        alt=""
+                        className="h-20 w-14 object-contain"
+                      />
+                      <span className="text-ui-fg-subtle text-[10px]">
+                        {a.code}
+                      </span>
+                    </button>
+                  ))}
+                  {pcProduct?.image && (
+                    <Button
+                      size="small"
+                      variant="transparent"
+                      type="button"
+                      onClick={() => setImage(pcProduct.image ?? '')}
+                    >
+                      {t('pcAdd.image.usePcPhoto')}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

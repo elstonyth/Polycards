@@ -390,7 +390,10 @@
       "replace": "Replace image",
       "urlPlaceholder": "Image URL",
       "hint": "Auto-filled from the PriceCharting card photo when a match is picked. Paste a different PriceCharting image URL or upload your own to override. A PriceCharting URL is fetched and stored through the media pipeline on save — never hotlinked.",
-      "autoFilled": "Will be fetched & stored on save"
+      "autoFilled": "Will be fetched & stored on save",
+      "cleanArt": "Clean card art",
+      "cleanArtPick": "Several printings match: pick the right art.",
+      "usePcPhoto": "Use the PriceCharting photo"
     },
     "pixel": {
       "required": "Required — the reel can't render this card without a pixel sprite. Link a library entry or upload one above."
@@ -1567,6 +1570,7 @@
     "pricing": "Pricing",
     "coinFlip": "Coin flip",
     "sprites": "Pixel sprites",
+    "cardArt": "Card art",
     "stock": "Stock",
     "addStock": "Add stock",
     "importCollection": "Import collection",
