@@ -704,6 +704,11 @@ function OrderDetailModal({
   );
 }
 
+// Under 48rem of table width each row stacks into a card: the header row hides
+// and every cell prints its column name (data-label) above its value.
+const CELL =
+  'px-4 py-3 text-white/80 @max-3xl:p-0 @max-3xl:before:mb-1 @max-3xl:before:block @max-3xl:before:text-[11px] @max-3xl:before:uppercase @max-3xl:before:tracking-wide @max-3xl:before:text-white/40 @max-3xl:before:content-[attr(data-label)]';
+
 export default function OrdersClient({
   orders: initialOrders,
   addresses,
@@ -753,9 +758,9 @@ export default function OrdersClient({
 
   return (
     <>
-      <div className="overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.03]">
-        <table className="w-full border-collapse text-sm">
-          <thead>
+      <div className="@container overflow-x-auto rounded-2xl border border-white/10 bg-white/[0.03]">
+        <table className="w-full border-collapse text-sm @max-3xl:block">
+          <thead className="@max-3xl:hidden">
             <tr className="border-b border-white/10 text-left text-[12px] uppercase tracking-wide text-white/40">
               {['Order', 'Cards', 'Requested', 'Tracking', 'Status', ''].map(
                 (h, i) => (
@@ -766,18 +771,24 @@ export default function OrdersClient({
               )}
             </tr>
           </thead>
-          <tbody>
+          <tbody className="@max-3xl:block">
             {orders.map((o) => (
               <tr
                 key={o.id}
-                className="border-b border-white/5 last:border-0 hover:bg-white/[0.02]"
+                className="border-b border-white/5 last:border-0 hover:bg-white/[0.02] @max-3xl:grid @max-3xl:grid-flow-dense @max-3xl:grid-cols-2 @max-3xl:gap-x-4 @max-3xl:gap-y-3 @max-3xl:p-4"
               >
-                <td className="whitespace-nowrap px-4 py-3 text-white/80">
+                <td
+                  data-label="Order"
+                  className={cn('whitespace-nowrap', CELL)}
+                >
                   <span className="font-mono text-[12px] text-white/60">
                     #{o.id.slice(-6)}
                   </span>
                 </td>
-                <td className="whitespace-nowrap px-4 py-3 text-white/80">
+                <td
+                  data-label="Cards"
+                  className={cn('whitespace-nowrap @max-3xl:col-span-2', CELL)}
+                >
                   {/* The cards cell IS the affordance — it already shows the
                       first card and "+N more", so tapping it to see the rest is
                       what a customer reaches for. A real <button> so it's
@@ -791,12 +802,15 @@ export default function OrdersClient({
                     <DeliveryItems items={o.items} />
                   </button>
                 </td>
-                <td className="whitespace-nowrap px-4 py-3 text-white/80">
+                <td
+                  data-label="Requested"
+                  className={cn('whitespace-nowrap', CELL)}
+                >
                   {mytDate(o.createdAt)}
                 </td>
-                <td className="px-4 py-3 text-white/80">
+                <td data-label="Tracking" className={CELL}>
                   {o.trackingNumber ? (
-                    <span className="font-mono text-[12px] text-white/70">
+                    <span className="font-mono text-[12px] text-white/70 @max-3xl:break-all">
                       {o.trackingNumber}
                     </span>
                   ) : (
@@ -828,7 +842,10 @@ export default function OrdersClient({
                     </div>
                   )}
                 </td>
-                <td className="whitespace-nowrap px-4 py-3 text-white/80">
+                <td
+                  data-label="Status"
+                  className={cn('whitespace-nowrap', CELL)}
+                >
                   {/* `?? o.status` alongside the exhaustive map: a status the
                       schema starts allowing before this map learns it shows the
                       raw token, never an empty badge. */}
@@ -848,9 +865,9 @@ export default function OrdersClient({
                     </p>
                   )}
                 </td>
-                <td className="whitespace-nowrap px-4 py-3 text-right text-white/80">
+                <td className="whitespace-nowrap px-4 py-3 text-right text-white/80 @max-3xl:col-span-2 @max-3xl:p-0 @max-3xl:text-left @max-3xl:empty:hidden">
                   {ADDRESS_EDITABLE.has(o.status) && (
-                    <span className="inline-flex items-center gap-2">
+                    <span className="inline-flex flex-wrap items-center gap-2">
                       <button
                         type="button"
                         onClick={() => setEditing(o)}
