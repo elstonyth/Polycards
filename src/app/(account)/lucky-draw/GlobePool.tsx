@@ -483,11 +483,15 @@ export function GlobePool({
     const pins = spots.current;
     card.current?.focus({ preventScroll: true });
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') open(null);
+      // A sheet opened from the card (players, tickets) closes first, alone.
+      // Read in the capture phase: the sheet's own document listener removes
+      // it before a bubbling window listener would look.
+      if (e.key === 'Escape' && !document.querySelector('[role="dialog"]'))
+        open(null);
     };
-    window.addEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
     return () => {
-      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('keydown', onKey, true);
       pins
         .get(openId)
         ?.querySelector<HTMLElement>('[data-pin]')
