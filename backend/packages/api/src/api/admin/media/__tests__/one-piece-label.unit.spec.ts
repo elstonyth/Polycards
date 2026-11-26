@@ -146,7 +146,7 @@ describe('One Piece label rules', () => {
     });
   });
 
-  it('an event / prize print names the language, not a box, and invents no year (172653222, 156101387)', () => {
+  it('an event / prize print names the language, not a box, and invents no year (rule extended from the Promo-set certs 172653222, 156101387; no cert for a starter-deck prize print)', () => {
     expect(
       onePieceLabel({ name: 'Monkey.D.Luffy [Serial Prize] ST01-001', set: 'One Piece Starter Deck 1: Straw Hat Crew' }),
     ).toEqual({

@@ -208,11 +208,13 @@ export function onePieceLabel(f: {
     const promo = c ? null : hash[1].match(PROMO_CODE_RE);
     number = `#${c ? c[2] : promo ? promo[1] : hash[1]}`; // "#OP01-120" typed -> "#120"
   } else {
-    const c = name.match(CODE_RE) ?? name.match(PROMO_CODE_RE);
-    if (c) {
-      if (c.length === 3) cardCode = `${c[1].toUpperCase()}-${c[2]}`;
-      number = `#${c[c.length - 1]}`;
-      name = name.replace(c[0], ' ');
+    const c = name.match(CODE_RE);
+    const p = c ? null : name.match(PROMO_CODE_RE);
+    if (c) cardCode = `${c[1].toUpperCase()}-${c[2]}`;
+    const m = c ?? p;
+    if (m) {
+      number = `#${c ? c[2] : m[1]}`;
+      name = name.replace(m[0], ' ');
     }
   }
   name = psaName(name);
@@ -229,6 +231,8 @@ export function onePieceLabel(f: {
     number,
     variety: bracket.trim().toUpperCase(),
   });
+  // A Promo-set card keeps the promo line even with a booster code: PSA prints
+  // "ONE PIECE JP" for ST13-015 (156101387) and ST21-014 (134661995).
   if (PRIZE_RE.test(bracket) || /\bpromo\b/.test(rest)) {
     return { setLine: `ONE PIECE ${lang}`, year: '', name, number, variety: bracket.trim().toUpperCase() };
   }
