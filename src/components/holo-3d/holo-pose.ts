@@ -1,5 +1,7 @@
 /** The three live 3D icons (models: scripts/build-holo-icons.py). */
 export type HoloKind = 'crown' | 'gift' | 'vault';
+/** The finish: `ink` is glossy black with chrome, the rest are solid metal. */
+export type HoloTone = 'ink' | 'gold' | 'silver' | 'bronze';
 
 /** How long a tap's play runs, in seconds. */
 export const PLAY_SECONDS: Record<HoloKind, number> = {

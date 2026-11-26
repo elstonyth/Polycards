@@ -3,10 +3,13 @@
 // WebGL. It reads the icons' own canvases off /holo-preview, so a poster is
 // the exact first frame of the live icon.
 //
-//   node scripts/capture-holo-posters.mjs [base]     (default http://127.0.0.1:4330)
+//   node scripts/capture-holo-posters.mjs [base] [name...]
+//   (base defaults to http://127.0.0.1:4330; names, e.g. crown-gold, limit
+//   which posters are written, so the others keep their committed frame)
 //
 // Needs a server with the preview switch on (next dev, or HOME_PREVIEW=1) and
-// ffmpeg on PATH. Writes public/3dicons/<kind>.webp and <kind>-cage.webp.
+// ffmpeg on PATH. Writes public/3dicons/<name>.webp for each `data-poster`
+// box on the page.
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,7 +24,7 @@ const out = join(
   'public',
   '3dicons',
 );
-const KINDS = ['crown', 'gift', 'vault'];
+const only = process.argv.slice(3);
 
 const browser = await chromium.launch({ args: ['--mute-audio'] });
 try {
@@ -49,24 +52,29 @@ try {
       new Promise((resolve, reject) => {
         const started = performance.now();
         const tick = () => {
-          const all = [...document.querySelectorAll('canvas')];
-          const live = all.every(
-            (c) => Number(getComputedStyle(c).opacity) > 0,
+          const boxes = [...document.querySelectorAll('[data-poster]')];
+          const canvases = boxes.map((b) => b.querySelector('canvas'));
+          const live = canvases.every(
+            (c) => c && Number(getComputedStyle(c).opacity) > 0,
           );
-          if (all.length === 6 && live)
-            resolve(all.map((c) => c.toDataURL('image/png')));
+          if (boxes.length && live)
+            resolve(
+              boxes.map((b, i) => [
+                b.dataset.poster,
+                canvases[i].toDataURL('image/png'),
+              ]),
+            );
           else if (performance.now() - started > 60_000)
-            reject(new Error(`only ${all.length} canvases went live`));
+            reject(new Error('not every icon went live'));
           else requestAnimationFrame(tick);
         };
         tick();
       }),
   );
   const tmp = mkdtempSync(join(tmpdir(), 'holo-'));
-  // The page lists the three caged icons, then the three bare ones.
-  shots.forEach((url, i) => {
-    const cage = i < 3;
-    const name = `${KINDS[i % 3]}${cage ? '-cage' : ''}`;
+  for (const [name, url] of shots) {
+    if (only.length && !only.includes(name)) continue;
+    const cage = name.endsWith('-cage');
     const png = join(tmp, `${name}.png`);
     writeFileSync(png, Buffer.from(url.split(',')[1], 'base64'));
     execFileSync('ffmpeg', [
@@ -84,7 +92,7 @@ try {
       join(out, `${name}.webp`),
     ]);
     console.log('wrote', `${name}.webp`);
-  });
+  }
 } finally {
   await browser.close();
 }

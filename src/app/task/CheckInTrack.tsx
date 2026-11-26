@@ -170,8 +170,9 @@ export function CheckInTrack({
         </p>
       </div>
 
-      {/* Six day tiles and a larger day 7, bottoms aligned; the gift on day 7
-          hangs off its tile's corner but stays inside the card's padding. */}
+      {/* Six day tiles and a larger day 7, bottoms aligned; a gold gift hangs
+          off each tile's corner, day 7's the largest, inside the card's
+          padding. */}
       <ol className="mt-4 grid grid-cols-[repeat(6,minmax(0,1fr))_minmax(0,1.5fr)] items-end gap-1.5 sm:gap-2">
         {DAYS.map((day) => {
           const tasks = milestones.get(day) ?? [];
@@ -194,13 +195,20 @@ export function CheckInTrack({
             <>
               {/* Painted first, so the day's art, tick and ticket count sit
                   over it. */}
-              {big && (
-                <HoloIcon
-                  kind="gift"
-                  interactive={false}
-                  className="absolute -right-3 -bottom-6 w-[78%] max-w-24 sm:-right-4"
-                />
-              )}
+              <HoloIcon
+                kind="gift"
+                tone="gold"
+                interactive={false}
+                // Only day 7's gift is live 3D; the six small ones are its
+                // picture.
+                still={!big}
+                className={cn(
+                  'absolute',
+                  big
+                    ? '-right-3 -bottom-6 w-[78%] max-w-24 sm:-right-4'
+                    : '-right-1.5 -bottom-3 w-[62%] max-w-12',
+                )}
+              />
               {(lead || done) && (
                 <span
                   className={cn(

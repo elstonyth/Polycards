@@ -1,10 +1,16 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { PLAY_SECONDS, actionPose, type HoloKind } from './holo-pose';
+import {
+  PLAY_SECONDS,
+  actionPose,
+  type HoloKind,
+  type HoloTone,
+} from './holo-pose';
 
 export type HoloOptions = {
   kind: HoloKind;
+  tone: HoloTone;
   /** The wire cube, floor rings and scan line around the object. Off for
    *  small sizes, where they would only be noise. */
   cage: boolean;
@@ -19,6 +25,11 @@ export type HoloHandle = { dispose: () => void };
 /** The cube's side; the model is scaled to 2 across. */
 const CAGE = 2.5;
 const WHITE = 0xffffff;
+const METAL: Record<Exclude<HoloTone, 'ink'>, number> = {
+  gold: 0xf2b23c,
+  silver: 0xd4d7dd,
+  bronze: 0xb87333,
+};
 
 /** A soft white disc, for the light behind the object. */
 function haloTexture(): THREE.CanvasTexture {
@@ -182,7 +193,7 @@ function buildCage() {
  */
 export function mountHolo(
   canvas: HTMLCanvasElement,
-  { kind, cage, interactive, onReady }: HoloOptions,
+  { kind, tone, cage, interactive, onReady }: HoloOptions,
 ): HoloHandle | null {
   let renderer: THREE.WebGLRenderer;
   try {
@@ -215,17 +226,30 @@ export function mountHolo(
   camera.position.set(0, cage ? 1.5 : 1, cage ? 8.2 : 6.4);
   camera.lookAt(0, 0, 0);
 
+  // A metal finish is the metal all over, its trim a paler polish of it.
+  const metal = tone === 'ink' ? null : new THREE.Color(METAL[tone]);
   const materials = {
-    body: new THREE.MeshPhysicalMaterial({
-      color: 0x0b0b0d,
-      metalness: 0.55,
-      roughness: 0.3,
-      clearcoat: 1,
-      clearcoatRoughness: 0.14,
-      envMapIntensity: 1.7,
-    }),
+    body: new THREE.MeshPhysicalMaterial(
+      metal
+        ? {
+            color: metal,
+            metalness: 1,
+            roughness: 0.3,
+            clearcoat: 0.6,
+            clearcoatRoughness: 0.2,
+            envMapIntensity: 1.6,
+          }
+        : {
+            color: 0x0b0b0d,
+            metalness: 0.55,
+            roughness: 0.3,
+            clearcoat: 1,
+            clearcoatRoughness: 0.14,
+            envMapIntensity: 1.7,
+          },
+    ),
     trim: new THREE.MeshStandardMaterial({
-      color: 0x4a4b50,
+      color: metal ? metal.clone().lerp(new THREE.Color(WHITE), 0.5) : 0x4a4b50,
       metalness: 1,
       roughness: 0.2,
       envMapIntensity: 1.9,
@@ -236,6 +260,7 @@ export function mountHolo(
   const halo = new THREE.Sprite(
     new THREE.SpriteMaterial({
       map: haloTexture(),
+      color: metal ?? WHITE,
       transparent: true,
       opacity: 0.16,
       depthWrite: false,

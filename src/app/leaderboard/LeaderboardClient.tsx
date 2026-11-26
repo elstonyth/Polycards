@@ -127,10 +127,13 @@ function PlayerName({
 }
 
 // Podium places, by rank: grid column (1 centre, 2 left, 3 right), the
-// avatar ring's metal, the avatar size and the stepped block's height.
+// crown's and the avatar ring's metal, the avatar size and the stepped
+// block's height.
 const PLACES = [
   {
     col: 'col-start-2',
+    tone: 'gold',
+    crown: '-mb-5 w-16 sm:w-20',
     ring: 'ring-chase',
     avatar: 72,
     block: 'h-20',
@@ -138,6 +141,8 @@ const PLACES = [
   },
   {
     col: 'col-start-1',
+    tone: 'silver',
+    crown: '-mb-4 w-12 sm:w-14',
     ring: 'ring-neutral-300',
     avatar: 56,
     block: 'h-14',
@@ -145,6 +150,8 @@ const PLACES = [
   },
   {
     col: 'col-start-3',
+    tone: 'bronze',
+    crown: '-mb-4 w-12 sm:w-14',
     // amber-500: the bronze the stage cards' #3RD numeral already uses.
     ring: 'ring-amber-500',
     avatar: 56,
@@ -154,7 +161,7 @@ const PLACES = [
 ] as const;
 
 /** The top three of the selected period as a podium: rank 1 in the centre,
- *  tallest, crowned; rank 2 left, rank 3 right. The list keeps rank order
+ *  tallest, under a gold crown; rank 2 left in silver, rank 3 right in bronze. The list keeps rank order
  *  (1, 2, 3) for screen readers; the grid columns place them. A board with
  *  one or two players shows just those places. */
 function Podium({
@@ -185,9 +192,11 @@ function Podium({
               place.col,
             )}
           >
-            {first && (
-              <HoloIcon kind="crown" className="z-10 -mb-5 w-16 sm:w-20" />
-            )}
+            <HoloIcon
+              kind="crown"
+              tone={place.tone}
+              className={cn('z-10', place.crown)}
+            />
             <span className={cn('rounded-full p-1 ring-2', place.ring)}>
               <FramedAvatar
                 src={entry.avatar}
