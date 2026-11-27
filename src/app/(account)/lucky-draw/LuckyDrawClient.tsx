@@ -11,7 +11,7 @@ import { ArenaShow } from '@/components/draw-arena/lazy';
 import { Panel, UnavailablePanel } from '@/components/task-ui';
 import { TicketArt } from '@/components/TicketArt';
 import { cn } from '@/lib/utils';
-import { GLOBE_STAGE } from '@/lib/draw-globe';
+import { GLOBE_DISC, GLOBE_DISC_BOX, GLOBE_STAGE } from '@/lib/draw-globe';
 import { mytDate, num } from '@/lib/format';
 import { usePrefersReducedMotion } from '@/lib/use-reveal';
 import {
@@ -45,7 +45,16 @@ import { TicketOpenIntro } from './TicketOpenIntro';
 // three.js stays out of the page's first load: the globe arrives after it.
 const GlobePool = dynamic(
   () => import('./GlobePool').then((m) => m.GlobePool),
-  { ssr: false, loading: () => <div className={GLOBE_STAGE} /> },
+  {
+    ssr: false,
+    loading: () => (
+      <div className={cn('relative', GLOBE_STAGE)} aria-hidden>
+        <div className={GLOBE_DISC_BOX}>
+          <div className={GLOBE_DISC} />
+        </div>
+      </div>
+    ),
+  },
 );
 
 type TabKey = 'prizes' | 'results' | 'mine';

@@ -13,6 +13,14 @@ import type { LuckyDrawTier } from '@/lib/lucky-draw';
 export const GLOBE_STAGE =
   'h-[clamp(27rem,calc(100dvh-16.5rem),46rem)] squat:h-[max(22rem,calc(100dvh-14.5rem))] short:h-[max(15rem,calc(100dvh-9.5rem))] lg:h-[clamp(30rem,calc(100dvh-13rem),52rem)]';
 
+/** The globe's stand-in while it loads: the same disc from the page skeleton
+ *  to the first frame. Its box must be a size container (GLOBE_DISC_BOX), so
+ *  the disc also fits a landscape stage shorter than it is wide. */
+export const GLOBE_DISC_BOX =
+  'absolute inset-0 grid place-items-center [container-type:size]';
+export const GLOBE_DISC =
+  'size-[min(72cqw,24rem,85cqh)] animate-pulse rounded-full bg-white/[0.04]';
+
 export type LonLat = readonly [lon: number, lat: number];
 export type Vec3 = readonly [x: number, y: number, z: number];
 

@@ -8,6 +8,7 @@ import {
   SkeletonReveal,
 } from '@/components/ui/page-frame';
 import { cn } from '@/lib/utils';
+import { GLOBE_DISC, GLOBE_DISC_BOX, GLOBE_STAGE } from '@/lib/draw-globe';
 
 // The (account) route group's loading fallback, shaped per destination. One
 // switch on the pathname rather than a loading.tsx per folder: a
@@ -158,18 +159,21 @@ export function LuckyDrawSkeleton() {
   return (
     // The same breakout as the page, so the stage does not jump wide.
     <div className="pool-wide">
-      {/* LuckyDrawClient's title row, class for class: the title, the ticket
-          chip (36px) and the three-way pill, with Draw's squat/short spacing. */}
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-4 squat:-mt-3 squat:gap-y-2 short:-mt-3 lg:gap-x-6">
-        <div className="min-w-0">
-          <PageTitle as="p" className="whitespace-nowrap short:text-xl">
+      {/* LuckyDrawClient's title row, class for class: the title only from lg,
+          the three-way pill and the ticket chip after it on one row. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-4 squat:gap-y-2 lg:gap-x-6 lg:squat:-mt-3 lg:short:-mt-3">
+        <div className="contents lg:block lg:min-w-0">
+          <PageTitle
+            as="p"
+            className="sr-only whitespace-nowrap short:text-xl lg:not-sr-only"
+          >
             LUCKY DRAW
           </PageTitle>
         </div>
         <div
           className={cn(
             SKELETON_REVEAL,
-            'h-9 w-20 shrink-0 short:order-last lg:order-last',
+            'order-last h-11 w-20 shrink-0 squat:h-10 short:h-9',
           )}
         >
           <div
@@ -179,7 +183,7 @@ export function LuckyDrawSkeleton() {
         <div
           className={cn(
             SKELETON_REVEAL,
-            'w-full short:w-[clamp(15rem,40vw,20rem)] lg:w-[26rem]',
+            'min-w-0 flex-1 short:w-[clamp(15rem,40vw,20rem)] short:flex-none lg:w-[26rem] lg:flex-none',
           )}
         >
           {/* 44/40/36px buttons + p-1 + border. */}
@@ -193,16 +197,14 @@ export function LuckyDrawSkeleton() {
         </div>
       </div>
 
-      {/* One gate ticket. An estimate: the stub art's height (GateList
-          ART_HEIGHT) plus about 15rem for the stub's text and action. */}
+      {/* The Pool tab's globe stage at its own height, with the disc it
+          shows until the globe's first frame. */}
       <SkeletonReveal className="mt-4 squat:mt-3 short:mt-3">
-        <div
-          className={cn(
-            BONE.pulse,
-            BONE.panel,
-            'h-[calc(clamp(5rem,15dvh,8rem)_+_15rem)] rounded-[20px] sm:h-[calc(clamp(8rem,20dvh,11rem)_+_15rem)]',
-          )}
-        />
+        <div className={cn('relative', GLOBE_STAGE)}>
+          <div className={GLOBE_DISC_BOX}>
+            <div className={GLOBE_DISC} />
+          </div>
+        </div>
       </SkeletonReveal>
     </div>
   );

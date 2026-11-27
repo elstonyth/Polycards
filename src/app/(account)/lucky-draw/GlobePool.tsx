@@ -21,6 +21,8 @@ import { useMediaQuery, usePrefersReducedMotion } from '@/lib/use-reveal';
 import {
   assignRoutes,
   flightProgress,
+  GLOBE_DISC,
+  GLOBE_DISC_BOX,
   GLOBE_STAGE,
   planeKind,
   shortTimeLeft,
@@ -582,8 +584,8 @@ function GlobeStage({
         className={cn('relative isolate overflow-x-clip', GLOBE_STAGE)}
       >
         {!ready && (
-          <div className="absolute inset-0 grid place-items-center" aria-hidden>
-            <div className="aspect-square w-[min(72%,24rem)] animate-pulse rounded-full bg-white/[0.04]" />
+          <div className={GLOBE_DISC_BOX} aria-hidden>
+            <div className={GLOBE_DISC} />
           </div>
         )}
         <div
