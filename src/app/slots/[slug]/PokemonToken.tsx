@@ -24,8 +24,10 @@ type PokemonTokenProps = {
   eager?: boolean;
   /** Render this exact image instead of a dex sprite (non-Pokémon card fallback, §2/G5). */
   imageSrc?: string;
-  /** Tallest the figure may be, in px, when the cell around the square token is
-   *  taller than it (the reel's portrait tile). Default FIGURE_FILL × size. */
+  /** Height, in px, of a band centred on the figure's centre of mass that the
+   *  figure must stay inside, for a cell taller than the square token (the
+   *  reel's portrait tile). Without it the figure's larger side fills
+   *  FIGURE_FILL × size, as before. */
   maxFigureHeight?: number;
 };
 
@@ -188,10 +190,13 @@ export function PokemonToken({
     const bh = figure.maxY - figure.minY + 1;
     // Width fills FIGURE_FILL of the token; a tall figure (a One Piece
     // character) may use the portrait tile's extra height instead of shrinking
-    // to a sliver beside the round Pokémon.
+    // to a sliver beside the round Pokémon. The figure is centred on its centre
+    // of mass, so the height cap measures from there to the farther edge: a
+    // lopsided figure can never reach past the band.
+    const farY = Math.max(figure.cy - figure.minY, figure.maxY + 1 - figure.cy);
     const scale = Math.min(
       (FIGURE_FILL * size) / bw,
-      (maxFigureHeight ?? FIGURE_FILL * size) / bh,
+      maxFigureHeight ? maxFigureHeight / 2 / farY : (FIGURE_FILL * size) / bh,
     );
     const half = size / 2;
     imgClassName =

@@ -98,9 +98,9 @@ export function CardTile({
           dex={dex}
           name={name}
           size={Math.round(size * 0.72)}
-          // 72% of the tile's height: every frame of all 126 One Piece sprites
-          // stays inside the tile edge (measured worst reach 89%).
-          maxFigureHeight={Math.round(size * 0.72)}
+          // A band 76% of the tile's height: no figure's first frame reaches
+          // past it, and the 126 One Piece sprites' later frames stay under 80%.
+          maxFigureHeight={Math.round(size * 0.76)}
           eager={eager}
           imageSrc={imageSrc}
         />
