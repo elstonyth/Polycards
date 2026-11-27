@@ -46,8 +46,12 @@ const TAN = Math.tan((FOV * Math.PI) / 360);
 // A focused plane sits this far below the middle of the view, so it is seen
 // from above and behind with the horizon over it.
 const FOCUS_TILT = 0.6;
-const SWAY = 0.6;
+// Left alone, the globe turns once a minute, bringing every route round.
+const TURN = (2 * Math.PI) / 60;
 const IDLE_MS = 4000;
+// How squarely a plane must face the viewer for its pin to show (cosine of
+// the angle from the globe's middle as seen from the camera, about 65°).
+const FACING = 0.42;
 // A stage this much wider than tall (a phone on its side) sees the top of a
 // bigger globe as a horizon, the flights spread along it.
 const WIDE = 2.4;
@@ -471,7 +475,7 @@ export function createGlobeScene(
   let frame = 0;
   let then = performance.now();
   let onScreen = true;
-  let drift = 0;
+  let turn = 0;
 
   const draw = (now: number) => {
     frame = 0;
@@ -506,13 +510,17 @@ export function createGlobeScene(
         yaw += spin * dt;
         spin *= Math.exp(-2.4 * dt);
         touchedAt = now;
-      } else if (now - touchedAt > IDLE_MS || !Number.isFinite(touchedAt)) {
-        // Left alone: back to the flights, swaying slowly either side.
-        if (!snap) drift += dt;
-        const want = wrapNear(homeYaw, yaw) + SWAY * Math.sin(drift * 0.2);
-        yaw += (want - yaw) * ease(1.5);
+        turn = 0;
+      } else if (
+        !snap &&
+        (now - touchedAt > IDLE_MS || !Number.isFinite(touchedAt))
+      ) {
+        // Left alone: a slow turn, eased in so it never starts with a jolt.
+        turn += (TURN - turn) * ease(0.8);
+        yaw += turn * dt;
       }
     }
+    if (focused || dragging) turn = 0;
     dist += (wantDist - dist) * ease(4.5);
     lift += (wantLift - lift) * ease(4.5);
     side += (wantSide - side) * ease(4.5);
@@ -554,8 +562,13 @@ export function createGlobeScene(
       f.plane.localToWorld(P);
       ray.subVectors(P, C);
       const t = -C.dot(ray) / ray.lengthSq();
+      // Near the globe's edge a plane is still drawn, but its pin waits until
+      // it turns towards the viewer: edge pins crowd the rim.
+      const edge =
+        f.id !== focusId && P.dot(C) / (P.length() * C.length()) < FACING;
       const behind =
-        t > 0 && t < 1 && C.clone().addScaledVector(ray, t).length() < 0.99;
+        edge ||
+        (t > 0 && t < 1 && C.clone().addScaledVector(ray, t).length() < 0.99);
       P.project(camera);
       f.anchor.x = (P.x * 0.5 + 0.5) * width;
       f.anchor.y = (-P.y * 0.5 + 0.5) * height;

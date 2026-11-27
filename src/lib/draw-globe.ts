@@ -32,42 +32,58 @@ export function planeKind(tier: LuckyDrawTier | null): PlaneKind {
   return tier === 'first' ? 'jumbo' : tier === 'business' ? 'jet' : 'prop';
 }
 
-// Every route sits in the one half of the globe the page opens on, so all the
-// running gates show at once. No two cross or share an airport: their pins
-// would sit on each other.
+// Spread round the whole world, so the side facing you never carries every
+// gate at once: the globe turns, and planes come round into view. No two cross
+// or share an airport: their pins would sit on each other.
 export const ROUTES: readonly (readonly [LonLat, LonLat])[] = [
   [
     [103.9, 1.4],
     [139.8, 35.5],
   ], // Singapore to Tokyo
   [
-    [151.2, -33.9],
-    [79.9, 6.9],
-  ], // Sydney to Colombo
-  [
-    [100.5, 13.7],
-    [77.1, 28.6],
-  ], // Bangkok to Delhi
-  [
-    [115.9, -31.9],
-    [57.7, -20.4],
-  ], // Perth to Mauritius
+    [-0.5, 51.5],
+    [12.5, 41.9],
+  ], // London to Rome
   [
     [55.4, 25.3],
-    [73.5, 4.2],
-  ], // Dubai to Malé
+    [77.1, 28.6],
+  ], // Dubai to Delhi
   [
-    [121.0, 14.5],
-    [147.2, -9.4],
-  ], // Manila to Port Moresby
+    [-118.4, 33.9],
+    [-99.1, 19.4],
+  ], // Los Angeles to Mexico City
   [
-    [126.4, 37.5],
-    [106.8, 47.8],
-  ], // Seoul to Ulaanbaatar
+    [115.9, -31.9],
+    [151.2, -33.9],
+  ], // Perth to Sydney
   [
-    [174.8, -37.0],
+    [-46.6, -23.5],
+    [-77.1, -12.0],
+  ], // São Paulo to Lima
+  [
+    [31.2, 30.1],
+    [36.8, -1.3],
+  ], // Cairo to Nairobi
+  [
+    [-157.9, 21.3],
     [177.4, -17.8],
-  ], // Auckland to Nadi
+  ], // Honolulu to Nadi
+  [
+    [-73.8, 40.6],
+    [-21.9, 64.1],
+  ], // New York to Reykjavik
+  [
+    [3.4, 6.5],
+    [18.4, -33.9],
+  ], // Lagos to Cape Town
+  [
+    [-123.1, 49.2],
+    [-149.9, 61.2],
+  ], // Vancouver to Anchorage
+  [
+    [37.6, 55.8],
+    [28.8, 41.0],
+  ], // Moscow to Istanbul
 ];
 
 function hash(id: string): number {
