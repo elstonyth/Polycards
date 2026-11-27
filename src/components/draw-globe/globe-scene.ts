@@ -7,13 +7,13 @@
 // the camera and moves in.
 
 import * as THREE from 'three';
-import { flightPose, ROUTES, toVec, type PlaneKind } from '@/lib/draw-globe';
+import { flightPose, routeEnds, toVec, type PlaneKind } from '@/lib/draw-globe';
 import { buildPlane, groundHeight, PLANES } from './planes';
 
 export type GlobeFlight = {
   id: string;
   kind: PlaneKind;
-  /** Index into ROUTES. */
+  /** A slot from assignRoutes: a route and a lane beside it. */
   route: number;
   /** 0 at take-off to 1 landed. */
   progress: number;
@@ -213,7 +213,7 @@ export function createGlobeScene(
   };
 
   const place = (f: Flight) => {
-    const [from, to] = ROUTES[f.route]!;
+    const [from, to] = routeEnds(f.route);
     const pose = flightPose(
       from,
       to,
@@ -233,7 +233,7 @@ export function createGlobeScene(
 
   /** Lay the route's dots `shift` (0 to 1) of a gap along, towards landing. */
   const layDots = (f: Flight, shift: number) => {
-    const [from, to] = ROUTES[f.route]!;
+    const [from, to] = routeEnds(f.route);
     const n = f.dots.count + 1;
     for (let i = 1; i < n; i++) {
       const p = flightPose(
@@ -249,7 +249,7 @@ export function createGlobeScene(
   };
 
   const routeMarks = (f: GlobeFlight): THREE.Group => {
-    const [from, to] = ROUTES[f.route]!;
+    const [from, to] = routeEnds(f.route);
     const g = new THREE.Group();
     const ink = f.progress >= 1 ? grey : white;
     const a = new THREE.Vector3(...toVec(from));

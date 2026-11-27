@@ -6,6 +6,7 @@ import {
   greatCircle,
   planeKind,
   ROUTES,
+  routeEnds,
   shortTimeLeft,
   toVec,
 } from '../draw-globe';
@@ -28,6 +29,32 @@ describe('draw globe', () => {
     expect(assignRoutes([...ids].reverse())).toEqual(all);
     // More gates than routes still each get one.
     expect(assignRoutes([...ids, 'extra']).get('extra')).toBeTypeOf('number');
+  });
+
+  it('flies more gates than routes in lanes beside them, never stacked', () => {
+    const n = ROUTES.length;
+    const ids = Array.from({ length: n * 2 + 3 }, (_, i) => `ldev_${i}`);
+    const slots = [...assignRoutes(ids).values()];
+    expect(new Set(slots).size).toBe(ids.length);
+    // The first lane is the route itself.
+    expect(routeEnds(2)).toEqual(ROUTES[2]);
+    // Further lanes run beside it, a few degrees off, on alternating sides.
+    const mid = (i: number) => {
+      const [a, b] = routeEnds(i);
+      return toVec([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]);
+    };
+    const apart = (i: number, j: number) => {
+      const [x, y] = [mid(i), mid(j)];
+      return (
+        (Math.acos(x[0] * y[0] + x[1] * y[1] + x[2] * y[2]) * 180) / Math.PI
+      );
+    };
+    for (const lane of [1, 2]) {
+      const d = apart(2, 2 + lane * n);
+      expect(d).toBeGreaterThan(9);
+      expect(d).toBeLessThan(15);
+    }
+    expect(apart(2 + n, 2 + 2 * n)).toBeGreaterThan(20);
   });
 
   it('flies from open to close and lands when the gate closes', () => {

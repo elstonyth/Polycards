@@ -76,20 +76,59 @@ function hash(id: string): number {
   return h;
 }
 
-/** A route for each gate, by its id: the same gate keeps its route across
- *  re-reads. Two gates never share one while a free route is left. */
+/** A slot for each gate, by its id: the same gate keeps its slot across
+ *  re-reads. Slot `i` is route `i % ROUTES.length` in lane
+ *  `floor(i / ROUTES.length)` (see routeEnds): every route's first lane fills
+ *  before any gate flies beside another, and no two gates share a slot. */
 export function assignRoutes(ids: readonly string[]): Map<string, number> {
+  const n = ROUTES.length;
   const taken = new Set<number>();
   const out = new Map<string, number>();
   for (const id of [...ids].sort()) {
-    let route = hash(id) % ROUTES.length;
-    for (let i = 0; i < ROUTES.length && taken.has(route); i++) {
-      route = (route + 1) % ROUTES.length;
+    const h = hash(id);
+    let slot = 0;
+    for (let k = 0; ; k++) {
+      slot = Math.floor(k / n) * n + ((h + k) % n);
+      if (!taken.has(slot)) break;
     }
-    taken.add(route);
-    out.set(id, route);
+    taken.add(slot);
+    out.set(id, slot);
   }
   return out;
+}
+
+// How far each further lane flies from its route, in degrees.
+const LANE_DEG = 12;
+
+/** A slot's two airports. Lane 0 is the route itself; lane 1 runs LANE_DEG
+ *  to one side of it, lane 2 to the other, lane 3 twice as far, and so on:
+ *  gates sharing a route with the same times would otherwise fly as one plane. */
+export function routeEnds(slot: number): readonly [LonLat, LonLat] {
+  const n = ROUTES.length;
+  const [from, to] = ROUTES[slot % n]!;
+  const lane = Math.floor(slot / n);
+  if (lane === 0) return [from, to];
+  const side = lane % 2 ? 1 : -1;
+  const angle = (side * Math.ceil(lane / 2) * LANE_DEG * Math.PI) / 180;
+  const a = toVec(from);
+  const b = toVec(to);
+  // The route's great circle turns about this axis; stepping along it moves a
+  // point square off the route.
+  const axis = norm([
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ]);
+  const shift = (p: Vec3): LonLat => {
+    const q = norm(
+      add(scale(p, Math.cos(angle)), scale(axis, Math.sin(angle))),
+    );
+    return [
+      (Math.atan2(-q[2], q[0]) * 180) / Math.PI,
+      (Math.asin(q[1]) * 180) / Math.PI,
+    ];
+  };
+  return [shift(a), shift(b)];
 }
 
 /** How far along its route a gate's plane is, 0 at take-off to 1 landed. A
