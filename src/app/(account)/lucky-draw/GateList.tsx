@@ -395,7 +395,9 @@ function GateControls({
   sort,
   onTier,
   onSort,
+  children,
 }: {
+  children?: ReactNode;
   /** The tiers running now: a chip that leads nowhere is clutter. */
   tiers: LuckyDrawTier[];
   tier: LuckyDrawTier | 'all';
@@ -447,6 +449,7 @@ function GateControls({
           ))}
         </select>
       </label>
+      {children}
     </div>
   );
 }
@@ -544,6 +547,7 @@ export function GateList({
   balance,
   spinHref,
   onEnter,
+  aside,
 }: {
   gates: LuckyDrawGate[];
   newIds: ReadonlySet<string>;
@@ -552,6 +556,8 @@ export function GateList({
   /** Where to spin a capsule for tickets; null with none on sale. */
   spinHref: string | null;
   onEnter: (gate: LuckyDrawGate) => void;
+  /** At the end of the controls row: the globe's view switch. */
+  aside?: ReactNode;
 }) {
   const [tier, setTier] = useState<LuckyDrawTier | 'all'>('all');
   const [sort, setSort] = useState<GateSort>('closing');
@@ -570,14 +576,18 @@ export function GateList({
   return (
     <div className="space-y-3">
       {/* Nothing to choose between with one gate. */}
-      {gates.length > 1 && (
+      {gates.length > 1 ? (
         <GateControls
           tiers={tiers}
           tier={shownTier}
           sort={sort}
           onTier={setTier}
           onSort={setSort}
-        />
+        >
+          {aside}
+        </GateControls>
+      ) : (
+        aside && <div className="flex justify-end">{aside}</div>
       )}
 
       <ul className="grid gap-3 lg:grid-cols-[repeat(auto-fit,minmax(22rem,1fr))] lg:gap-4">

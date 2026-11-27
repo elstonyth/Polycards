@@ -7,8 +7,9 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from 'react';
-import { ChevronRight, X } from 'lucide-react';
+import { ChevronRight, Globe, List, X } from 'lucide-react';
 import {
   createGlobeScene,
   type GlobeAnchor,
@@ -311,17 +312,7 @@ function Detail({
   );
 }
 
-/** The Pool tab as a globe: every running gate is a plane on its way to land,
- *  which is when its gate closes. A tap on a plane or its pin moves in and the
- *  pin grows into the gate's details. Without WebGL it is the list. */
-export function GlobePool({
-  gates,
-  newIds,
-  nowMs,
-  balance,
-  spinHref,
-  onEnter,
-}: {
+type PoolProps = {
   gates: LuckyDrawGate[];
   newIds: ReadonlySet<string>;
   nowMs: number | null;
@@ -329,14 +320,98 @@ export function GlobePool({
   /** Where to spin a capsule for tickets; null with none on sale. */
   spinHref: string | null;
   onEnter: (gate: LuckyDrawGate) => void;
+};
+
+type PoolView = 'globe' | 'list';
+
+/** Globe or list. The list reaches every gate without dragging the globe,
+ *  and keeps the tier filter and sort. */
+function ViewSwitch({
+  view,
+  focus,
+  onView,
+}: {
+  view: PoolView;
+  /** After a switch: the new view's pressed button keeps the focus. */
+  focus: boolean;
+  onView: (view: PoolView) => void;
 }) {
+  return (
+    <div
+      role="group"
+      aria-label="View"
+      className="flex shrink-0 rounded-full bg-neutral-800 p-0.5"
+    >
+      {(
+        [
+          ['globe', Globe, 'Globe'],
+          ['list', List, 'List'],
+        ] as const
+      ).map(([key, Icon, label]) => (
+        <button
+          key={key}
+          type="button"
+          aria-pressed={view === key}
+          aria-label={label}
+          autoFocus={focus && view === key}
+          onClick={() => onView(key)}
+          className={cn(
+            'flex h-8 w-8 items-center justify-center rounded-full transition-colors outline-none focus-visible:ring-2 focus-visible:ring-white/40',
+            view === key
+              ? 'bg-neutral-600 text-white'
+              : 'text-neutral-400 hover:text-white',
+          )}
+        >
+          <Icon className="h-4 w-4" aria-hidden />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The Pool tab: the globe by default, the list on the switch, and the list
+ *  alone where the globe can't draw. */
+export function GlobePool(props: PoolProps) {
+  const [view, setView] = useState<PoolView | 'failed'>('globe');
+  const [switched, setSwitched] = useState(false);
+  const fail = useCallback(() => setView('failed'), []);
+  if (view === 'failed') return <GateList {...props} />;
+  const aside = (
+    <ViewSwitch
+      view={view}
+      focus={switched}
+      onView={(next) => {
+        setView(next);
+        setSwitched(true);
+      }}
+    />
+  );
+  return view === 'list' ? (
+    <GateList {...props} aside={aside} />
+  ) : (
+    <GlobeStage {...props} onFail={fail} aside={aside} />
+  );
+}
+
+/** The Pool tab as a globe: every running gate is a plane on its way to land,
+ *  which is when its gate closes. A tap on a plane or its pin moves in and the
+ *  pin grows into the gate's details. */
+function GlobeStage({
+  gates,
+  newIds,
+  nowMs,
+  balance,
+  spinHref,
+  onEnter,
+  onFail,
+  aside,
+}: PoolProps & { onFail: () => void; aside: ReactNode }) {
   const reduced = usePrefersReducedMotion();
   const stage = useRef<HTMLDivElement>(null);
   const host = useRef<HTMLDivElement>(null);
   const scene = useRef<GlobeScene | null>(null);
   const spots = useRef(new Map<string, HTMLDivElement>());
   const card = useRef<HTMLDialogElement>(null);
-  const [failed, setFailed] = useState(false);
   const [ready, setReady] = useState(false);
   const [shown, setShown] = useState<{ id: string; leaving: boolean } | null>(
     null,
@@ -411,14 +486,13 @@ export function GlobePool({
       made = createGlobeScene(host.current, {
         reducedMotion: reduced,
         onReady: () => setReady(true),
-        onFail: () => setFailed(true),
+        onFail,
         onFrame,
         onPick: open,
       });
     } catch {
       // Whether the GPU can draw is only known by asking it.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setFailed(true);
+      onFail();
       return;
     }
     scene.current = made;
@@ -426,7 +500,7 @@ export function GlobePool({
       made.dispose();
       scene.current = null;
     };
-  }, [reduced, onFrame, open]);
+  }, [reduced, onFrame, open, onFail]);
 
   const ids = gates.map((g) => g.id).join('|');
   const routes = useMemo(() => assignRoutes(ids ? ids.split('|') : []), [ids]);
@@ -500,19 +574,6 @@ export function GlobePool({
     };
   }, [openId, open]);
 
-  if (failed) {
-    return (
-      <GateList
-        gates={gates}
-        newIds={newIds}
-        nowMs={nowMs}
-        balance={balance}
-        spinHref={spinHref}
-        onEnter={onEnter}
-      />
-    );
-  }
-
   const ordered = sortGates(gates, 'closing', newIds, nowMs);
   return (
     <div className="space-y-3">
@@ -549,6 +610,14 @@ export function GlobePool({
             {num(gates.length)} prize {gates.length === 1 ? 'pool' : 'pools'} in
             the air · tap a plane
           </p>
+        </div>
+        <div
+          className={cn(
+            'absolute top-0 right-0 z-10 transition-[opacity,visibility] duration-300',
+            openId && 'invisible opacity-0',
+          )}
+        >
+          {aside}
         </div>
 
         {ready &&
